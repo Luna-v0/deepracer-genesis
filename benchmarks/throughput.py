@@ -27,6 +27,7 @@ MODES = {
     "vision_ppo": dict(vision=True, policy=True),
     "vision_dr": dict(vision=True, policy=False, randomize=True),
     "vision_hetero": dict(vision=True, policy=False, randomize=True, tracks=HETERO_TRACKS),
+    "vision_raster": dict(vision=True, policy=False, raster=True),
 }
 
 
@@ -43,6 +44,8 @@ def run_single(n_envs, mode, steps, warmup, repeats):
     m = MODES[mode]
     track = m.get("tracks", "reinvent_base")
     env_cfg = get_env_cfg(vision=m["vision"], randomize=m.get("randomize", False), track=track)
+    if m.get("raster"):
+        env_cfg["vision_renderer"] = "raster"
     env = DeepRacerEnv(num_envs=n_envs, env_cfg=env_cfg)
 
     runner = None

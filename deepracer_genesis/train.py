@@ -20,6 +20,9 @@ def main():
     parser.add_argument("--cpu", action="store_true",
                         help="run simulation + training on CPU (visual-only obs; "
                              "per-env rasterizer cameras instead of Madrona). Slow.")
+    parser.add_argument("--raster", action="store_true",
+                        help="render vision obs with per-env rasterizer cameras instead "
+                             "of Madrona (correct texture colors; slower). CUDA physics.")
     parser.add_argument("--randomize", action="store_true")
     parser.add_argument("--track", default="reinvent_base")
     parser.add_argument("--exp_name", default="deepracer")
@@ -35,7 +38,11 @@ def main():
     from deepracer_genesis.configs.cfgs import get_env_cfg, get_train_cfg
     from deepracer_genesis.envs import DeepRacerEnv
 
+    if args.raster:
+        args.vision = True
     env_cfg = get_env_cfg(vision=args.vision, track=args.track, randomize=args.randomize)
+    if args.raster:
+        env_cfg["vision_renderer"] = "raster"
     train_cfg = get_train_cfg(vision=args.vision, visual_only=args.cpu)
 
     log_dir = os.path.join("logs", args.exp_name)

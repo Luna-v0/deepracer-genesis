@@ -51,11 +51,13 @@ class DeepRacerEnv:
         self.track = MultiTrack(names, num_envs, self.device)
 
         # ------------- scene -------------
-        # CPU backend: the Madrona BatchRenderer requires CUDA, so vision falls
-        # back to one rasterizer camera per env (rendered serially via EGL)
-        self.cpu_vision = self.vision and gs.backend != gs.cuda
+        # Rasterizer vision: one EGL camera per env (rendered serially) instead
+        # of the Madrona BatchRenderer. Correct texture colors (no Madrona
+        # quirks); the CPU backend forces it since Madrona requires CUDA.
+        self.raster_vision = self.vision and (
+            env_cfg.get("vision_renderer", "batch") == "raster" or gs.backend != gs.cuda)
         renderer = (gs.renderers.BatchRenderer(use_rasterizer=True)
-                    if self.vision and not self.cpu_vision else gs.renderers.Rasterizer())
+                    if self.vision and not self.raster_vision else gs.renderers.Rasterizer())
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=env_cfg["dt"], substeps=1),
             rigid_options=gs.options.RigidOptions(
@@ -118,17 +120,17 @@ class DeepRacerEnv:
                 up=(0.0, 1.0, 0.0),
                 fov=60,
                 GUI=False,
-                debug=self.vision,
+                debug=self.vision and not self.raster_vision,
             )
         self.cams = None
         if self.vision:
-            if not self.cpu_vision:
+            if not self.raster_vision:
                 self.scene.add_light(
                     pos=(0.0, 0.0, 10.0), dir=(0.4, 0.3, -1.0), directional=True,
                     castshadow=False, intensity=float(env_cfg.get("light_intensity", 6.0)),
                 )
             res = env_cfg["camera_res"]  # (W, H)
-            if self.cpu_vision:
+            if self.raster_vision:
                 # one env-bound camera per environment
                 self.cams = [self.scene.add_camera(res=res, fov=env_cfg["camera_fov"],
                                                    GUI=False, env_idx=i)
@@ -192,7 +194,7 @@ class DeepRacerEnv:
         if self.cam is not None or self.cams is not None:
             self.cam_offset_T = self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0))
             link = self.car.get_link("camera_link")
-            for c in self.cams if self.cpu_vision else [self.cam]:
+            for c in self.cams if self.raster_vision else [self.cam]:
                 c.attach(link, self.cam_offset_T)
 
         # ------------- buffers -------------
@@ -326,7 +328,7 @@ class DeepRacerEnv:
 
         # ---- camera obs ----
         if self.vision:
-            if self.cpu_vision:
+            if self.raster_vision:
                 frames = []
                 for c in self.cams:
                     c.move_to_attach()
@@ -397,7 +399,7 @@ class DeepRacerEnv:
 
         if self.cfg.get("randomize", False):
             randomize_physics(self, env_ids)
-            if self.vision and not self.cpu_vision:
+            if self.vision and not self.raster_vision:
                 randomize_camera_mount(self, env_ids)
 
         # episode logging

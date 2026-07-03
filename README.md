@@ -1,13 +1,27 @@
-# deepracer-genesis (branch: cpu-vision)
+# deepracer-genesis (branch: raster-vision)
 
-**This branch trains from VISION ONLY on the CPU backend** — no CUDA, no
-Madrona. `python -m deepracer_genesis.train -B 4 --cpu --max_iterations 100`
-runs `gs.init(backend=gs.cpu)`, gives every env its own rasterizer camera
-(rendered serially via EGL/OpenGL — the only non-CPU component), and trains a
-CNN policy whose actor *and* critic see pixels only (no privileged state).
-Expect ~50 steps/s at 4 envs vs ~25,000+ on the CUDA branch — use it for
-correctness checks and laptops, not real training runs. Bonus: the rasterizer
-renders the original texture colors exactly (orange centerline, blue sky).
+**This branch replaces the Madrona BatchRenderer with per-env rasterizer
+cameras for the training observations** — correct original texture colors
+(orange dashed centerline, blue sky; none of the Madrona quirks) at the cost
+of serial rendering. Physics stays on CUDA.
+
+```bash
+python -m deepracer_genesis.train -B 16 --raster --max_iterations 500
+```
+
+Measured cost (RTX 4060 Ti, vision 160x120, no policy update):
+
+| Renderer | 4 envs | 16 envs | 64 envs | 256 envs |
+|---|---|---|---|---|
+| Madrona batch (main) | — | — | 10,963 steps/s | 27,548 steps/s |
+| Rasterizer per-env (this branch) | 481 | 607 | 533 | — |
+
+The rasterizer path saturates around ~600 aggregate steps/s (~1.6 ms per
+serial EGL render): roughly **20-45x slower** than Madrona, but ~10-40x
+faster than the Gazebo original and it renders the scene faithfully. Use it
+when observation color fidelity matters (sim2real) or as the reference
+renderer for auditing Madrona output. `--cpu` additionally moves physics +
+training to the CPU backend (visual-only critic) — see branch `cpu-vision`.
 
 ---
 
