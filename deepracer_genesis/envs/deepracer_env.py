@@ -59,6 +59,10 @@ class DeepRacerEnv:
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
                 enable_joint_limit=True,
+                # per-env dofs/links properties (kp/kv/armature/mass/COM DR)
+                # need batched physics info, per the Genesis DR guide
+                batch_dofs_info=bool(env_cfg.get("randomize", False)),
+                batch_links_info=bool(env_cfg.get("randomize", False)),
             ),
             vis_options=gs.options.VisOptions(
                 shadow=False,

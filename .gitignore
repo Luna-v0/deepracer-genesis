@@ -4,4 +4,6 @@ __pycache__/
 *.pyc
 *.pt
 *.egg-info/
+dist/
+build/
 benchmarks/results.csv
