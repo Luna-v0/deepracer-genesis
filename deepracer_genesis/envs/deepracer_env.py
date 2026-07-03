@@ -68,13 +68,18 @@ class DeepRacerEnv:
             renderer=renderer,
             show_viewer=show_viewer,
         )
-        # visible green ground doubles as the field: some DAE ground materials
-        # render transparent under Madrona, and this is what shows through
+        # green ground doubles as the field: some DAE ground materials render
+        # transparent under Madrona, and this is what shows through. Must be a
+        # surface color — Madrona does not sample ImageTexture on primitives.
         fc = env_cfg.get("field_color", (0.30, 0.48, 0.32))
         self.plane = self.scene.add_entity(
             gs.morphs.Plane(pos=(0, 0, -0.001)),
             surface=gs.surfaces.Rough(color=(*fc, 1.0)),
         )
+        # optional workaround knob for gs-madrona texture channel quirks (the
+        # alpha-cutout centerline texture renders R<->G swapped; opaque
+        # textures render correctly, so this stays off by default)
+        self.rg_swap = bool(env_cfg.get("madrona_rg_swap", False)) and self.vision
         self.car = self.scene.add_entity(
             gs.morphs.URDF(
                 file=f"{__file__.rsplit('/envs/', 1)[0]}/assets/urdf/deepracer/deepracer_processed.urdf",
@@ -92,6 +97,25 @@ class DeepRacerEnv:
 
         self.cam = None
         self.top_cam = None
+        self.spec_cam = None
+        if env_cfg.get("spectator", False):
+            # high-res bird's-eye view rendered by the rasterizer (true colors,
+            # any resolution, shows every env's car in one image). With the
+            # BatchRenderer active it must be a debug camera to stay off the
+            # batch pipeline.
+            t0 = self.track.tracks[0]
+            c = t0.center.mean(dim=0).cpu().numpy()
+            extent = (t0.center.max(dim=0).values - t0.center.min(dim=0).values).max().item()
+            sw, sh = env_cfg.get("spectator_res", (1280, 960))
+            self.spec_cam = self.scene.add_camera(
+                res=(sw, sh),
+                pos=(float(c[0]), float(c[1]), extent * 1.1),
+                lookat=(float(c[0]), float(c[1]), 0.0),
+                up=(0.0, 1.0, 0.0),
+                fov=60,
+                GUI=False,
+                debug=self.vision,
+            )
         if self.vision:
             self.scene.add_light(
                 pos=(0.0, 0.0, 10.0), dir=(0.4, 0.3, -1.0), directional=True,
@@ -290,6 +314,8 @@ class DeepRacerEnv:
         if self.vision:
             self.cam.move_to_attach()
             rgb = self.cam.render(rgb=True)[0]                   # (N, H, W, 3) uint8 cuda
+            if self.rg_swap:
+                rgb = rgb[..., [1, 0, 2]]
             img = rgb.permute(0, 3, 1, 2).float() / 255.0
             if self.cfg.get("pixel_noise", 0.0) > 0:
                 img = (img + torch.randn_like(img) * self.cfg["pixel_noise"]).clamp(0, 1)
@@ -373,6 +399,13 @@ class DeepRacerEnv:
         return TensorDict(groups, batch_size=[self.num_envs], device=self.device)
 
     def render_topdown(self):
-        """(N, H, W, 3) uint8 bird's-eye view (validation only)."""
+        """(N, H, W, 3) uint8 per-env bird's-eye view (validation only)."""
         assert self.top_cam is not None
-        return self.top_cam.render(rgb=True)[0]
+        rgb = self.top_cam.render(rgb=True)[0]
+        return rgb[..., [1, 0, 2]] if self.rg_swap else rgb
+
+    def render_spectator(self):
+        """(H, W, 3) uint8 high-res bird's-eye view showing all envs' cars."""
+        assert self.spec_cam is not None
+        rgb = np.asarray(self.spec_cam.render(rgb=True)[0])
+        return rgb.reshape(rgb.shape[-3:])

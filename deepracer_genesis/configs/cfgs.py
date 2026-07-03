@@ -32,10 +32,13 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False, topdown=Fa
         "obs_noise": 0.0,
         # vision
         "vision": vision,
-        "camera_res": (160, 120),
+        "camera_res": (160, 120),      # DeepRacer-native observation resolution
         "camera_fov": 90,
         "camera_pitch_deg": 10.0,
-        "topdown_camera": topdown,
+        "topdown_camera": topdown,     # per-env batch camera (validation checks)
+        "spectator": False,            # high-res rasterizer cam, all cars in one view
+        "spectator_res": (1280, 960),
+        "madrona_rg_swap": False,      # see env: only alpha-cutout textures are swapped
         "pixel_noise": 0.0,
         "light_intensity": 6.0,
         # rewards

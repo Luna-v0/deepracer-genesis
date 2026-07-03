@@ -51,9 +51,9 @@ def main():
     parser.add_argument("--randomize", action="store_true")
     parser.add_argument("--tracks", default="reinvent_base",
                         help="comma-separated track names; >1 builds a heterogeneous scene")
-    parser.add_argument("--res", default=None,
-                        help="render resolution WxH (e.g. 1280x960); default is the "
-                             "DeepRacer-native 160x120 used for training")
+    parser.add_argument("--res", default="1280x960",
+                        help="spectator (high-res bird's-eye) resolution WxH; the onboard "
+                             "and per-env topdown cameras stay at the DeepRacer-native 160x120")
     args = parser.parse_args()
 
     gs.init(backend=gs.cuda, logging_level="warning")
@@ -66,12 +66,12 @@ def main():
     env_cfg = get_env_cfg(vision=True, randomize=args.randomize, topdown=True,
                           track=tracks if len(tracks) > 1 else tracks[0])
     env_cfg["random_start"] = True
-    if args.res:
+    if len(tracks) == 1:
+        # all tracks overlap in world coords, so the all-envs spectator view
+        # is only meaningful for a homogeneous scene
+        env_cfg["spectator"] = True
         w, h = args.res.lower().split("x")
-        if args.checkpoint:
-            # keep the policy input at its training resolution
-            env_cfg["policy_res"] = env_cfg["camera_res"]
-        env_cfg["camera_res"] = (int(w), int(h))
+        env_cfg["spectator_res"] = (int(w), int(h))
     env = DeepRacerEnv(num_envs=args.num_envs, env_cfg=env_cfg)
 
     policy = None
@@ -111,6 +111,9 @@ def main():
             for i in range(N):
                 Image.fromarray(onboard[i]).save(f"{args.out}/env{i}_step{t:04d}_onboard.png")
                 Image.fromarray(topdown[i]).save(f"{args.out}/env{i}_step{t:04d}_topdown.png")
+            if env.spec_cam is not None:
+                Image.fromarray(env.render_spectator()).save(
+                    f"{args.out}/spectator_step{t:04d}.png")
 
     # ---- automated checks ----
     img = env.image_buf  # (N, 3, H, W) in [0, 1]
