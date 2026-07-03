@@ -68,8 +68,9 @@ python -m deepracer_genesis.train -B 256 --vision --randomize --max_iterations 1
 python -m deepracer_genesis.validation.camera_check --num_envs 4
 python -m deepracer_genesis.validation.camera_check --checkpoint logs/vision/model_1000.pt
 
-# eval a checkpoint, record onboard + topdown videos
-python -m deepracer_genesis.eval --checkpoint logs/vision/model_1000.pt
+# eval a checkpoint: records a high-res "spectator" video (bird's-eye,
+# ALL agents on the track at once, true colors) + onboard video (vision envs)
+python -m deepracer_genesis.eval --checkpoint logs/teacher/model_500.pt --num_envs 24 --res 1280x960
 
 # throughput sweep -> benchmarks/results.md (max steps/s per agent x n_agents)
 python benchmarks/throughput.py --sweep
@@ -104,3 +105,13 @@ position consistency).
 - On the reInvent2019 track, cars under the start-gate bridge are occluded
   from the top-down camera; the cross-view validation check tolerates
   legitimate occlusion (visible cars must project within 8 px).
+- The BatchRenderer requires all cameras to share one resolution. The
+  "spectator" camera escapes this via `add_camera(debug=True)`: it renders
+  through the rasterizer at any resolution, with true texture colors, and
+  shows every env's car in a single image — used for high-res demo videos.
+- Madrona renders the alpha-cutout centerline texture with R and G swapped
+  (dashes look yellow-green onboard instead of orange). Asset-level fixes
+  don't take; the rasterizer path (spectator, cpu-vision branch) is correct.
+  Consistent for training, cosmetic otherwise.
+- Branch `cpu-vision`: visual-only training on the CPU backend (per-env
+  rasterizer cameras instead of Madrona). Slow; for correctness checks.
