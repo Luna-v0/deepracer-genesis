@@ -141,11 +141,14 @@ class DeepRacerEnv:
                 spp=int(env_cfg.get("nyx_spp", 4)), render_mode=mode, lights=[sun],
                 denoise=False, anti_aliasing=nps.EAntiAliasing.Off,
             )
+            # same link->camera mount transform as the Madrona path (camera
+            # looks along -z of offset_T), including the downward pitch;
+            # note: camera sensors ignore pos_offset/euler_offset
             self.nyx_cam = self.scene.add_sensor(NyxCameraOptions(
                 res=res, fov=env_cfg["camera_fov"],
                 entity_idx=self.car.idx,
                 link_idx_local=self.car.get_link("camera_link").idx_local,
-                euler_offset=tuple(env_cfg.get("nyx_cam_euler_offset", (0.0, 0.0, 0.0))),
+                offset_T=self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0)),
                 **nyx_common,
             ))
             self.nyx_top = None

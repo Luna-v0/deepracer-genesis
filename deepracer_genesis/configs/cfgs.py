@@ -43,7 +43,6 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False, topdown=Fa
         "nyx_mode": "Forward",         # "Forward" (fastest) | "FastPathTracer" | "RefPathTracer"
         "nyx_spp": 4,
         "nyx_light_intensity": 3.0,
-        "nyx_cam_euler_offset": (0.0, 0.0, 0.0),
         "pixel_noise": 0.0,
         "light_intensity": 6.0,
         # rewards
