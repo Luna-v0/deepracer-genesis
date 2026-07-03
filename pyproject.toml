@@ -1,0 +1,18 @@
+[project]
+name = "deepracer-genesis"
+version = "0.1.0"
+description = "AWS DeepRacer RL environment ported to Genesis (ROS-free, GPU-batched, vision-based, RSL-RL)"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "genesis-world>=1.2.0",
+    "gs-madrona",
+    "rsl-rl-lib>=5.4.0",
+    "torch>=2.5",
+    "tensordict>=0.7",
+    "tensorboard",
+    "pillow",
+    "numpy",
+]
+
+[tool.setuptools]
+packages = ["deepracer_genesis"]
