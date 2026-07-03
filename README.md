@@ -1,4 +1,16 @@
-# deepracer-genesis
+# deepracer-genesis (branch: cpu-vision)
+
+**This branch trains from VISION ONLY on the CPU backend** — no CUDA, no
+Madrona. `python -m deepracer_genesis.train -B 4 --cpu --max_iterations 100`
+runs `gs.init(backend=gs.cpu)`, gives every env its own rasterizer camera
+(rendered serially via EGL/OpenGL — the only non-CPU component), and trains a
+CNN policy whose actor *and* critic see pixels only (no privileged state).
+Expect ~50 steps/s at 4 envs vs ~25,000+ on the CUDA branch — use it for
+correctness checks and laptops, not real training runs. Bonus: the rasterizer
+renders the original texture colors exactly (orange centerline, blue sky).
+
+---
+
 
 AWS DeepRacer RL environment ported from ROS/Gazebo to [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) —
 ROS-free, GPU-batched, vision-based, trained with rsl-rl-lib PPO.

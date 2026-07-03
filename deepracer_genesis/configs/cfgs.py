@@ -64,9 +64,11 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False, topdown=Fa
     }
 
 
-def get_train_cfg(vision=False):
+def get_train_cfg(vision=False, visual_only=False):
     if vision:
-        obs_groups = {"actor": ["camera"], "critic": ["state", "camera"]}
+        # visual_only: the critic sees pixels only too (no privileged state)
+        obs_groups = ({"actor": ["camera"], "critic": ["camera"]} if visual_only
+                      else {"actor": ["camera"], "critic": ["state", "camera"]})
         actor = {
             "class_name": "CNNModel",
             "hidden_dims": [512, 256, 128],

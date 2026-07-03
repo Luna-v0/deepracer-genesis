@@ -51,7 +51,11 @@ class DeepRacerEnv:
         self.track = MultiTrack(names, num_envs, self.device)
 
         # ------------- scene -------------
-        renderer = gs.renderers.BatchRenderer(use_rasterizer=True) if self.vision else gs.renderers.Rasterizer()
+        # CPU backend: the Madrona BatchRenderer requires CUDA, so vision falls
+        # back to one rasterizer camera per env (rendered serially via EGL)
+        self.cpu_vision = self.vision and gs.backend != gs.cuda
+        renderer = (gs.renderers.BatchRenderer(use_rasterizer=True)
+                    if self.vision and not self.cpu_vision else gs.renderers.Rasterizer())
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=env_cfg["dt"], substeps=1),
             rigid_options=gs.options.RigidOptions(
@@ -116,13 +120,21 @@ class DeepRacerEnv:
                 GUI=False,
                 debug=self.vision,
             )
+        self.cams = None
         if self.vision:
-            self.scene.add_light(
-                pos=(0.0, 0.0, 10.0), dir=(0.4, 0.3, -1.0), directional=True,
-                castshadow=False, intensity=float(env_cfg.get("light_intensity", 6.0)),
-            )
+            if not self.cpu_vision:
+                self.scene.add_light(
+                    pos=(0.0, 0.0, 10.0), dir=(0.4, 0.3, -1.0), directional=True,
+                    castshadow=False, intensity=float(env_cfg.get("light_intensity", 6.0)),
+                )
             res = env_cfg["camera_res"]  # (W, H)
-            self.cam = self.scene.add_camera(res=res, fov=env_cfg["camera_fov"], GUI=False)
+            if self.cpu_vision:
+                # one env-bound camera per environment
+                self.cams = [self.scene.add_camera(res=res, fov=env_cfg["camera_fov"],
+                                                   GUI=False, env_idx=i)
+                             for i in range(num_envs)]
+            else:
+                self.cam = self.scene.add_camera(res=res, fov=env_cfg["camera_fov"], GUI=False)
             if env_cfg.get("topdown_camera", False):
                 # per-env bird's-eye pose over each env's own track variant
                 centers, heights = [], []
@@ -177,9 +189,11 @@ class DeepRacerEnv:
         self.wheel_radius = float(wheel_mesh.extents[2]) / 2.0
 
         # ------------- camera mount -------------
-        if self.cam is not None:
+        if self.cam is not None or self.cams is not None:
             self.cam_offset_T = self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0))
-            self.cam.attach(self.car.get_link("camera_link"), self.cam_offset_T)
+            link = self.car.get_link("camera_link")
+            for c in self.cams if self.cpu_vision else [self.cam]:
+                c.attach(link, self.cam_offset_T)
 
         # ------------- buffers -------------
         N = num_envs
@@ -312,10 +326,18 @@ class DeepRacerEnv:
 
         # ---- camera obs ----
         if self.vision:
-            self.cam.move_to_attach()
-            rgb = self.cam.render(rgb=True)[0]                   # (N, H, W, 3) uint8 cuda
-            if self.rg_swap:
-                rgb = rgb[..., [1, 0, 2]]
+            if self.cpu_vision:
+                frames = []
+                for c in self.cams:
+                    c.move_to_attach()
+                    frames.append(torch.as_tensor(
+                        np.asarray(c.render(rgb=True)[0]).reshape(*c.res[::-1], 3).copy()))
+                rgb = torch.stack(frames).to(self.device)
+            else:
+                self.cam.move_to_attach()
+                rgb = self.cam.render(rgb=True)[0]               # (N, H, W, 3) uint8
+                if self.rg_swap:
+                    rgb = rgb[..., [1, 0, 2]]
             img = rgb.permute(0, 3, 1, 2).float() / 255.0
             if self.cfg.get("pixel_noise", 0.0) > 0:
                 img = (img + torch.randn_like(img) * self.cfg["pixel_noise"]).clamp(0, 1)
@@ -375,7 +397,7 @@ class DeepRacerEnv:
 
         if self.cfg.get("randomize", False):
             randomize_physics(self, env_ids)
-            if self.vision:
+            if self.vision and not self.cpu_vision:
                 randomize_camera_mount(self, env_ids)
 
         # episode logging
