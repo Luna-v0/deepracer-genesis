@@ -50,6 +50,14 @@ output can't be linked by nvJitLink-12 and scene build dies with
 3. binary-patch the dlopen name `libnvrtc.so.13` -> `libnvrtc.so.12` in
    `site-packages/gs_madrona/libmadgs_mgr.so` (same byte length)
 
+## Google Colab
+
+[`notebooks/deepracer_genesis_colab.ipynb`](notebooks/deepracer_genesis_colab.ipynb)
+runs the whole pipeline on a Colab GPU runtime (T4 works): pip-installs this
+repo, applies the gs-madrona NVRTC fix, trains a policy, validates the camera
+pipeline, and renders the many-agents spectator video inline. Point the
+`REPO` variable in the install cell at your GitHub fork.
+
 ## Usage
 
 ```bash

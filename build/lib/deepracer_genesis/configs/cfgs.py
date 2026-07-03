@@ -53,11 +53,15 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False, topdown=Fa
         },
         # domain randomization
         "randomize": randomize,
+        # per the Genesis DR guide: friction/mass/COM per link, kp/kv/armature
+        # per dof, all per-env (needs batch_dofs_info/batch_links_info)
         "rand": {
             "friction_range": (0.6, 1.4),
+            "mass_shift_kg": 0.2,
+            "com_shift_m": 0.01,
             "steer_kp_scale": (0.8, 1.2),
             "wheel_kv_scale": (0.8, 1.2),
-            "mass_shift_kg": 0.2,
+            "armature_range": (0.0, 0.01),
             "camera_pitch_jitter_deg": 2.0,
             "camera_pos_jitter_m": 0.005,
         },
