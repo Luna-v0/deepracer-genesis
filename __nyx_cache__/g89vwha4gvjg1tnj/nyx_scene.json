@@ -1,0 +1,267 @@
+{
+    "version": 1,
+    "asset_root_path": "../../",
+    "instance_array": [
+        {
+            "uuid": 4273175448862846976,
+            "name": "",
+            "position": [
+                0.0,
+                -0.0010000000474974514,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1000.0,
+                1.0,
+                1000.0
+            ],
+            "smooth": false,
+            "convert_axis": false,
+            "instance_type": "primitive",
+            "primitive_type": "plane",
+            "material_override": {
+                "double_sided": true,
+                "albedo_color": [
+                    0.30000001192092898,
+                    0.47999998927116396,
+                    0.3199999928474426
+                ],
+                "opacity": 1.0,
+                "perceptual_roughness": 1.0,
+                "uv_scale": [
+                    1000.0,
+                    1000.0
+                ],
+                "albedo_texture": ""
+            }
+        },
+        {
+            "uuid": 4273175448955121664,
+            "name": "",
+            "position": [
+                0.0,
+                0.05000000074505806,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "subscene",
+            "uri": "/home/lunav0/.SecretProjects/deepracer-genesis/deepracer_genesis/assets/urdf/deepracer/deepracer_processed.urdf",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273175449437466624,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273175449437466624,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273175449437466624,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273175449437466624,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273175449437466624,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        }
+    ],
+    "camera_array": [
+        {
+            "uuid": 18446744073709551615,
+            "position": [
+                0.6800000071525574,
+                0.15000000596046449,
+                3.059999942779541
+            ],
+            "rotation": [
+                0.0008407235145568848,
+                0.9991058707237244,
+                0.034608662128448489,
+                0.024269521236419679
+            ],
+            "fov_y": 90.0,
+            "resolution": [
+                160,
+                120
+            ],
+            "near_plane": 0.10000000149011612,
+            "far_plane": 100.0,
+            "aperture": 2.799999952316284,
+            "focal_length": 10.0,
+            "spp": 8,
+            "denoise": true,
+            "tone_mapper": "reinhard",
+            "anti_aliasing": "smaa"
+        },
+        {
+            "uuid": 18446744073709551615,
+            "position": [
+                2.5,
+                8.0,
+                4.0
+            ],
+            "rotation": [
+                0.5,
+                0.5,
+                0.5,
+                0.5
+            ],
+            "fov_y": 60.0,
+            "resolution": [
+                640,
+                480
+            ],
+            "near_plane": 0.10000000149011612,
+            "far_plane": 100.0,
+            "aperture": 2.799999952316284,
+            "focal_length": 10.0,
+            "spp": 8,
+            "denoise": true,
+            "tone_mapper": "reinhard",
+            "anti_aliasing": "smaa"
+        }
+    ],
+    "light_array": [],
+    "environment_map_array": [],
+    "animation_array": [],
+    "light_field_array": []
+}

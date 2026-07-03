@@ -39,6 +39,11 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False, topdown=Fa
         "spectator": False,            # high-res rasterizer cam, all cars in one view
         "spectator_res": (1280, 960),
         "madrona_rg_swap": False,      # see env: only alpha-cutout textures are swapped
+        "vision_renderer": "batch",    # "batch" (Madrona) | "nyx" (path tracer, true colors)
+        "nyx_mode": "Forward",         # "Forward" (fastest) | "FastPathTracer" | "RefPathTracer"
+        "nyx_spp": 4,
+        "nyx_light_intensity": 3.0,
+        "nyx_cam_euler_offset": (0.0, 0.0, 0.0),
         "pixel_noise": 0.0,
         "light_intensity": 6.0,
         # rewards

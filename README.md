@@ -1,4 +1,42 @@
-# deepracer-genesis
+# deepracer-genesis (branch: nyx-vision)
+
+**This branch renders training observations with the Nyx renderer**
+([genesis-nyx](https://github.com/Genesis-Embodied-AI/genesis-nyx),
+`pip install gs-nyx-plugin`) instead of Madrona — photorealistic forward/path
+tracing with the correct original texture colors (orange dashed centerline),
+batched per-env camera sensors, native link attachment.
+
+```bash
+python -m deepracer_genesis.train -B 64 --nyx --max_iterations 500
+python -m deepracer_genesis.validation.camera_check --num_envs 4 --nyx
+```
+
+Measured (RTX 4060 Ti, 160x120, Forward mode, spp=4, denoise off):
+
+| Renderer | 16 envs | 64 envs | 256 envs |
+|---|---|---|---|
+| Madrona batch (main) | — | 10,963 | 27,548 steps/s |
+| Nyx Forward (this branch) | 1,141 | 1,406 | 1,505 steps/s |
+| Rasterizer per-env (raster-vision) | 607 | 533 | — |
+
+Nyx sits between the rasterizer and Madrona (~2.5x faster than raster,
+~18x slower than Madrona) with the best image quality of the three and no
+color bugs. Full training loop measured at ~1,022 steps/s @ 64 envs.
+
+Branch-specific notes:
+- Nyx cannot read DAE meshes -> tracks use OBJ conversions
+  (`assets/tracks/*/obj/`, same geometry + textures).
+- The Nyx exporter refuses URDF entities with merged fixed links -> the car
+  loads with `merge_fixed_links=False` here.
+- `denoise`/`anti_aliasing` are disabled on the observation sensors: their
+  temporal history smears moving objects across frames (breaks both RL
+  observations and validation diffs; with them off, cross-view validation is
+  sub-pixel accurate).
+- Heterogeneous multi-track scenes are not supported with Nyx yet.
+- The cross-view validation check is now self-calibrating (symmetric local
+  probes) and renderer-agnostic.
+
+---
 
 AWS DeepRacer RL environment ported from ROS/Gazebo to [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) —
 ROS-free, GPU-batched, vision-based, trained with rsl-rl-lib PPO.

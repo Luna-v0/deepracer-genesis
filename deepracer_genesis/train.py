@@ -17,6 +17,9 @@ def main():
     parser.add_argument("-B", "--num_envs", type=int, default=1024)
     parser.add_argument("--max_iterations", type=int, default=300)
     parser.add_argument("--vision", action="store_true")
+    parser.add_argument("--nyx", action="store_true",
+                        help="render vision obs with the Nyx renderer (true colors, "
+                             "photorealistic; slower than Madrona)")
     parser.add_argument("--randomize", action="store_true")
     parser.add_argument("--track", default="reinvent_base")
     parser.add_argument("--exp_name", default="deepracer")
@@ -30,7 +33,11 @@ def main():
     from deepracer_genesis.configs.cfgs import get_env_cfg, get_train_cfg
     from deepracer_genesis.envs import DeepRacerEnv
 
+    if args.nyx:
+        args.vision = True
     env_cfg = get_env_cfg(vision=args.vision, track=args.track, randomize=args.randomize)
+    if args.nyx:
+        env_cfg["vision_renderer"] = "nyx"
     train_cfg = get_train_cfg(vision=args.vision)
 
     log_dir = os.path.join("logs", args.exp_name)

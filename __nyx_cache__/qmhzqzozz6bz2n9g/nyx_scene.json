@@ -1,0 +1,206 @@
+{
+    "version": 1,
+    "asset_root_path": "../../",
+    "instance_array": [
+        {
+            "uuid": 4273615567377043456,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1000.0,
+                1.0,
+                1000.0
+            ],
+            "smooth": false,
+            "convert_axis": false,
+            "instance_type": "primitive",
+            "primitive_type": "plane",
+            "material_override": {
+                "double_sided": true,
+                "uv_scale": [
+                    1000.0,
+                    1000.0
+                ],
+                "albedo_texture": ".venv/lib/python3.12/site-packages/genesis/assets/textures/checker.png"
+            }
+        },
+        {
+            "uuid": 4273615567850999808,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273615567850999808,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273615567850999808,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273615567850999808,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        },
+        {
+            "uuid": 4273615567850999808,
+            "name": "",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "smooth": false,
+            "convert_axis": true,
+            "instance_type": "mesh",
+            "uri": "deepracer_genesis/assets/tracks/reinvent/reinvent_base.dae",
+            "material_override": {
+                "double_sided": true
+            }
+        }
+    ],
+    "camera_array": [
+        {
+            "uuid": 18446744073709551615,
+            "position": [
+                1.5,
+                1.0,
+                1.5
+            ],
+            "rotation": [
+                0.1841111183166504,
+                -0.3750077486038208,
+                -0.07626134157180786,
+                0.9053488373756409
+            ],
+            "fov_y": 60.0,
+            "resolution": [
+                160,
+                120
+            ],
+            "near_plane": 0.10000000149011612,
+            "far_plane": 100.0,
+            "aperture": 2.799999952316284,
+            "focal_length": 10.0,
+            "spp": 8,
+            "denoise": true,
+            "tone_mapper": "reinhard",
+            "anti_aliasing": "smaa"
+        }
+    ],
+    "light_array": [],
+    "environment_map_array": [],
+    "animation_array": [],
+    "light_field_array": []
+}

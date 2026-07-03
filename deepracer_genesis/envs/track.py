@@ -33,6 +33,9 @@ class Track:
         self.name = name
         self.mesh_path = os.path.join(ASSETS_DIR, mesh_rel)
         self.field_path = os.path.join(ASSETS_DIR, field_rel) if field_rel else None
+        # OBJ conversion (same geometry/textures) for renderers that can't read DAE (Nyx)
+        base = os.path.basename(mesh_rel).rsplit(".", 1)[0]
+        self.obj_path = os.path.join(os.path.dirname(self.mesh_path), "obj", base + ".obj")
         self.device = device
 
         wps = np.load(os.path.join(ASSETS_DIR, route_rel)).astype(np.float32)
@@ -140,6 +143,7 @@ class MultiTrack:
         self.n_wps_v = torch.tensor([t.n_wps for t in self.tracks], device=device)
         self.total_len_v = torch.stack([t.total_len for t in self.tracks])
         self.mesh_paths = [t.mesh_path for t in self.tracks]
+        self.obj_paths = [t.obj_path for t in self.tracks]
 
         # per-env views
         self._ev = self.variant_idx
