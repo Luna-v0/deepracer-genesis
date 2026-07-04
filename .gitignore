@@ -2,5 +2,9 @@
 logs/
 __pycache__/
 *.pyc
+*.pt
 *.egg-info/
+dist/
+build/
 benchmarks/results.csv
+notebooks/*_output.ipynb

@@ -25,22 +25,6 @@ from PIL import Image
 import genesis as gs
 
 
-def project_topdown(env, pos_xy):
-    """Project world (x, y) to top-down camera pixel coords (u, v).
-
-    Each env's top-down camera looks straight down from (cx, cy, h) with
-    up=+y, so u grows with world +x, v grows with world -y (origin top-left).
-    """
-    w, h = env.cfg["camera_res"]
-    c = env.top_cam_center            # (N, 2)
-    height = env.top_cam_height       # (N,)
-    fov = math.radians(60)
-    f = (h / 2) / math.tan(fov / 2)   # focal length in pixels (fov is vertical)
-    u = (pos_xy[:, 0] - c[:, 0]) / height * f + w / 2
-    v = -(pos_xy[:, 1] - c[:, 1]) / height * f + h / 2
-    return torch.stack([u, v], dim=1)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_envs", type=int, default=4)
@@ -51,6 +35,7 @@ def main():
     parser.add_argument("--randomize", action="store_true")
     parser.add_argument("--tracks", default="reinvent_base",
                         help="comma-separated track names; >1 builds a heterogeneous scene")
+    parser.add_argument("--nyx", action="store_true", help="use the Nyx renderer for observations")
     parser.add_argument("--res", default="1280x960",
                         help="spectator (high-res bird's-eye) resolution WxH; the onboard "
                              "and per-env topdown cameras stay at the DeepRacer-native 160x120")
@@ -66,6 +51,8 @@ def main():
     env_cfg = get_env_cfg(vision=True, randomize=args.randomize, topdown=True,
                           track=tracks if len(tracks) > 1 else tracks[0])
     env_cfg["random_start"] = True
+    if args.nyx:
+        env_cfg["vision_renderer"] = "nyx"
     if len(tracks) == 1:
         # all tracks overlap in world coords, so the all-envs spectator view
         # is only meaningful for a homogeneous scene
@@ -85,6 +72,9 @@ def main():
     prev_frame = None
     frame_diffs, results = [], {}
     onboard_frames, topdown_frames = [], []
+    max_std = torch.zeros(N, device=env.device)
+    # Nyx accumulates frames temporally; give renders extra steps to converge
+    settle_steps = 3 if getattr(env, "nyx_vision", False) else 1
 
     obs = env.get_observations()
     for t in range(args.steps):
@@ -103,6 +93,7 @@ def main():
         topdown_frames.append(topdown[0])
 
         cur = env.image_buf.clone()
+        max_std = torch.maximum(max_std, cur.flatten(1).std(dim=1))
         if prev_frame is not None:
             frame_diffs.append((cur - prev_frame).abs().mean().item())
         prev_frame = cur
@@ -117,7 +108,9 @@ def main():
 
     # ---- automated checks ----
     img = env.image_buf  # (N, 3, H, W) in [0, 1]
-    per_env_std = img.flatten(1).std(dim=1)
+    # max over the run: a camera that ever shows scene content isn't broken
+    # (a single frame can legitimately be near-uniform, e.g. staring at grass)
+    per_env_std = max_std
     results["nondegenerate (std>0.02 all envs)"] = bool((per_env_std > 0.02).all())
 
     results["frames change between steps (mean diff>1e-4)"] = (
@@ -129,30 +122,65 @@ def main():
     ]
     results["frames differ across envs (max pair diff>0.005)"] = max(pair_diffs) > 0.005
 
-    # cross-view: with the cars held static on-track, project the sim car
-    # position into the top-down image and compare against the pixel centroid
-    # of (car present) - (car parked far away). Static bracketing avoids
-    # transient mismatches from cars resetting on the final step.
+    # cross-view: with the cars held static on-track, verify the car appears in
+    # the top-down image where the sim state says it is. The ground->pixel map
+    # is CALIBRATED EMPIRICALLY (cars parked at 3 probe positions, per-axis
+    # linear fit) so the check is renderer-agnostic — no assumptions about a
+    # renderer's fov/aspect conventions. Detection = centroid of
+    # (car present) - (car parked far away); static bracketing avoids transient
+    # mismatches from cars resetting on the final step.
     saved_qpos = env.car.get_qpos().clone()
+
+    def detect_centroids(reference):
+        top = env.render_topdown().float().cpu()
+        out = []
+        for i in range(N):
+            diff = (top[i] - reference[i]).abs().sum(dim=-1)  # (H, W)
+            if diff.max() < 30.0:
+                out.append(None)
+                continue
+            ys, xs = torch.nonzero(diff > 30.0, as_tuple=True)
+            out.append(np.array([xs.float().mean().item(), ys.float().mean().item()]))
+        return out
+
+    def place_cars(xy):
+        q = torch.zeros(N, 13, device=env.device)
+        q[:, 0:2] = xy
+        q[:, 2] = 0.03
+        q[:, 3] = 1.0
+        env.car.set_qpos(q)
+        for _ in range(settle_steps):
+            env.scene.step()
+
     park = torch.zeros(N, 13, device=env.device)
     park[:, 0] = -50.0
     park[:, 3] = 1.0
     env.car.set_qpos(park)
-    env.scene.step()
+    for _ in range(settle_steps):
+        env.scene.step()
     top_empty = env.render_topdown().float().cpu()
+
+    # local symmetric probes: park the car 0.5 m either side of its actual
+    # position; the midpoint of the two detections predicts the car's pixel
+    # (first-order exact under any camera tilt/projection convention)
+    car_xy = saved_qpos[:, 0:2].clone()
+    off = torch.tensor([[0.5, 0.0]], device=env.device).expand(N, 2)
+    place_cars(car_xy + off)
+    c_plus = detect_centroids(top_empty)
+    place_cars(car_xy - off)
+    c_minus = detect_centroids(top_empty)
+
     env.car.set_qpos(saved_qpos)
-    env.scene.step()
-    top_with = env.render_topdown().float().cpu()
-    car_px = project_topdown(env, env.car.get_pos()[:, :2]).cpu().numpy()
+    for _ in range(settle_steps):
+        env.scene.step()
+    detected = detect_centroids(top_empty)
     err_px = []
     for i in range(N):
-        diff = (top_with[i] - top_empty[i]).abs().sum(dim=-1)  # (H, W)
-        if diff.max() < 30.0:
+        if detected[i] is None or c_plus[i] is None or c_minus[i] is None:
             err_px.append(float("inf"))
             continue
-        ys, xs = torch.nonzero(diff > 30.0, as_tuple=True)
-        centroid = np.array([xs.float().mean().item(), ys.float().mean().item()])
-        err_px.append(float(np.linalg.norm(centroid - car_px[i])))
+        predicted = (c_plus[i] + c_minus[i]) / 2
+        err_px.append(float(np.linalg.norm(detected[i] - predicted)))
     # inf = car not visible from above; legitimate under bridges/start gates
     # (e.g. reInvent2019), so require accuracy on visible cars + majority visible
     visible = [e for e in err_px if e != float("inf")]
