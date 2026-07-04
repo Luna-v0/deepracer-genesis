@@ -1,6 +1,6 @@
 [project]
 name = "deepracer-genesis"
-version = "0.1.0"
+version = "0.1.1"
 description = "AWS DeepRacer RL environment ported to Genesis (ROS-free, GPU-batched, vision-based, RSL-RL)"
 requires-python = ">=3.10,<3.13"
 dependencies = [
