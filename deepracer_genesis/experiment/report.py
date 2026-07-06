@@ -24,6 +24,7 @@ TABLE_METRICS = ("completion_rate", "lap_time_s", "mean_progress_m",
 
 
 def load_records(root: str = "runs") -> list[EvalRecord]:
+    """Every eval_record.json under `root` (one per finished run)."""
     return [EvalRecord.load(p)
             for p in sorted(glob.glob(os.path.join(root, "**", "eval_record.json"),
                                       recursive=True))]
@@ -58,7 +59,7 @@ def _agg(values: list[float]) -> tuple[float, float]:
     return mean, std
 
 
-def _fmt(mean, std, digits=3):
+def _fmt(mean: float, std: float, digits: int = 3) -> str:
     if isinstance(mean, float) and math.isnan(mean):
         return "-"
     return f"{mean:.{digits}g} ± {std:.{digits}g}" if std else f"{mean:.{digits}g}"

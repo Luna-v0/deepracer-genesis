@@ -62,7 +62,7 @@ def build(target, **overrides) -> ExperimentSpec:
 
 
 def run(target, *, root: str = "runs", build_only: bool = False,
-        force: bool = False, **overrides):
+        force: bool = False, **overrides) -> "EvalRecord | ExperimentSpec":
     """Build the spec and train it. `run('cam_baseline', seed=3)`;
     `force=True` retrains even when the identity cache has a record."""
     spec = build(target, **overrides)

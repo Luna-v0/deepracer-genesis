@@ -27,6 +27,7 @@ class EvalRecord:
     variant: Optional[str]
     metrics: dict = field(default_factory=dict)
     train: dict = field(default_factory=dict)   # steps_per_s, wall_clock_s, ...
+    eval_history: list = field(default_factory=list)  # periodic evals: [{frames, **metrics}]
     created_at: str = ""
 
     def save(self, run_dir: str) -> str:

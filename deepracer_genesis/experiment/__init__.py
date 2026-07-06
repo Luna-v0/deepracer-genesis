@@ -17,6 +17,7 @@ from .spec import (
     SpecError,
 )
 from .stages import (
+    Algo,
     PPO,
     AsymmetricCameraPolicy,
     AsymmetricVectorPolicy,
@@ -46,7 +47,7 @@ __all__ = [
     "DomainRandomizationActions",
     "FrozenCNNToFeatureVector",
     "AsymmetricCameraPolicy", "VectorPolicy", "AsymmetricVectorPolicy",
-    "PPO", "PPOLagrangian",
+    "PPO", "PPOLagrangian", "Algo",
     "REGISTRY", "experiment", "Experiment",
     "build", "run",
 ]

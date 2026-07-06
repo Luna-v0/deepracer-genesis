@@ -28,7 +28,8 @@ def override(spec: ExperimentSpec, path: str, value) -> ExperimentSpec:
     return out
 
 
-def _override(spec, path: str, value):
+def _override(spec: "ExperimentSpec", path: str, value) -> "ExperimentSpec":
+    """Rebuild `spec` with the dotted-path field replaced (frozen tree walk)."""
     head, _, rest = path.partition(".")
     if not rest:
         if isinstance(spec, dict):

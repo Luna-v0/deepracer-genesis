@@ -18,6 +18,7 @@ from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.envs import TransformedEnv
+from torchrl.envs.transforms import Transform  # noqa: F401 (annotations)
 from torchrl.envs.utils import ExplorationType
 from torchrl.modules import MLP, ConvNet, ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.objectives import ClipPPOLoss
@@ -57,6 +58,7 @@ class Builder:
 
     # ------------------------------------------------------------- sim
     def sim_cfg(self) -> dict:
+        """Translate the EnvSpec (+DR spec) into the sim's config dict."""
         env = self.spec.env
         if env.features:
             raise NotImplementedError(f"extra features not implemented: {env.features}")
@@ -69,6 +71,7 @@ class Builder:
         cfg["camera_res"] = tuple(env.resolution)
         cfg["camera_fov"] = env.fov
         cfg["lookahead_k"] = env.lookahead_k
+        cfg["random_start"] = env.random_start
         if env.render == "nyx":
             cfg["vision_renderer"] = "nyx"
         if randomize:
@@ -82,15 +85,20 @@ class Builder:
             cfg["cost_fn"] = env.cost_fn
         return cfg
 
-    def sim(self) -> DeepRacerEnv:
+    def sim(self, extra_cfg: dict | None = None) -> DeepRacerEnv:
+        """Build (once) and return the Genesis sim. `extra_cfg` merges into
+        the spec-derived config on first construction (e.g. spectator camera
+        for visualization rollouts)."""
         if self._sim is None:
             _ensure_genesis()
-            self._sim = DeepRacerEnv(num_envs=self.spec.env.num_envs,
-                                     env_cfg=self.sim_cfg())
+            cfg = self.sim_cfg()
+            if extra_cfg:
+                cfg.update(extra_cfg)
+            self._sim = DeepRacerEnv(num_envs=self.spec.env.num_envs, env_cfg=cfg)
         return self._sim
 
     # ------------------------------------------------------ torchrl env
-    def transforms(self) -> list:
+    def transforms(self) -> list["Transform"]:
         """Obs/action transforms per spec (order: aug -> encoder -> action DR)."""
         ts = []
         if self.spec.obs_dr.image_aug:
@@ -106,7 +114,10 @@ class Builder:
                                        device=self.sim().device))
         return ts
 
-    def env(self):
+    def env(self) -> "TorchRLDeepRacerEnv | TransformedEnv":
+        """The TorchRL training env: wrapper (+ TransformedEnv when the spec
+        carries transforms). Collection-side only; evaluation drives the raw
+        sim (see evaluator.evaluate_policy)."""
         base = TorchRLDeepRacerEnv(self.sim(), emit_cost=self.spec.env.emits_cost)
         transforms = self.transforms()
         if not transforms:
@@ -117,14 +128,17 @@ class Builder:
         return env
 
     # ----------------------------------------------------------- models
-    def _mlp(self, in_features, out_features):
+    def _mlp(self, in_features: int, out_features: int) -> MLP:
+        """Fused MLP head per the spec's mlp config (concatenates multiple
+        positional inputs — the multi-key mechanism)."""
         p = self.spec.policy.mlp
         return MLP(in_features=in_features, out_features=out_features,
                    num_cells=list(p.get("hidden", (256, 128, 64))),
                    activation_class=_ACT[p.get("activation", "elu")],
                    device=self.sim().device)
 
-    def _key_dims(self) -> dict:
+    def _key_dims(self) -> dict[str, int]:
+        """Flat width of every vector observation key a policy may read."""
         sim = self.sim()
         dims = {"state": sim.num_state_obs}
         if self.spec.encoder.kind == "frozen_cnn":
@@ -132,6 +146,7 @@ class Builder:
         return dims
 
     def _cnn(self) -> ConvNet:
+        """Camera trunk per the spec's cnn config."""
         c = self.spec.policy.cnn
         return ConvNet(in_features=3,
                        num_cells=list(c["channels"]),
@@ -141,6 +156,7 @@ class Builder:
                        device=self.sim().device)
 
     def _cnn_flat_dim(self, cnn: ConvNet) -> int:
+        """Flattened feature width of `cnn` at the spec's resolution."""
         w, h = self.spec.env.resolution
         with torch.no_grad():
             return cnn(torch.zeros(1, 3, h, w, device=self.sim().device)).shape[-1]
@@ -167,6 +183,8 @@ class Builder:
         return modules, head_keys, in_dim
 
     def actor(self) -> ProbabilisticActor:
+        """TanhNormal actor over spec.policy.actor_keys ((camera via CNN
+        trunk) + vector keys fused in the MLP head)."""
         spec = self.spec
         keys = list(spec.policy.actor_keys)
         dims = self._key_dims()
@@ -196,7 +214,9 @@ class Builder:
             default_interaction_type=ExplorationType.RANDOM,
         )
 
-    def critic(self, out_key: str = "state_value"):
+    def critic(self, out_key: str = "state_value") -> "ValueOperator | TensorDictSequential":
+        """Value head over spec.policy.critic_keys. `out_key` lets the
+        Lagrangian build a second (cost) critic with its own CNN trunk."""
         spec = self.spec
         keys = list(spec.policy.critic_keys)
         dims = self._key_dims()
@@ -277,7 +297,8 @@ class Builder:
                    value="cost_value", reward="cost")
         return g
 
-    def loss(self, actor, critic):
+    def loss(self, actor: ProbabilisticActor, critic) -> ClipPPOLoss:
+        """Clipped PPO loss wired per spec.algorithm.ppo."""
         ppo = self.spec.algorithm.ppo
         return ClipPPOLoss(actor, critic,
                            clip_epsilon=ppo["clip"],
@@ -286,7 +307,8 @@ class Builder:
                            loss_critic_type="smooth_l1",
                            normalize_advantage=True)
 
-    def collector(self, env, actor):
+    def collector(self, env, actor) -> Collector:
+        """On-policy collector: frames_per_batch = num_envs * horizon."""
         ppo = self.spec.algorithm.ppo
         n = self.spec.env.num_envs
         return Collector(env, actor,
@@ -295,7 +317,8 @@ class Builder:
                          device=self.sim().device,
                          auto_register_policy_transforms=True)
 
-    def buffer(self):
+    def buffer(self) -> TensorDictReplayBuffer:
+        """One-rollout minibatch buffer (SamplerWithoutReplacement)."""
         ppo = self.spec.algorithm.ppo
         n = self.spec.env.num_envs
         frames = n * ppo["horizon"]
@@ -304,7 +327,9 @@ class Builder:
             sampler=SamplerWithoutReplacement(),
             batch_size=max(1, frames // ppo["minibatches"]))
 
-    def optimizer(self, loss_module, *extra_modules):
+    def optimizer(self, loss_module, *extra_modules) -> torch.optim.Adam:
+        """Adam over the loss module's params (+ any extra modules, e.g.
+        the Lagrangian cost critic)."""
         params = list(loss_module.parameters())
         for m in extra_modules:
             params += list(m.parameters())

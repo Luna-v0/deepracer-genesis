@@ -1,0 +1,162 @@
+{
+  "spec_id": "195303ed9a1f",
+  "spec": {
+    "env": {
+      "modality": "feature",
+      "render": "none",
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "lookahead_k": 10,
+      "features": [],
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 1024,
+      "random_start": true,
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "state"
+      ],
+      "critic_keys": [
+        "state"
+      ],
+      "cnn": null,
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "kind": "ppo",
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 0.0003,
+        "entropy_coef": 0.01,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "total_env_steps": 5000000,
+    "eval_every_steps": 1000000,
+    "seed": 0,
+    "ablation_group": "baselines",
+    "variant": "feature"
+  },
+  "seed": 0,
+  "ablation_group": "baselines",
+  "variant": "feature",
+  "metrics": {
+    "episodes": 1028,
+    "mean_return": 474.6302490234375,
+    "mean_progress_m": 40.53031539916992,
+    "mean_episode_s": 29.547958374023438,
+    "completion_rate": 0.9873540997505188,
+    "mean_laps": 2.2886641025543213,
+    "offtrack_rate": 0.02723735384643078,
+    "lap_time_s": 12.910144805908203,
+    "mean_speed_mps": 1.3694809675216675
+  },
+  "train": {
+    "wall_clock_s": 95.5,
+    "steps_per_s": 52514.3,
+    "total_env_steps": 5013504,
+    "checkpoint": "runs/baselines/feature-0-195303ed9a1f/best.pt"
+  },
+  "eval_history": [
+    {
+      "frames": 1007616,
+      "episodes": 10542,
+      "mean_return": -5.077839374542236,
+      "mean_progress_m": 0.14132998883724213,
+      "mean_episode_s": 3.3278462886810303,
+      "completion_rate": 0.0,
+      "mean_laps": 0.00798061490058899,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.04357481002807617
+    },
+    {
+      "frames": 2015232,
+      "episodes": 7577,
+      "mean_return": -0.8814477920532227,
+      "mean_progress_m": 0.3401510417461395,
+      "mean_episode_s": 4.517798900604248,
+      "completion_rate": 0.0,
+      "mean_laps": 0.019207632169127464,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.07854510843753815
+    },
+    {
+      "frames": 3022848,
+      "episodes": 8288,
+      "mean_return": -1.250022292137146,
+      "mean_progress_m": 0.30970999598503113,
+      "mean_episode_s": 4.167157173156738,
+      "completion_rate": 0.0,
+      "mean_laps": 0.017488690093159676,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.07712136209011078
+    },
+    {
+      "frames": 4005888,
+      "episodes": 2961,
+      "mean_return": 43.20086669921875,
+      "mean_progress_m": 3.150644540786743,
+      "mean_episode_s": 10.293217658996582,
+      "completion_rate": 0.0,
+      "mean_laps": 0.1779104471206665,
+      "offtrack_rate": 0.9999999403953552,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.320643812417984
+    },
+    {
+      "frames": 5013504,
+      "episodes": 1036,
+      "mean_return": 457.31768798828125,
+      "mean_progress_m": 38.852962493896484,
+      "mean_episode_s": 29.28397560119629,
+      "completion_rate": 0.9749034643173218,
+      "mean_laps": 2.1939470767974854,
+      "offtrack_rate": 0.048262547701597214,
+      "lap_time_s": 13.341179847717285,
+      "mean_speed_mps": 1.322003960609436
+    }
+  ],
+  "created_at": "2026-07-06T19:13:00"
+}

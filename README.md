@@ -81,12 +81,53 @@ envs); the `Trainer` writes checkpoints + an `EvalRecord` per run under
 `runs/{group}/{variant}-{seed}-{id}/`; re-running an identical config is a
 cache hit.
 
+### Running experiments
+
+An experiment is one file, one class: training config as class attributes,
+the env / DR / policy pipeline as a `>>` chain. Copy
+`experiments/template.py`:
+
+```python
+from deepracer_genesis.experiment import (CameraEnvironment, Experiment,
+                                          DomainRandomizationCamera,
+                                          AsymmetricCameraPolicy)
+
+class MyExperiment(Experiment):
+    seed = 0
+    total_env_steps = 10_000_000
+    eval_every_steps = 1_000_000          # deterministic eval every 1M steps
+    num_envs = 128                        # your own hyperparameters, any name
+
+    def pipeline(self):
+        return (CameraEnvironment(render="madrona", num_envs=self.num_envs,
+                                  resolution=(160, 120))
+                >> DomainRandomizationCamera(brightness=(0.7, 1.3))
+                >> AsymmetricCameraPolicy(actor_keys=("camera",),
+                                          critic_keys=("camera", "state")))
+
+if __name__ == "__main__":
+    MyExperiment().run()                  # python experiments/my_experiment.py
+```
+
+Variants are subclasses (`class NoDR(MyExperiment): ...`) — each gets its own
+content-hashed run dir; re-running an identical config is a cache hit.
+
+The same experiments run from the CLI or from Python:
+
+```bash
+python -m deepracer_genesis.experiment --list                 # registered names
+python -m deepracer_genesis.experiment feature_baseline --seed 3 --eval-every 1000000
+python -m deepracer_genesis.experiment MyExperiment --set num_envs=64
+python -m deepracer_genesis.experiment feature_baseline --video --track reInvent2019_track
+python -m deepracer_genesis.experiment --report                # runs/report.md
+```
+
 ```python
 import experiments                             # registrations fire
 from deepracer_genesis.experiment import run
-run("feature_baseline")                        # 5M steps in ~82 s (61k steps/s)
+run("feature_baseline")                        # 5M steps in ~90 s on a 4060 Ti
 run("cam_baseline", seed=3)                    # Env 1: camera+asym+full DR
-run("SafeTransfer", budget=10.0)               # Env 2: frozen-CNN + Lagrangian
+run("cam_multitrack")                          # heterogeneous: 3 tracks at once
 
 from deepracer_genesis.experiment.ablation import sweep, seeds
 for spec in seeds(sweep(run("safe_feature", build_only=True),
@@ -95,6 +136,38 @@ for spec in seeds(sweep(run("safe_feature", build_only=True),
 from deepracer_genesis.experiment.report import build_report
 build_report("runs")                           # report.md + report.csv
 ```
+
+Multi-track training: pass `tracks=(...)` to any env stage — Genesis builds a
+heterogeneous morph per track and each parallel env simulates + renders its
+own geometry (`cam_multitrack` trains on three tracks simultaneously).
+
+Spawns are randomized (`random_start=True`, plus lateral/yaw noise under DR);
+a lap is measured as cumulative progress from the spawn point, so the finish
+line of a lap is exactly the (random) start location.
+
+### Visual verification & data collection
+
+```python
+from deepracer_genesis.experiment.visualize import rollout_video, dr_preview_video
+rollout_video("feature_baseline")                       # bird's-eye mp4, trained policy
+rollout_video("feature_baseline", track="reInvent2019_track")   # same policy, new track
+dr_preview_video("cam_baseline")                        # raw|augmented onboard + random-spawn view
+
+from deepracer_genesis.experiment.data_collection import collect_camera_dataset
+collect_camera_dataset(track="reinvent_base", out="data/reinvent")  # .npz shards:
+# image (B,H,W,3) uint8, state (B,28), pose (B,4) — teleport sweep over
+# (waypoint x lateral x yaw) grid, optional ImageAug
+```
+
+### Custom algorithms (SAC, world models, ...)
+
+`deepracer_genesis/experiment/algorithms.py` defines the `Algorithm` protocol
+the Trainer drives: implement `setup(builder)`, `collect_policy`,
+`eval_actor`, `train_on_batch(data)`, `observe_env_logs(logs)`,
+`checkpoint()`, register with `@register_algorithm("my_kind")`, and select it
+from the DSL with `... >> Algo(kind="my_kind", params={...})`. PPO and
+PPO-Lagrangian are themselves implementations of the protocol — see the
+module docstring for the step-by-step guide.
 
 ## Usage
 

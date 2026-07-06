@@ -24,6 +24,8 @@ VALID_COST_FNS = ("offtrack", "offtrack_or_overspeed", "crash")
 
 @dataclass(frozen=True)
 class EnvSpec:
+    """The simulator slice of the spec (filled by an Environment stage)."""
+
     modality: Literal["camera", "feature"]
     render: Literal["madrona", "nyx", "none"] = "none"
     resolution: tuple[int, int] = (160, 120)
@@ -32,6 +34,10 @@ class EnvSpec:
     features: tuple[str, ...] = ()          # extra feature-vector channels
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 512
+    # spawn randomization: every episode starts at a random waypoint with
+    # lateral/yaw noise; laps are measured by cumulative progress from the
+    # spawn, so a "completed lap" ends back at that same random location
+    random_start: bool = True
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None
@@ -70,9 +76,14 @@ class ActionDRSpec:
 
 @dataclass(frozen=True)
 class AlgorithmSpec:
-    kind: Literal["ppo", "ppo_lagrangian"] = "ppo"
+    """Training-algorithm slice. `kind` selects a registered Algorithm
+    implementation (see experiment/algorithms.py) — "ppo" and
+    "ppo_lagrangian" ship; custom kinds resolve at build time."""
+
+    kind: str = "ppo"
     ppo: dict = field(default_factory=dict)
     lagrangian: dict = field(default_factory=dict)  # budget, pid=(kp,ki,kd), ...
+    params: dict = field(default_factory=dict)      # free-form for custom kinds
 
 
 @dataclass(frozen=True)
@@ -84,6 +95,7 @@ class ExperimentSpec:
     action_dr: ActionDRSpec = field(default_factory=ActionDRSpec)
     algorithm: Optional[AlgorithmSpec] = None
     total_env_steps: int = 5_000_000
+    eval_every_steps: int = 0        # 0 = final eval only; N = also every N env-steps
     seed: int = 0
     ablation_group: Optional[str] = None
     variant: Optional[str] = None
@@ -94,6 +106,9 @@ class ExperimentSpec:
         return json.loads(json.dumps(asdict(self)))
 
     def id(self) -> str:
+        """Content-hash identity (sha1 of the config JSON). Two specs with the
+        same training-relevant fields share an id — and therefore a cached
+        run. Tags (ablation_group/variant) are excluded: labels, not config."""
         # sha1, NOT built-in hash(): identity must be stable across processes.
         # ablation_group/variant are bookkeeping tags, not configuration —
         # the same training config keeps one id however it is tagged.

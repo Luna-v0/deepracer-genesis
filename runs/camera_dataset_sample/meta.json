@@ -1,0 +1,22 @@
+{
+  "track": "reinvent_base",
+  "resolution": [
+    160,
+    120
+  ],
+  "lateral_fracs": [
+    -0.5,
+    0.0,
+    0.5
+  ],
+  "yaw_offsets": [
+    -0.3,
+    0.0,
+    0.3
+  ],
+  "waypoint_stride": 4,
+  "image_aug": {},
+  "frames": 270,
+  "shards": 1,
+  "render": "madrona"
+}

@@ -101,38 +101,46 @@ class Pipeline:
 # Environment stages (source; must be first)
 @dataclass(frozen=True)
 class FeatureEnvironment(Stage):
+    """State-vector env: waypoint-relative features, no rendering."""
+
     features: tuple[str, ...] = ()
     lookahead_k: int = 10
-    tracks: tuple[str, ...] = ("reinvent_base",)
+    tracks: tuple[str, ...] = ("reinvent_base",)   # >1 => heterogeneous per-env
     num_envs: int = 512
+    random_start: bool = True
 
     KIND = "environment"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, env=EnvSpec(
             modality="feature", render="none",
             features=tuple(self.features), lookahead_k=self.lookahead_k,
             tracks=tuple(self.tracks), num_envs=self.num_envs,
+            random_start=self.random_start,
         ))
 
 
 @dataclass(frozen=True)
 class CameraEnvironment(Stage):
+    """Front-RGB-camera env; `tracks` with >1 entry trains heterogeneously
+    (each parallel env simulates + renders its own track; Madrona only)."""
+
     render: str = "madrona"
     resolution: tuple[int, int] = (160, 120)
     fov: float = 90.0
     lookahead_k: int = 10
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 128
+    random_start: bool = True
 
     KIND = "environment"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, env=EnvSpec(
             modality="camera", render=self.render,
             resolution=tuple(self.resolution), fov=self.fov,
             lookahead_k=self.lookahead_k, tracks=tuple(self.tracks),
-            num_envs=self.num_envs,
+            num_envs=self.num_envs, random_start=self.random_start,
         ))
 
 
@@ -142,7 +150,7 @@ class SafeRLFeatureEnvironment(FeatureEnvironment):
     cost: str = "offtrack"
     budget: float = 25.0
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         spec = super().apply(spec)
         return replace(spec, env=replace(
             spec.env, emits_cost=True, cost_fn=self.cost, cost_budget=self.budget))
@@ -154,7 +162,7 @@ class SafeRLCameraEnvironment(CameraEnvironment):
     cost: str = "offtrack"
     budget: float = 25.0
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         spec = super().apply(spec)
         return replace(spec, env=replace(
             spec.env, emits_cost=True, cost_fn=self.cost, cost_budget=self.budget))
@@ -174,7 +182,7 @@ class DomainRandomizationCamera(Stage):
 
     KIND = "obs_dr_camera"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         aug = {}
         if self.brightness: aug["brightness"] = tuple(self.brightness)
         if self.contrast:   aug["contrast"] = tuple(self.contrast)
@@ -202,7 +210,7 @@ class DomainRandomizationPhysics(Stage):
 
     KIND = "obs_dr_physics"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         physics = {
             "friction_range": tuple(self.friction),
             "mass_shift_kg": self.mass,
@@ -225,7 +233,7 @@ class FrozenCNNToFeatureVector(Stage):
 
     KIND = "encoder"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, encoder=EncoderSpec(
             kind="frozen_cnn", checkpoint=self.checkpoint or None,
             output_dim=self.output_dim, layer=self.layer, out_key=self.out_key,
@@ -243,7 +251,7 @@ class AsymmetricCameraPolicy(Stage):
 
     KIND = "policy"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, policy=PolicySpec(
             actor_keys=tuple(self.actor_keys), critic_keys=tuple(self.critic_keys),
             cnn=dict(self.cnn or DEFAULT_CNN), mlp=dict(self.mlp or DEFAULT_MLP),
@@ -257,7 +265,7 @@ class VectorPolicy(Stage):
 
     KIND = "policy"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, policy=PolicySpec(
             actor_keys=tuple(self.keys), critic_keys=tuple(self.keys),
             cnn=None, mlp=dict(self.mlp or DEFAULT_MLP),
@@ -272,7 +280,7 @@ class AsymmetricVectorPolicy(Stage):
 
     KIND = "policy"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, policy=PolicySpec(
             actor_keys=tuple(self.actor_keys), critic_keys=tuple(self.critic_keys),
             cnn=None, mlp=dict(self.mlp or DEFAULT_MLP),
@@ -289,7 +297,7 @@ class DomainRandomizationActions(Stage):
 
     KIND = "action_dr"
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, action_dr=ActionDRSpec(
             steer_noise=self.steer_noise, speed_noise=self.speed_noise,
             delay_steps=self.delay_steps,
@@ -321,7 +329,7 @@ class PPO(Stage):
             "max_grad_norm": self.max_grad_norm, "horizon": self.horizon,
         }
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, algorithm=AlgorithmSpec(kind="ppo", ppo=self._ppo_dict()))
 
 
@@ -332,7 +340,7 @@ class PPOLagrangian(PPO):
     cost_gae_lambda: float = 0.95
     lambda_init: float = 0.0
 
-    def apply(self, spec):
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, algorithm=AlgorithmSpec(
             kind="ppo_lagrangian", ppo=self._ppo_dict(),
             lagrangian={
@@ -341,6 +349,25 @@ class PPOLagrangian(PPO):
                 "lambda_init": self.lambda_init,
             },
         ))
+
+
+@dataclass(frozen=True)
+class Algo(PPO):
+    """Terminal stage selecting a CUSTOM registered algorithm by kind.
+
+    The PPO hyperparameters double as generic on-policy knobs (horizon,
+    minibatches, lr, ...); `params` carries anything algorithm-specific.
+    Register the implementation with
+    `@register_algorithm("my_kind")` in experiment/algorithms.py's registry —
+    see the Algorithm protocol there for the full contract.
+    """
+
+    kind: str = "ppo"
+    params: Optional[dict] = None
+
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
+        return replace(spec, algorithm=AlgorithmSpec(
+            kind=self.kind, ppo=self._ppo_dict(), params=dict(self.params or {})))
 
 
 # ----------------------------------------------------------------------

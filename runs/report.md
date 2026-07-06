@@ -1,13 +1,13 @@
 # Experiment report
 
-4 run record(s) under `runs/`.
+5 run record(s) under `runs/`.
 
 ## Combination table
 
 | modality | render | algorithm | asymmetry | encoder | dr_profile | runs | completion_rate | lap_time_s | mean_progress_m | offtrack_rate | mean_return | mean_cost | cost_violation_rate |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | camera | madrona | ppo | asymmetric | none | full | 1 | 0 | - | 1.95 | 1 | 11.5 | - | - |
-| feature | none | ppo | symmetric | none | none | 1 | 0.987 | 8.16 | 64.4 | 0.0135 | 685 | - | - |
+| feature | none | ppo | symmetric | none | none | 2 | 0.987 ± 7.76e-05 | 10.5 ± 3.36 | 52.4 ± 16.8 | 0.0204 ± 0.00971 | 580 ± 149 | - | - |
 | feature | none | ppo_lagrangian | symmetric | none | none | 1 | 1 | 8.98 | 59.2 | 0 | 626 | 69.7 | 0.949 |
 | camera | madrona | ppo_lagrangian | symmetric | frozen_cnn | obs+action | 1 | 0 | - | 2.56 | 1 | 27.3 | 24 | 0.207 |
 
