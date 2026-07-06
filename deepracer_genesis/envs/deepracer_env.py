@@ -51,7 +51,12 @@ class DeepRacerEnv:
         self.track = MultiTrack(names, num_envs, self.device)
 
         # ------------- scene -------------
-        renderer = gs.renderers.BatchRenderer(use_rasterizer=True) if self.vision else gs.renderers.Rasterizer()
+        # vision_renderer "nyx": observations come from Nyx path-tracer camera
+        # sensors (batched per env, correct texture colors) instead of Madrona;
+        # the scene renderer is then only used by the spectator camera.
+        self.nyx_vision = self.vision and env_cfg.get("vision_renderer", "batch") == "nyx"
+        renderer = (gs.renderers.BatchRenderer(use_rasterizer=True)
+                    if self.vision and not self.nyx_vision else gs.renderers.Rasterizer())
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=env_cfg["dt"], substeps=1),
             rigid_options=gs.options.RigidOptions(
@@ -88,12 +93,17 @@ class DeepRacerEnv:
             gs.morphs.URDF(
                 file=f"{__file__.rsplit('/envs/', 1)[0]}/assets/urdf/deepracer/deepracer_processed.urdf",
                 pos=(0, 0, 0.05),
-                merge_fixed_links=True,
+                # the Nyx exporter refuses URDF entities with merged fixed links
+                merge_fixed_links=not self.nyx_vision,
                 links_to_keep=["camera_link"],
             ),
         )
+        # Nyx cannot read DAE; use the OBJ conversions (same geometry/textures)
+        mesh_paths = self.track.obj_paths if self.nyx_vision else self.track.mesh_paths
+        if self.nyx_vision and len(mesh_paths) > 1:
+            raise NotImplementedError("heterogeneous tracks are not supported with the Nyx renderer")
         track_morphs = [gs.morphs.Mesh(file=p, fixed=True, collision=False)
-                        for p in self.track.mesh_paths]
+                        for p in mesh_paths]
         # a list of morphs makes the entity heterogeneous: each parallel env
         # simulates (and renders) one geometry variant
         self.track_entity = self.scene.add_entity(
@@ -118,9 +128,47 @@ class DeepRacerEnv:
                 up=(0.0, 1.0, 0.0),
                 fov=60,
                 GUI=False,
-                debug=self.vision,
+                debug=self.vision and not self.nyx_vision,
             )
-        if self.vision:
+        if self.vision and self.nyx_vision:
+            import gs_nyx.nyx_py_renderer as npr
+            import gs_nyx.nyx_py_sdk as nps
+            from gs_nyx_plugin.nyx_camera_options import NyxCameraOptions
+
+            sun = {"type": "directional", "dir": (0.4, 0.3, -1.0), "color": (1.0, 1.0, 1.0),
+                   "intensity": float(env_cfg.get("nyx_light_intensity", 3.0)), "shadow": False}
+            mode = getattr(npr.ERenderMode, env_cfg.get("nyx_mode", "Forward"))
+            res = env_cfg["camera_res"]
+            # denoise/AA off: their temporal history smears moving objects
+            # across frames — bad for RL observations and for validation diffs
+            nyx_common = dict(
+                spp=int(env_cfg.get("nyx_spp", 4)), render_mode=mode, lights=[sun],
+                denoise=False, anti_aliasing=nps.EAntiAliasing.Off,
+            )
+            # same link->camera mount transform as the Madrona path (camera
+            # looks along -z of offset_T), including the downward pitch;
+            # note: camera sensors ignore pos_offset/euler_offset
+            self.nyx_cam = self.scene.add_sensor(NyxCameraOptions(
+                res=res, fov=env_cfg["camera_fov"],
+                entity_idx=self.car.idx,
+                link_idx_local=self.car.get_link("camera_link").idx_local,
+                offset_T=self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0)),
+                **nyx_common,
+            ))
+            self.nyx_top = None
+            if env_cfg.get("topdown_camera", False):
+                t0 = self.track.tracks[0]
+                c = t0.center.mean(dim=0).cpu().numpy()
+                extent = (t0.center.max(dim=0).values - t0.center.min(dim=0).values).max().item()
+                self.top_cam_center = t0.center.mean(dim=0).expand(num_envs, 2).clone()
+                self.top_cam_height = torch.full((num_envs,), extent * 1.2, device=self.device)
+                self.nyx_top = self.scene.add_sensor(NyxCameraOptions(
+                    res=res, fov=60,
+                    pos=(float(c[0]), float(c[1]), extent * 1.2),
+                    lookat=(float(c[0]), float(c[1]), 0.0), up=(0.0, 1.0, 0.0),
+                    **nyx_common,
+                ))
+        elif self.vision:
             self.scene.add_light(
                 pos=(0.0, 0.0, 10.0), dir=(0.4, 0.3, -1.0), directional=True,
                 castshadow=False, intensity=float(env_cfg.get("light_intensity", 6.0)),
@@ -181,7 +229,7 @@ class DeepRacerEnv:
         self.wheel_radius = float(wheel_mesh.extents[2]) / 2.0
 
         # ------------- camera mount -------------
-        if self.cam is not None:
+        if self.cam is not None and not self.nyx_vision:
             self.cam_offset_T = self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0))
             self.cam.attach(self.car.get_link("camera_link"), self.cam_offset_T)
 
@@ -331,10 +379,13 @@ class DeepRacerEnv:
 
         # ---- camera obs ----
         if self.vision:
-            self.cam.move_to_attach()
-            rgb = self.cam.render(rgb=True)[0]                   # (N, H, W, 3) uint8 cuda
-            if self.rg_swap:
-                rgb = rgb[..., [1, 0, 2]]
+            if self.nyx_vision:
+                rgb = self.nyx_cam.read().rgb[..., :3]           # (N, H, W, 3) uint8 cuda
+            else:
+                self.cam.move_to_attach()
+                rgb = self.cam.render(rgb=True)[0]               # (N, H, W, 3) uint8 cuda
+                if self.rg_swap:
+                    rgb = rgb[..., [1, 0, 2]]
             img = rgb.permute(0, 3, 1, 2).float() / 255.0
             if self.cfg.get("pixel_noise", 0.0) > 0:
                 img = (img + torch.randn_like(img) * self.cfg["pixel_noise"]).clamp(0, 1)
@@ -396,7 +447,7 @@ class DeepRacerEnv:
 
         if self.cfg.get("randomize", False):
             randomize_physics(self, env_ids)
-            if self.vision:
+            if self.vision and not self.nyx_vision:
                 randomize_camera_mount(self, env_ids)
 
         # episode logging
@@ -422,6 +473,9 @@ class DeepRacerEnv:
 
     def render_topdown(self):
         """(N, H, W, 3) uint8 per-env bird's-eye view (validation only)."""
+        if self.nyx_vision:
+            assert self.nyx_top is not None
+            return self.nyx_top.read().rgb[..., :3]
         assert self.top_cam is not None
         rgb = self.top_cam.render(rgb=True)[0]
         return rgb[..., [1, 0, 2]] if self.rg_swap else rgb
