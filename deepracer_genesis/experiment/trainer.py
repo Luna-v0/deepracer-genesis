@@ -87,7 +87,13 @@ class Trainer:
                         data["advantage"] = ((data["advantage"]
                                               - lam * data["cost_advantage"])
                                              / (1.0 + lam))
-                buffer.extend(data.reshape(-1))
+                # ("next", camera) is only consumed by GAE's next-value pass;
+                # dropping it before the buffer halves the biggest tensor's
+                # footprint (camera minibatches keep the root key the nets read)
+                slim = data
+                if ("next", "camera") in data.keys(True):
+                    slim = data.exclude(("next", "camera"))
+                buffer.extend(slim.reshape(-1))
                 for batch in buffer:
                     loss_td = loss_module(batch)
                     loss = (loss_td["loss_objective"] + loss_td["loss_critic"]
