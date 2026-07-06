@@ -12,7 +12,23 @@ from .spec import ExperimentSpec, SpecError
 
 def override(spec: ExperimentSpec, path: str, value) -> ExperimentSpec:
     """dataclasses.replace along a dotted path, e.g. 'env.num_envs' or
-    'algorithm.lagrangian.budget' (dict leaves are copied, not mutated)."""
+    'algorithm.lagrangian.budget' (dict leaves are copied, not mutated).
+
+    Coupled fields stay in sync: the cost budget lives on the env AND in the
+    inferred lagrangian config — changing either updates both.
+    """
+    out = _override(spec, path, value)
+    if isinstance(out, ExperimentSpec):
+        if (path == "env.cost_budget" and out.algorithm is not None
+                and out.algorithm.kind == "ppo_lagrangian"):
+            out = _override(out, "algorithm.lagrangian.budget", value)
+        elif (path == "algorithm.lagrangian.budget" and out.env is not None
+                and out.env.emits_cost):
+            out = _override(out, "env.cost_budget", value)
+    return out
+
+
+def _override(spec, path: str, value):
     head, _, rest = path.partition(".")
     if not rest:
         if isinstance(spec, dict):
@@ -23,7 +39,7 @@ def override(spec: ExperimentSpec, path: str, value) -> ExperimentSpec:
             return out
         return replace(spec, **{head: value})
     child = spec[head] if isinstance(spec, dict) else getattr(spec, head)
-    new_child = override(child, rest, value)
+    new_child = _override(child, rest, value)
     if isinstance(spec, dict):
         out = dict(spec)
         out[head] = new_child

@@ -191,5 +191,11 @@ class ExperimentSpec:
             raise SpecError("PPOLagrangian requires a SafeRL* env that emits a cost signal")
         if algo.kind == "ppo_lagrangian" and not algo.lagrangian.get("budget"):
             raise SpecError("PPOLagrangian needs a budget (explicit or from the env stage)")
+        if (algo.kind == "ppo_lagrangian" and env.cost_budget is not None
+                and algo.lagrangian.get("budget") not in (None, env.cost_budget)):
+            raise SpecError(
+                "conflicting budgets: env.cost_budget=%r vs algorithm.lagrangian"
+                "['budget']=%r — sweep 'env.cost_budget' (ablation.override keeps "
+                "them in sync)" % (env.cost_budget, algo.lagrangian.get("budget")))
 
         return self
