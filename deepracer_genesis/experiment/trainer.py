@@ -79,7 +79,7 @@ class Trainer:
             for k in ("loss_objective", "loss_critic", "loss_entropy",
                       "clip_fraction", "kl_approx"):
                 if k in loss_td.keys():
-                    writer.add_scalar(f"Loss/{k}", float(loss_td[k]), frames)
+                    writer.add_scalar(f"Loss/{k}", float(loss_td[k].detach()), frames)
             if i % 10 == 0 or i == iterations - 1:
                 ep = sim.extras.get("log", {})
                 rew = float(ep.get("Episode/rew_progress", float("nan")))

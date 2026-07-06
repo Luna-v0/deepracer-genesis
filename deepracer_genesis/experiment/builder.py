@@ -168,7 +168,8 @@ class Builder:
         return Collector(env, actor,
                          frames_per_batch=n * ppo["horizon"],
                          total_frames=self.spec.total_env_steps,
-                         device=self.sim().device)
+                         device=self.sim().device,
+                         auto_register_policy_transforms=True)
 
     def buffer(self):
         ppo = self.spec.algorithm.ppo

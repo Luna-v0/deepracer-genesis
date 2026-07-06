@@ -1,0 +1,97 @@
+{
+  "spec_id": "be7057ba2f88",
+  "spec": {
+    "env": {
+      "modality": "feature",
+      "render": "none",
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "lookahead_k": 10,
+      "features": [],
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 1024,
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "state"
+      ],
+      "critic_keys": [
+        "state"
+      ],
+      "cnn": null,
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "kind": "ppo",
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 0.0003,
+        "entropy_coef": 0.01,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {}
+    },
+    "total_env_steps": 5000000,
+    "seed": 0,
+    "ablation_group": "baselines",
+    "variant": "feature"
+  },
+  "seed": 0,
+  "ablation_group": "baselines",
+  "variant": "feature",
+  "metrics": {
+    "episodes": 1037,
+    "mean_return": 685.0263671875,
+    "mean_progress_m": 64.35538482666016,
+    "mean_episode_s": 29.653444290161133,
+    "completion_rate": 0.9874638319015503,
+    "mean_laps": 3.634016513824463,
+    "offtrack_rate": 0.013500481843948364,
+    "lap_time_s": 8.156584739685059,
+    "mean_speed_mps": 2.1577870845794678
+  },
+  "train": {
+    "wall_clock_s": 81.6,
+    "steps_per_s": 61421.6,
+    "total_env_steps": 5013504,
+    "checkpoint": "runs/baselines/feature-0-be7057ba2f88/best.pt"
+  },
+  "created_at": "2026-07-06T17:51:53"
+}
