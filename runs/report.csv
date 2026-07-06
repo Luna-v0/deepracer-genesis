@@ -1,2 +1,5 @@
-modality,render,algorithm,asymmetry,encoder,dr_profile,n_runs,seeds,completion_rate,completion_rate_std,lap_time_s,lap_time_s_std,mean_progress_m,mean_progress_m_std,offtrack_rate,offtrack_rate_std,mean_return,mean_return_std
-feature,none,ppo,symmetric,none,none,1,0,0.9874638319015503,0.0,8.156584739685059,0.0,64.35538482666016,0.0,0.013500481843948364,0.0,685.0263671875,0.0
+modality,render,algorithm,asymmetry,encoder,dr_profile,n_runs,seeds,completion_rate,completion_rate_std,lap_time_s,lap_time_s_std,mean_progress_m,mean_progress_m_std,offtrack_rate,offtrack_rate_std,mean_return,mean_return_std,mean_cost,mean_cost_std,cost_violation_rate,cost_violation_rate_std
+camera,madrona,ppo,asymmetric,none,full,1,0,0.0,0.0,nan,nan,1.9533244371414185,0.0,1.0,0.0,11.529715538024902,0.0,nan,nan,nan,nan
+feature,none,ppo,symmetric,none,none,1,0,0.9874638319015503,0.0,8.156584739685059,0.0,64.35538482666016,0.0,0.013500481843948364,0.0,685.0263671875,0.0,nan,nan,nan,nan
+feature,none,ppo_lagrangian,symmetric,none,none,1,0,1.0,0.0,8.981012344360352,0.0,59.163429260253906,0.0,0.0,0.0,626.0341186523438,0.0,69.6708984375,0.0,0.94921875,0.0
+camera,madrona,ppo_lagrangian,symmetric,frozen_cnn,obs+action,1,0,0.0,0.0,nan,nan,2.5644869804382324,0.0,1.0,0.0,27.296281814575195,0.0,24.041614532470703,0.0,0.20683228969573975,0.0
