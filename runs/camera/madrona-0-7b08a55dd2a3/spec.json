@@ -1,0 +1,120 @@
+{
+  "env": {
+    "modality": "camera",
+    "render": "madrona",
+    "resolution": [
+      160,
+      120
+    ],
+    "fov": 90.0,
+    "lookahead_k": 10,
+    "features": [],
+    "tracks": [
+      "reinvent_base"
+    ],
+    "num_envs": 128,
+    "emits_cost": false,
+    "cost_fn": null,
+    "cost_budget": null
+  },
+  "obs_dr": {
+    "image_aug": {
+      "brightness": [
+        0.7,
+        1.3
+      ],
+      "hue": 0.05,
+      "blur": 0.3
+    },
+    "camera_jitter": {
+      "pitch_deg": 2.0,
+      "pos_m": 0.005
+    },
+    "physics": {
+      "friction_range": [
+        0.6,
+        1.4
+      ],
+      "mass_shift_kg": 0.2,
+      "com_shift_m": 0.01,
+      "steer_kp_scale": [
+        0.8,
+        1.2
+      ],
+      "wheel_kv_scale": [
+        0.8,
+        1.2
+      ],
+      "armature_range": [
+        0.0,
+        0.01
+      ]
+    }
+  },
+  "encoder": {
+    "kind": "none",
+    "checkpoint": null,
+    "output_dim": null,
+    "layer": null,
+    "out_key": "encoded"
+  },
+  "policy": {
+    "actor_keys": [
+      "camera"
+    ],
+    "critic_keys": [
+      "camera",
+      "state"
+    ],
+    "cnn": {
+      "channels": [
+        16,
+        32,
+        64
+      ],
+      "kernels": [
+        8,
+        4,
+        3
+      ],
+      "strides": [
+        4,
+        2,
+        1
+      ],
+      "activation": "relu"
+    },
+    "mlp": {
+      "hidden": [
+        256,
+        128,
+        64
+      ],
+      "activation": "elu"
+    }
+  },
+  "action_dr": {
+    "steer_noise": 0.02,
+    "speed_noise": 0.05,
+    "delay_steps": 1
+  },
+  "algorithm": {
+    "kind": "ppo",
+    "ppo": {
+      "clip": 0.2,
+      "epochs": 5,
+      "minibatches": 4,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "lr": 0.0003,
+      "entropy_coef": 0.01,
+      "max_grad_norm": 1.0,
+      "horizon": 24
+    },
+    "lagrangian": {}
+  },
+  "total_env_steps": 36864,
+  "seed": 0,
+  "ablation_group": "camera",
+  "variant": "madrona"
+}

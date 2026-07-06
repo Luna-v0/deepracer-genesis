@@ -1,0 +1,82 @@
+{
+  "env": {
+    "modality": "feature",
+    "render": "none",
+    "resolution": [
+      160,
+      120
+    ],
+    "fov": 90.0,
+    "lookahead_k": 10,
+    "features": [],
+    "tracks": [
+      "reinvent_base"
+    ],
+    "num_envs": 1024,
+    "emits_cost": true,
+    "cost_fn": "offtrack",
+    "cost_budget": 25.0
+  },
+  "obs_dr": {
+    "image_aug": {},
+    "camera_jitter": {},
+    "physics": {}
+  },
+  "encoder": {
+    "kind": "none",
+    "checkpoint": null,
+    "output_dim": null,
+    "layer": null,
+    "out_key": "encoded"
+  },
+  "policy": {
+    "actor_keys": [
+      "state"
+    ],
+    "critic_keys": [
+      "state"
+    ],
+    "cnn": null,
+    "mlp": {
+      "hidden": [
+        256,
+        128,
+        64
+      ],
+      "activation": "elu"
+    }
+  },
+  "action_dr": {
+    "steer_noise": 0.0,
+    "speed_noise": 0.0,
+    "delay_steps": 0
+  },
+  "algorithm": {
+    "kind": "ppo_lagrangian",
+    "ppo": {
+      "clip": 0.2,
+      "epochs": 5,
+      "minibatches": 4,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "lr": 0.0003,
+      "entropy_coef": 0.01,
+      "max_grad_norm": 1.0,
+      "horizon": 24
+    },
+    "lagrangian": {
+      "budget": 25.0,
+      "pid": [
+        0.05,
+        0.0005,
+        0.1
+      ],
+      "cost_gae_lambda": 0.95,
+      "lambda_init": 0.0
+    }
+  },
+  "total_env_steps": 2457600,
+  "seed": 0,
+  "ablation_group": "safety",
+  "variant": "feature_lagrangian"
+}

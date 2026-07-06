@@ -1,0 +1,109 @@
+{
+  "spec_id": "c49450a41500",
+  "spec": {
+    "env": {
+      "modality": "feature",
+      "render": "none",
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "lookahead_k": 10,
+      "features": [],
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 1024,
+      "emits_cost": true,
+      "cost_fn": "offtrack",
+      "cost_budget": 25.0
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "state"
+      ],
+      "critic_keys": [
+        "state"
+      ],
+      "cnn": null,
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "kind": "ppo_lagrangian",
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 0.0003,
+        "entropy_coef": 0.01,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {
+        "budget": 25.0,
+        "pid": [
+          0.05,
+          0.0005,
+          0.1
+        ],
+        "cost_gae_lambda": 0.95,
+        "lambda_init": 0.0
+      }
+    },
+    "total_env_steps": 2457600,
+    "seed": 0,
+    "ablation_group": "safety",
+    "variant": "feature_lagrangian"
+  },
+  "seed": 0,
+  "ablation_group": "safety",
+  "variant": "feature_lagrangian",
+  "metrics": {
+    "episodes": 1024,
+    "mean_return": 626.0341186523438,
+    "mean_progress_m": 59.163429260253906,
+    "mean_episode_s": 30.0,
+    "completion_rate": 1.0,
+    "mean_laps": 3.3408374786376953,
+    "offtrack_rate": 0.0,
+    "lap_time_s": 8.981012344360352,
+    "mean_speed_mps": 1.9721143245697021,
+    "mean_cost": 69.6708984375,
+    "cost_violation_rate": 0.94921875,
+    "budget_satisfied": false
+  },
+  "train": {
+    "wall_clock_s": 24.6,
+    "steps_per_s": 99842.8,
+    "total_env_steps": 2457600,
+    "checkpoint": "/tmp/smoke_runs/safety/feature_lagrangian-0-c49450a41500/best.pt"
+  },
+  "created_at": "2026-07-06T18:17:58"
+}

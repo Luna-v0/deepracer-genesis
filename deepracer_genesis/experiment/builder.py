@@ -170,20 +170,23 @@ class Builder:
         spec = self.spec
         keys = list(spec.policy.actor_keys)
         dims = self._key_dims()
+        # NormalParamExtractor is its own tensordict stage: only MLP.forward
+        # concatenates multiple positional inputs, nn.Sequential does not
         if spec.policy.cnn is not None and "camera" in keys:
             modules, head_keys, in_dim = self._head(keys, dims, "actor_cam_feat")
             mlp = self._mlp(in_dim, 2 * 2)
-            head = nn.Sequential(mlp, NormalParamExtractor())
-            modules.append(TensorDictModule(head, in_keys=head_keys,
-                                            out_keys=["loc", "scale"]))
+            modules.append(TensorDictModule(mlp, in_keys=head_keys,
+                                            out_keys=["_pi_params"]))
             # kept for checkpointing — Phase-5 transfer rebuilds the encoder
             self._actor_cnn, self._actor_mlp = modules[0].module, mlp
-            param_module = TensorDictSequential(*modules)
         else:
-            net = nn.Sequential(self._mlp(sum(dims[k] for k in keys), 2 * 2),
-                                NormalParamExtractor())
+            mlp = self._mlp(sum(dims[k] for k in keys), 2 * 2)
             self._actor_cnn = self._actor_mlp = None
-            param_module = TensorDictModule(net, in_keys=keys, out_keys=["loc", "scale"])
+            modules = [TensorDictModule(mlp, in_keys=keys, out_keys=["_pi_params"])]
+        modules.append(TensorDictModule(NormalParamExtractor(),
+                                        in_keys=["_pi_params"],
+                                        out_keys=["loc", "scale"]))
+        param_module = TensorDictSequential(*modules)
         return ProbabilisticActor(
             param_module,
             in_keys=["loc", "scale"], out_keys=["action"],
