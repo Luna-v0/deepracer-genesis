@@ -43,9 +43,22 @@ class Trainer:
         critic = self.b.critic()
         gae = self.b.gae(critic)
         loss_module = self.b.loss(actor, critic)
-        optim = self.b.optimizer(loss_module)
         buffer = self.b.buffer()
         collector = self.b.collector(env, actor)
+
+        lagrangian = spec.algorithm.kind == "ppo_lagrangian"
+        if lagrangian:
+            from ..algorithms import PIDLagrangian
+            lag = spec.algorithm.lagrangian
+            cost_critic = self.b.critic(out_key="cost_value")
+            gae_cost = self.b.gae_cost(cost_critic)
+            kp, ki, kd = lag.get("pid", (0.05, 0.0005, 0.1))
+            pid = PIDLagrangian(lag["budget"], kp, ki, kd,
+                                lambda_init=lag.get("lambda_init", 0.0))
+            optim = self.b.optimizer(loss_module, cost_critic)
+            j_cost = 0.0
+        else:
+            optim = self.b.optimizer(loss_module)
 
         from torch.utils.tensorboard import SummaryWriter
         writer = SummaryWriter(run_dir)
@@ -58,17 +71,37 @@ class Trainer:
 
         for i, data in enumerate(collector):
             frames += data.numel()
+            if lagrangian:
+                # J_cost estimate: EMA of the sim's mean episode cost at resets
+                ep_cost = sim.extras.get("log", {}).get("Episode/cost")
+                if ep_cost is not None:
+                    j_cost = 0.7 * j_cost + 0.3 * float(ep_cost)
+                lam = pid.update(j_cost)
             for _ in range(ppo["epochs"]):
                 with torch.no_grad():
                     data = gae(data)                    # on [N, T], every epoch
+                    if lagrangian:
+                        data = gae_cost(data)
+                        # combined surrogate: (A_r - lam*A_c) / (1+lam), fed to
+                        # ClipPPOLoss through the "advantage" key it reads
+                        data["advantage"] = ((data["advantage"]
+                                              - lam * data["cost_advantage"])
+                                             / (1.0 + lam))
                 buffer.extend(data.reshape(-1))
                 for batch in buffer:
                     loss_td = loss_module(batch)
                     loss = (loss_td["loss_objective"] + loss_td["loss_critic"]
                             + loss_td["loss_entropy"])
+                    if lagrangian:
+                        cost_pred = cost_critic(batch)["cost_value"]
+                        loss = loss + torch.nn.functional.smooth_l1_loss(
+                            cost_pred, batch["cost_value_target"])
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(loss_module.parameters(),
                                                    ppo["max_grad_norm"])
+                    if lagrangian:
+                        torch.nn.utils.clip_grad_norm_(cost_critic.parameters(),
+                                                       ppo["max_grad_norm"])
                     optim.step()
                     optim.zero_grad()
 
@@ -76,6 +109,9 @@ class Trainer:
             for k, v in sim.extras.get("log", {}).items():
                 writer.add_scalar(k, float(v), frames)
             writer.add_scalar("Train/steps_per_s", sps, frames)
+            if lagrangian:
+                writer.add_scalar("Safety/lambda", pid.value, frames)
+                writer.add_scalar("Safety/j_cost", j_cost, frames)
             for k in ("loss_objective", "loss_critic", "loss_entropy",
                       "clip_fraction", "kl_approx"):
                 if k in loss_td.keys():
@@ -94,7 +130,17 @@ class Trainer:
 
         budget = (spec.algorithm.lagrangian.get("budget")
                   if spec.algorithm.kind == "ppo_lagrangian" else None)
-        metrics = evaluate_policy(sim, actor, cost_budget=budget)
+        obs_transform = None
+        if spec.encoder.kind == "frozen_cnn":
+            encoder, _ = self.b.encoder_module()
+            out_key = spec.encoder.out_key
+
+            def obs_transform(td, _enc=encoder, _k=out_key):
+                td.set(_k, _enc(td["camera"]))
+                return td
+
+        metrics = evaluate_policy(sim, actor, cost_budget=budget,
+                                  obs_transform=obs_transform)
         writer.add_hparams({"spec_id": spec.id()},
                            {f"eval/{k}": v for k, v in metrics.items()
                             if isinstance(v, (int, float)) and v == v})
@@ -115,9 +161,17 @@ class Trainer:
 
     def _save(self, run_dir, name, actor, critic) -> str:
         path = os.path.join(run_dir, name)
-        torch.save({
+        payload = {
             "actor": actor.state_dict(),
             "critic": critic.state_dict(),
             "spec": self.b.spec.to_dict(),
-        }, path)
+        }
+        if getattr(self.b, "_actor_cnn", None) is not None:
+            # camera policies also export the trunk so Phase-5 transfer can
+            # rebuild a frozen encoder without touching actor internals
+            payload["actor_cnn"] = self.b._actor_cnn.state_dict()
+            payload["actor_mlp"] = self.b._actor_mlp.state_dict()
+            payload["cnn_cfg"] = dict(self.b.spec.policy.cnn)
+            payload["mlp_cfg"] = dict(self.b.spec.policy.mlp)
+        torch.save(payload, path)
         return path

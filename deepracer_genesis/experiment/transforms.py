@@ -110,6 +110,58 @@ class ImageAug(Transform):
     _reset_on_native_autoreset = _reset
 
 
+class FrozenEncoder(Transform):
+    """Run a frozen module over an obs key, write a new key, drop the raw one.
+
+    Modeled on torchrl's _R3MNet (the canonical frozen-representation
+    transform); the raw camera key is deleted from the carried tensordict and
+    the spec — the vector policy downstream never sees pixels, and the
+    collector stops hauling (N,3,H,W) frames it doesn't need.
+    """
+
+    def __init__(self, encoder, embed_dim: int, in_keys=("camera",),
+                 out_keys=("encoded",), del_keys: bool = True):
+        super().__init__(in_keys=list(in_keys), out_keys=list(out_keys))
+        encoder.eval()
+        encoder.requires_grad_(False)
+        self.encoder = encoder
+        self.embed_dim = embed_dim
+        self.del_keys = del_keys
+
+    @torch.no_grad()
+    def _apply_transform(self, obs: torch.Tensor) -> torch.Tensor:
+        lead = obs.shape[:-3]
+        out = self.encoder(obs.reshape(-1, *obs.shape[-3:]))
+        return out.reshape(*lead, self.embed_dim)
+
+    def _call(self, next_tensordict):
+        next_tensordict = super()._call(next_tensordict)
+        if self.del_keys:
+            next_tensordict = next_tensordict.exclude(*self.in_keys)
+        return next_tensordict
+
+    forward = _call
+
+    def _reset(self, tensordict, tensordict_reset):
+        with _set_missing_tolerance(self, True):
+            return self._call(tensordict_reset)
+
+    _reset_on_native_autoreset = _reset
+
+    def transform_observation_spec(self, observation_spec):
+        from torchrl.data import Unbounded
+        observation_spec = observation_spec.clone()
+        ref = observation_spec[self.in_keys[0]]
+        lead = ref.shape[:-3]
+        if self.del_keys:
+            for k in self.in_keys:
+                del observation_spec[k]
+        for k in self.out_keys:
+            observation_spec[k] = Unbounded(shape=(*lead, self.embed_dim),
+                                            device=ref.device)
+        return observation_spec
+
+
 class ActionNoiseDelay(Transform):
     """Actuation DR: k-step command latency, then per-channel gaussian noise.
 

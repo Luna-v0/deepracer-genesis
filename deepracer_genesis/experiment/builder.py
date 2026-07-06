@@ -13,13 +13,13 @@ import torch
 from torch import nn
 
 import genesis as gs
-from tensordict.nn import NormalParamExtractor, TensorDictModule
+from tensordict.nn import NormalParamExtractor, TensorDictModule, TensorDictSequential
 from torchrl.collectors import Collector
 from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.envs import TransformedEnv
 from torchrl.envs.utils import ExplorationType
-from torchrl.modules import MLP, ProbabilisticActor, TanhNormal, ValueOperator
+from torchrl.modules import MLP, ConvNet, ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value.advantages import GAE
 
@@ -27,6 +27,7 @@ from ..configs.cfgs import get_env_cfg
 from ..envs import DeepRacerEnv
 from ..envs.torchrl_env import TorchRLDeepRacerEnv
 from .spec import ExperimentSpec
+from .transforms import ActionNoiseDelay, ImageAug
 
 _ACT = {"elu": nn.ELU, "relu": nn.ReLU, "tanh": nn.Tanh}
 
@@ -57,9 +58,6 @@ class Builder:
     # ------------------------------------------------------------- sim
     def sim_cfg(self) -> dict:
         env = self.spec.env
-        if env.render == "nyx":
-            raise NotImplementedError(
-                "render='nyx' needs the nyx-vision branch merged (Phase 2)")
         if env.features:
             raise NotImplementedError(f"extra features not implemented: {env.features}")
 
@@ -71,6 +69,8 @@ class Builder:
         cfg["camera_res"] = tuple(env.resolution)
         cfg["camera_fov"] = env.fov
         cfg["lookahead_k"] = env.lookahead_k
+        if env.render == "nyx":
+            cfg["vision_renderer"] = "nyx"
         if randomize:
             rand = dict(_NEUTRAL_PHYSICS)
             rand.update(obs_dr.physics)
@@ -91,8 +91,20 @@ class Builder:
 
     # ------------------------------------------------------ torchrl env
     def transforms(self) -> list:
-        """Obs/action transforms per spec — filled by Phases 3 and 5."""
-        return []
+        """Obs/action transforms per spec (order: aug -> encoder -> action DR)."""
+        ts = []
+        if self.spec.obs_dr.image_aug:
+            ts.append(ImageAug(self.spec.obs_dr.image_aug))
+        if self.spec.encoder.kind == "frozen_cnn":
+            ts.append(self.encoder_transform())
+        ad = self.spec.action_dr
+        if ad.delay_steps or ad.steer_noise or ad.speed_noise:
+            ts.append(ActionNoiseDelay(self.spec.env.num_envs,
+                                       steer_noise=ad.steer_noise,
+                                       speed_noise=ad.speed_noise,
+                                       delay_steps=ad.delay_steps,
+                                       device=self.sim().device))
+        return ts
 
     def env(self):
         base = TorchRLDeepRacerEnv(self.sim(), emit_cost=self.spec.env.emits_cost)
@@ -119,18 +131,61 @@ class Builder:
             dims[self.spec.encoder.out_key] = self.spec.encoder.output_dim
         return dims
 
+    def _cnn(self) -> ConvNet:
+        c = self.spec.policy.cnn
+        return ConvNet(in_features=3,
+                       num_cells=list(c["channels"]),
+                       kernel_sizes=list(c["kernels"]),
+                       strides=list(c["strides"]),
+                       activation_class=_ACT[c.get("activation", "relu")],
+                       device=self.sim().device)
+
+    def _cnn_flat_dim(self, cnn: ConvNet) -> int:
+        w, h = self.spec.env.resolution
+        with torch.no_grad():
+            return cnn(torch.zeros(1, 3, h, w, device=self.sim().device)).shape[-1]
+
+    def _head(self, keys, dims, cam_feat_key):
+        """Trunk for one network: optional CNN on 'camera' feeding a fused MLP.
+
+        Returns (modules, head_in_keys): `modules` start the TensorDictSequential;
+        vector keys (+ the CNN feature key) concat inside the MLP head.
+        """
+        modules = []
+        head_keys = []
+        in_dim = 0
+        for k in keys:
+            if k == "camera":
+                cnn = self._cnn()
+                modules.append(TensorDictModule(cnn, in_keys=["camera"],
+                                                out_keys=[cam_feat_key]))
+                head_keys.append(cam_feat_key)
+                in_dim += self._cnn_flat_dim(cnn)
+            else:
+                head_keys.append(k)
+                in_dim += dims[k]
+        return modules, head_keys, in_dim
+
     def actor(self) -> ProbabilisticActor:
         spec = self.spec
-        if spec.policy.cnn is not None:
-            raise NotImplementedError("camera policies land in Phase 2")
         keys = list(spec.policy.actor_keys)
         dims = self._key_dims()
-        net = nn.Sequential(
-            self._mlp(sum(dims[k] for k in keys), 2 * 2),
-            NormalParamExtractor(),
-        )
+        if spec.policy.cnn is not None and "camera" in keys:
+            modules, head_keys, in_dim = self._head(keys, dims, "actor_cam_feat")
+            mlp = self._mlp(in_dim, 2 * 2)
+            head = nn.Sequential(mlp, NormalParamExtractor())
+            modules.append(TensorDictModule(head, in_keys=head_keys,
+                                            out_keys=["loc", "scale"]))
+            # kept for checkpointing — Phase-5 transfer rebuilds the encoder
+            self._actor_cnn, self._actor_mlp = modules[0].module, mlp
+            param_module = TensorDictSequential(*modules)
+        else:
+            net = nn.Sequential(self._mlp(sum(dims[k] for k in keys), 2 * 2),
+                                NormalParamExtractor())
+            self._actor_cnn = self._actor_mlp = None
+            param_module = TensorDictModule(net, in_keys=keys, out_keys=["loc", "scale"])
         return ProbabilisticActor(
-            TensorDictModule(net, in_keys=keys, out_keys=["loc", "scale"]),
+            param_module,
             in_keys=["loc", "scale"], out_keys=["action"],
             distribution_class=TanhNormal,
             distribution_kwargs={"low": -1.0, "high": 1.0},
@@ -138,20 +193,86 @@ class Builder:
             default_interaction_type=ExplorationType.RANDOM,
         )
 
-    def critic(self, out_key: str = "state_value") -> ValueOperator:
+    def critic(self, out_key: str = "state_value"):
         spec = self.spec
-        if spec.policy.cnn is not None:
-            raise NotImplementedError("camera policies land in Phase 2")
         keys = list(spec.policy.critic_keys)
         dims = self._key_dims()
+        if spec.policy.cnn is not None and "camera" in keys:
+            feat_key = f"critic_cam_feat_{out_key}"      # own CNN per value head
+            modules, head_keys, in_dim = self._head(keys, dims, feat_key)
+            head = ValueOperator(self._mlp(in_dim, 1),
+                                 in_keys=head_keys, out_keys=[out_key])
+            return TensorDictSequential(*modules, head)
         return ValueOperator(self._mlp(sum(dims[k] for k in keys), 1),
                              in_keys=keys, out_keys=[out_key])
+
+    # -------------------------------------------------- frozen encoder
+    def encoder_module(self) -> tuple[nn.Module, int]:
+        """Rebuild the checkpointed camera actor's trunk as a frozen encoder.
+
+        Output = activations of the actor-MLP hidden layer whose width equals
+        spec.encoder.output_dim (e.g. 256 with the default (256,128,64) MLP);
+        the CNN and the MLP prefix up to that layer are loaded and frozen.
+        """
+        enc = self.spec.encoder
+        ckpt = torch.load(enc.checkpoint, map_location=self.sim().device,
+                          weights_only=False)
+        if "actor_cnn" not in ckpt:
+            raise ValueError(
+                f"{enc.checkpoint} is not a camera-policy checkpoint "
+                "(no 'actor_cnn'); train a camera experiment first")
+        cnn_cfg, mlp_cfg = ckpt["cnn_cfg"], ckpt["mlp_cfg"]
+        cnn = ConvNet(in_features=3, num_cells=list(cnn_cfg["channels"]),
+                      kernel_sizes=list(cnn_cfg["kernels"]),
+                      strides=list(cnn_cfg["strides"]),
+                      activation_class=_ACT[cnn_cfg.get("activation", "relu")],
+                      device=self.sim().device)
+        cnn.load_state_dict(ckpt["actor_cnn"])
+        flat = self._cnn_flat_dim(cnn)
+        mlp = MLP(in_features=flat, out_features=2 * 2,
+                  num_cells=list(mlp_cfg.get("hidden", (256, 128, 64))),
+                  activation_class=_ACT[mlp_cfg.get("activation", "elu")],
+                  device=self.sim().device)
+        mlp.load_state_dict(ckpt["actor_mlp"])
+        # slice the MLP after the linear+activation pair of width output_dim
+        layers, width = [], None
+        for mod in mlp:
+            layers.append(mod)
+            if isinstance(mod, nn.Linear):
+                width = mod.out_features
+            elif width == enc.output_dim:
+                break
+        else:
+            dims = [m.out_features for m in mlp if isinstance(m, nn.Linear)]
+            raise ValueError(
+                f"encoder output_dim={enc.output_dim} matches no hidden layer "
+                f"of the checkpointed actor MLP (available: {dims[:-1]})")
+        encoder = nn.Sequential(cnn, *layers).eval()
+        encoder.requires_grad_(False)
+        return encoder, enc.output_dim
+
+    def encoder_transform(self):
+        from .transforms import FrozenEncoder
+        encoder, dim = self.encoder_module()
+        return FrozenEncoder(encoder, dim, in_keys=("camera",),
+                             out_keys=(self.spec.encoder.out_key,))
 
     # -------------------------------------------------------- optimizing
     def gae(self, critic):
         ppo = self.spec.algorithm.ppo
         return GAE(gamma=ppo["gamma"], lmbda=ppo["gae_lambda"],
                    value_network=critic, device=self.sim().device)
+
+    def gae_cost(self, cost_critic):
+        """Second GAE over the cost stream (cheat-sheet: set_keys fields have
+        no _key suffix; reads ("next","cost"))."""
+        lag = self.spec.algorithm.lagrangian
+        ppo = self.spec.algorithm.ppo
+        g = GAE(gamma=ppo["gamma"], lmbda=lag.get("cost_gae_lambda", 0.95),
+                value_network=cost_critic, device=self.sim().device)
+        g.set_keys(advantage="cost_advantage", value_target="cost_value_target",
+                   value="cost_value", reward="cost")
+        return g
 
     def loss(self, actor, critic):
         ppo = self.spec.algorithm.ppo
@@ -180,6 +301,8 @@ class Builder:
             sampler=SamplerWithoutReplacement(),
             batch_size=max(1, frames // ppo["minibatches"]))
 
-    def optimizer(self, loss_module):
-        return torch.optim.Adam(loss_module.parameters(),
-                                lr=self.spec.algorithm.ppo["lr"])
+    def optimizer(self, loss_module, *extra_modules):
+        params = list(loss_module.parameters())
+        for m in extra_modules:
+            params += list(m.parameters())
+        return torch.optim.Adam(params, lr=self.spec.algorithm.ppo["lr"])

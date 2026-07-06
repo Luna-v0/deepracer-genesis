@@ -245,6 +245,11 @@ class DeepRacerEnv:
         self.laps = torch.zeros(N, device=self.device)
         self.offtrack_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
         self.flipped_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
+        self.emit_cost = bool(env_cfg.get("emit_cost", False))
+        self.cost_fn = env_cfg.get("cost_fn") or "offtrack"
+        if self.emit_cost:
+            self.cost_buf = torch.zeros(N, device=self.device)
+            self.cost_episode_sum = torch.zeros(N, device=self.device)
         self.extras = {"log": {}}
 
         self.lookahead_k = env_cfg["lookahead_k"]
@@ -259,6 +264,10 @@ class DeepRacerEnv:
             self.obs_image_buf = self.image_buf
 
         self.reward_scales = dict(env_cfg["reward_scales"])
+        if self.emit_cost:
+            # the cost stream replaces the offtrack shaping term (plan: pull
+            # offtrack/crash OUT of the reward, constrain them instead)
+            self.reward_scales.pop("off_track", None)
         self.episode_sums = {k: torch.zeros(N, device=self.device) for k in self.reward_scales}
 
         self.reset_idx(torch.arange(N, device=self.device))
@@ -310,6 +319,8 @@ class DeepRacerEnv:
             "time_out": self.time_out_buf.clone(),
             "terminal_state": self.state_buf.clone(),
         }
+        if self.emit_cost:
+            self.step_info["cost"] = self.cost_buf.clone()
 
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
@@ -419,12 +430,28 @@ class DeepRacerEnv:
     def _check_termination(self):
         off = self.lateral.abs() > (self.half_width + self.cfg["off_track_margin"])
         flipped = self.up_z < 0.3
-        self.offtrack_buf = off
         self.flipped_buf = flipped
         self.time_out_buf = self.episode_length_buf >= self.max_episode_length
-        self.reset_buf = off | flipped | self.time_out_buf
-        # terminal penalty for genuine failures (not timeouts)
-        self.rew_buf += (off | flipped).float() * self.cfg["crash_penalty"]
+        if self.emit_cost:
+            # CMDP framing: offtrack is a COST, not a termination — declare
+            # "violate at most `budget`" instead of hand-tuning a penalty.
+            # Only unrecoverable states terminate (flip, or far off the road).
+            hard_off = self.lateral.abs() > (self.half_width
+                                             + self.cfg["off_track_margin"] + 0.4)
+            self.offtrack_buf = hard_off
+            self.reset_buf = hard_off | flipped | self.time_out_buf
+            cost = off.float() + flipped.float()
+            if self.cost_fn == "offtrack_or_overspeed":
+                cost += (self.v_forward > self.cfg.get("overspeed_limit", 3.5)).float()
+            elif self.cost_fn == "crash":
+                cost = flipped.float() + hard_off.float()
+            self.cost_buf = cost
+            self.cost_episode_sum += cost
+        else:
+            self.offtrack_buf = off
+            self.reset_buf = off | flipped | self.time_out_buf
+            # terminal penalty for genuine failures (not timeouts)
+            self.rew_buf += (off | flipped).float() * self.cfg["crash_penalty"]
 
     # ------------------------------------------------------------------
     def reset_idx(self, env_ids):
@@ -456,6 +483,9 @@ class DeepRacerEnv:
             self.extras["log"][f"Episode/rew_{key}"] = sums[env_ids].mean()
             sums[env_ids] = 0.0
         self.extras["log"]["Episode/length"] = self.episode_length_buf[env_ids].float().mean()
+        if self.emit_cost:
+            self.extras["log"]["Episode/cost"] = self.cost_episode_sum[env_ids].mean()
+            self.cost_episode_sum[env_ids] = 0.0
 
         self.episode_length_buf[env_ids] = 0
         self.laps[env_ids] = 0.0
