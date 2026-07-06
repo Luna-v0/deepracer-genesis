@@ -1,5 +1,16 @@
 # DeepRacer-Genesis — Experiment Framework & Evaluation Plan
 
+> **STATUS (2026-07-06): all seven phases implemented and validated.**
+> Framework in `deepracer_genesis/experiment/` + `deepracer_genesis/algorithms/`;
+> authored experiments in `experiments/`; 51 unit tests. Full-length run:
+> feature_baseline (5M steps, 82 s, completion 0.987). Machinery-validated
+> short runs: Env 1 (camera+asym+full DR), safe_feature (PPO-Lagrangian, PID
+> lambda tracking the budget at 99.8k steps/s), Env 2 SafeTransfer
+> (frozen-CNN 256-d transfer + Lagrangian). Report: `runs/report.md`.
+> Deviations & fixes are recorded in the commit log (notably: tags excluded
+> from the content hash; cost budget synced env<->algorithm; a genesis/torch
+> CUDA stream race fixed by fencing the sim step).
+
 A design + phased build plan for: (1) a composable, **config-as-code** experiment system driven by a
 `>>` builder DSL and authored as Python functions/classes, (2) running the camera / feature /
 asymmetric / Safe-RL experiments on top of TorchRL, and (3) a combination-grouped evaluation report
