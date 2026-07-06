@@ -3,11 +3,11 @@
 One class defines EVERYTHING about a run: the hyperparameters (as class
 attributes — a variant is a subclass or `MyExperiment(budget=10)`), the
 env / DR / policy pipeline (the `>>` chain), and how long to train / how
-often to evaluate. Then it runs:
+often to evaluate. Then it just runs — no command line needed:
 
-    python experiments/template.py                 # this file, directly
-    python -m deepracer_genesis.experiment MyExperiment   # or by name
-    run("MyExperiment", seed=3)                    # or from Python
+    uv run experiments/template.py                 # this file, directly
+    run(MyExperiment, seed=3)                      # or from any Python code
+    python -m deepracer_genesis.experiment MyExperiment   # CLI, if you want it
 """
 
 from deepracer_genesis.experiment import (
@@ -17,6 +17,7 @@ from deepracer_genesis.experiment import (
     AsymmetricCameraPolicy,
     CameraEnvironment,
     Experiment,
+    run,
 )
 
 
@@ -55,4 +56,5 @@ class MyExperimentNoDelay(MyExperiment):
 
 
 if __name__ == "__main__":
-    MyExperiment().run()
+    run(MyExperiment)
+    # run(MyExperimentNoDelay)        # queue variants in the same file

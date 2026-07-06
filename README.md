@@ -83,14 +83,14 @@ cache hit.
 
 ### Running experiments
 
-An experiment is one file, one class: training config as class attributes,
-the env / DR / policy pipeline as a `>>` chain. Copy
-`experiments/template.py`:
+An experiment is one file, one class — no command line needed: training
+config as class attributes, the env / DR / policy pipeline as a `>>` chain,
+`run(TheClass)` in `__main__`. Copy `experiments/template.py`:
 
 ```python
 from deepracer_genesis.experiment import (CameraEnvironment, Experiment,
                                           DomainRandomizationCamera,
-                                          AsymmetricCameraPolicy)
+                                          AsymmetricCameraPolicy, run)
 
 class MyExperiment(Experiment):
     seed = 0
@@ -106,7 +106,7 @@ class MyExperiment(Experiment):
                                           critic_keys=("camera", "state")))
 
 if __name__ == "__main__":
-    MyExperiment().run()                  # python experiments/my_experiment.py
+    run(MyExperiment)                     # uv run experiments/my_experiment.py
 ```
 
 Variants are subclasses (`class NoDR(MyExperiment): ...`) — each gets its own
