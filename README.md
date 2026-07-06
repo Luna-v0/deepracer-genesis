@@ -71,6 +71,31 @@ repo, applies the gs-madrona NVRTC fix, trains a policy, validates the camera
 pipeline, and renders the many-agents spectator video inline. Point the
 `REPO` variable in the install cell at your GitHub fork.
 
+## Experiment framework (TorchRL, config-as-code)
+
+`deepracer_genesis/experiment/` implements EXPERIMENT_PLAN.md: experiments are
+Python functions/classes composing stages with `>>` into a content-hashed
+`ExperimentSpec`; a `Builder` turns specs into TorchRL objects (Collector,
+ClipPPOLoss, GAE — PPO-Lagrangian with a PID-controlled lambda for SafeRL*
+envs); the `Trainer` writes checkpoints + an `EvalRecord` per run under
+`runs/{group}/{variant}-{seed}-{id}/`; re-running an identical config is a
+cache hit.
+
+```python
+import experiments                             # registrations fire
+from deepracer_genesis.experiment import run
+run("feature_baseline")                        # 5M steps in ~82 s (61k steps/s)
+run("cam_baseline", seed=3)                    # Env 1: camera+asym+full DR
+run("SafeTransfer", budget=10.0)               # Env 2: frozen-CNN + Lagrangian
+
+from deepracer_genesis.experiment.ablation import sweep, seeds
+for spec in seeds(sweep(run("safe_feature", build_only=True),
+                        "env.cost_budget", [10, 25, 50]), k=3):
+    run(spec)
+from deepracer_genesis.experiment.report import build_report
+build_report("runs")                           # report.md + report.csv
+```
+
 ## Usage
 
 ```bash
