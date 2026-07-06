@@ -61,11 +61,13 @@ def build(target, **overrides) -> ExperimentSpec:
     return spec
 
 
-def run(target, *, root: str = "runs", build_only: bool = False, **overrides):
-    """Build the spec and train it. `run('cam_baseline', seed=3)`."""
+def run(target, *, root: str = "runs", build_only: bool = False,
+        force: bool = False, **overrides):
+    """Build the spec and train it. `run('cam_baseline', seed=3)`;
+    `force=True` retrains even when the identity cache has a record."""
     spec = build(target, **overrides)
     if build_only:
         return spec
     from .builder import Builder      # heavy imports live behind this line
     from .trainer import Trainer
-    return Trainer(Builder(spec), root=root).fit()
+    return Trainer(Builder(spec), root=root).fit(force=force)
