@@ -47,6 +47,7 @@ def _controller(sim) -> torch.Tensor:
 def rollout_video(target, *, root: str = "runs", ckpt: Optional[str] = None,
                   track: Optional[str] = None, steps: int = 500,
                   num_envs: Optional[int] = None, out: Optional[str] = None,
+                  spectator_res: tuple = (1280, 960),
                   **overrides) -> str:
     """Record a deterministic rollout of a trained experiment.
 
@@ -79,7 +80,7 @@ def rollout_video(target, *, root: str = "runs", ckpt: Optional[str] = None,
     eval_spec.validate()
 
     b = Builder(eval_spec)
-    sim = b.sim(extra_cfg=dict(_SPECTATOR))
+    sim = b.sim(extra_cfg={"spectator": True, "spectator_res": tuple(spectator_res)})
     actor = _load_actor(b, ckpt)
     obs_transform = None
     if eval_spec.encoder.kind == "frozen_cnn":
