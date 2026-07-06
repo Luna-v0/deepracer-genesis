@@ -299,13 +299,8 @@ class DeepRacerEnv:
             self.cfg["max_speed"] - self.cfg["min_speed"])
         wheel_omega = (speed / self.wheel_radius).repeat(1, 4)
 
-        # keep the control tensors alive for the whole step: genesis kernels
-        # read them on their own CUDA stream, and torch's stream-ordered
-        # allocator (cuMemFreeAsync) would otherwise recycle these temporaries
-        # while the kernels still run -> sporadic CUDA_ERROR_ILLEGAL_ADDRESS
-        self._ctrl_hold = (steer.repeat(1, 2), wheel_omega)
-        self.car.control_dofs_position(self._ctrl_hold[0], self.steer_dofs)
-        self.car.control_dofs_velocity(self._ctrl_hold[1], self.wheel_dofs)
+        self.car.control_dofs_position(steer.repeat(1, 2), self.steer_dofs)
+        self.car.control_dofs_velocity(wheel_omega, self.wheel_dofs)
         for _ in range(self.cfg["decimation"]):
             self.scene.step()
 
@@ -334,6 +329,13 @@ class DeepRacerEnv:
 
         self.last_actions[:] = self.actions
         self.extras["time_outs"] = self.time_out_buf
+        # fence the genesis<->torch stream boundary: quadrants kernels run on
+        # their own CUDA stream and consume torch tensors (controls, reset
+        # poses, DR draws) that torch's stream-ordered allocator may otherwise
+        # recycle while still in flight -> sporadic CUDA_ERROR_ILLEGAL_ADDRESS
+        # in long runs. One device sync per control step bounds the race.
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
         return self.get_observations(), self.rew_buf, self.reset_buf, self.extras
 
     # ------------------------------------------------------------------
@@ -498,6 +500,10 @@ class DeepRacerEnv:
         self.last_actions[env_ids] = 0.0
         # progress buffer refreshed on next _post_physics via env_ids d_progress zeroing
         self.progress_m[env_ids] = self.track.localize(pos_xy, envs_idx=env_ids)["progress_m"]
+        # same stream fence as step(): reset poses/DR draws are torch
+        # temporaries consumed by genesis kernels (see step() comment)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
 
     # ------------------------------------------------------------------
     def get_observations(self):
