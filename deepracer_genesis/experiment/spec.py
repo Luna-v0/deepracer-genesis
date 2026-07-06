@@ -94,8 +94,12 @@ class ExperimentSpec:
         return json.loads(json.dumps(asdict(self)))
 
     def id(self) -> str:
-        payload = json.dumps(self.to_dict(), sort_keys=True).encode()
-        return hashlib.sha1(payload).hexdigest()[:12]
+        # sha1, NOT built-in hash(): identity must be stable across processes.
+        # ablation_group/variant are bookkeeping tags, not configuration —
+        # the same training config keeps one id however it is tagged.
+        payload = {k: v for k, v in self.to_dict().items()
+                   if k not in ("ablation_group", "variant")}
+        return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
     def run_dir(self, root: str = "runs") -> str:
         group = self.ablation_group or "default"

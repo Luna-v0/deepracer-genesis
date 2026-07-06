@@ -252,6 +252,17 @@ class DeepRacerEnv:
         self._compute_reward()
         self._check_termination()
 
+        # pre-reset snapshot: reset_idx destroys these for done rows, but
+        # wrappers/evaluators need the values of the step that just happened
+        self.step_info = {
+            "progress_delta": self.d_progress.clone(),
+            "laps": self.laps.clone(),
+            "offtrack": self.offtrack_buf.clone(),
+            "flipped": self.flipped_buf.clone(),
+            "time_out": self.time_out_buf.clone(),
+            "terminal_state": self.state_buf.clone(),
+        }
+
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
             self.reset_idx(env_ids)

@@ -99,9 +99,9 @@ def test_id_stable_and_config_sensitive():
     b = env1_pipeline().build(seed=0)
     assert a == b and a.id() == b.id()
     c = env1_pipeline().build(seed=1)
-    assert c.id() != a.id()
-    d = env1_pipeline().build(seed=0, variant="v2")
-    assert d.id() != a.id()
+    assert c.id() != a.id()                     # seed IS configuration
+    d = env1_pipeline().build(seed=0, total_env_steps=1)
+    assert d.id() != a.id()                     # any config field changes id
 
 
 def test_to_dict_json_serializable_and_run_dir():
@@ -209,6 +209,32 @@ def test_registry_and_run_dispatcher():
 
     with pytest.raises(SpecError, match="unknown experiment"):
         run("does_not_exist", build_only=True)
+
+
+def test_experiment_class_overrides_via_run():
+    import experiments  # noqa: F401
+
+    st = run("SafeTransfer", build_only=True, budget=10.0, seed=2)
+    assert st.algorithm.lagrangian["budget"] == 10.0
+    assert st.seed == 2
+    with pytest.raises(SpecError, match="unknown override"):
+        run("cam_baseline", build_only=True, nonexistent_field=1)
+
+
+def test_id_ignores_bookkeeping_tags_and_is_cross_process_stable():
+    import subprocess
+    import sys
+
+    a = env1_pipeline().build(seed=0, ablation_group="g1", variant="v1")
+    b = env1_pipeline().build(seed=0, ablation_group="g2", variant="v2")
+    assert a.id() == b.id()                     # tags are not configuration
+    assert a.run_dir() != b.run_dir()           # but runs land separately
+
+    code = ("import experiments; from deepracer_genesis.experiment import run; "
+            "print(run('cam_baseline', build_only=True).id())")
+    out = [subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True).stdout.strip() for _ in range(2)]
+    assert out[0] == out[1] and len(out[0]) == 12   # sha1, not salted hash()
 
 
 def test_run_accepts_spec_and_pipeline():

@@ -7,7 +7,7 @@ happen only past build_only.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 
 from .registry import REGISTRY, Experiment
 from .spec import ExperimentSpec, SpecError
@@ -15,7 +15,12 @@ from .stages import Pipeline
 
 
 def build(target, **overrides) -> ExperimentSpec:
-    """Resolve any experiment handle into a validated ExperimentSpec."""
+    """Resolve any experiment handle into a validated ExperimentSpec.
+
+    Overrides route by name: keys matching the Experiment class's config
+    attributes go to the class (`run("SafeTransfer", budget=10.0)`); the rest
+    must be ExperimentSpec fields (`seed`, `variant`, ...).
+    """
     if isinstance(target, str):
         try:
             target = REGISTRY[target]
@@ -24,8 +29,12 @@ def build(target, **overrides) -> ExperimentSpec:
                 f"unknown experiment {target!r}; registered: {sorted(REGISTRY)} "
                 "(did you import your experiments package?)") from None
     if isinstance(target, type) and issubclass(target, Experiment):
-        target = target()
+        cls_kw = {k: overrides.pop(k) for k in list(overrides) if hasattr(target, k)}
+        target = target(**cls_kw)
     if isinstance(target, Experiment):
+        for k in list(overrides):
+            if hasattr(type(target), k):
+                setattr(target, k, overrides.pop(k))
         spec = target.spec()
     elif isinstance(target, Pipeline):
         spec = target.build()
@@ -41,7 +50,13 @@ def build(target, **overrides) -> ExperimentSpec:
             f"experiment handle produced {type(spec).__name__}, expected ExperimentSpec "
             "(did the function forget .build()?)")
     if overrides:
-        spec = replace(spec, **overrides)
+        try:
+            spec = replace(spec, **overrides)
+        except TypeError:
+            valid = sorted(f.name for f in fields(ExperimentSpec))
+            raise SpecError(
+                f"unknown override(s) {sorted(overrides)} for this experiment; "
+                f"ExperimentSpec fields are {valid}") from None
     spec.validate()
     return spec
 
