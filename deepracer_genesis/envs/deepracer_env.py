@@ -195,6 +195,8 @@ class DeepRacerEnv:
         self.last_actions = torch.zeros(N, 2, device=self.device)
         self.progress_m = torch.zeros(N, device=self.device)
         self.laps = torch.zeros(N, device=self.device)
+        self.offtrack_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
+        self.flipped_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
         self.extras = {"log": {}}
 
         self.lookahead_k = env_cfg["lookahead_k"]
@@ -288,6 +290,8 @@ class DeepRacerEnv:
         self.d_progress = torch.where(d > 0.5 * L, d - L, torch.where(d < -0.5 * L, d + L, d))
         if env_ids is not None and len(env_ids) > 0:
             self.d_progress[env_ids] = 0.0
+        # forward wrap through the finish line = one lap completed
+        self.laps += ((d < -0.5 * L) & (self.d_progress > 0)).float()
         self.progress_m = new_progress
 
         # ---- state obs ----
@@ -353,6 +357,8 @@ class DeepRacerEnv:
     def _check_termination(self):
         off = self.lateral.abs() > (self.half_width + self.cfg["off_track_margin"])
         flipped = self.up_z < 0.3
+        self.offtrack_buf = off
+        self.flipped_buf = flipped
         self.time_out_buf = self.episode_length_buf >= self.max_episode_length
         self.reset_buf = off | flipped | self.time_out_buf
         # terminal penalty for genuine failures (not timeouts)
@@ -390,6 +396,7 @@ class DeepRacerEnv:
         self.extras["log"]["Episode/length"] = self.episode_length_buf[env_ids].float().mean()
 
         self.episode_length_buf[env_ids] = 0
+        self.laps[env_ids] = 0.0
         self.actions[env_ids] = 0.0
         self.last_actions[env_ids] = 0.0
         # progress buffer refreshed on next _post_physics via env_ids d_progress zeroing
