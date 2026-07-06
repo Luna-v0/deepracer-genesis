@@ -19,6 +19,7 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False, topdown=Fa
         "wheel_max_torque": 3.0,
         # spawn / termination
         "random_start": True,
+        "random_direction": False,     # coin-flip CW/CCW driving direction per episode
         "spawn_lateral_noise": 0.15,
         "spawn_yaw_noise": 0.3,
         "spawn_height": 0.03,

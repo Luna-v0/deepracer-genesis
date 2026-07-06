@@ -243,6 +243,10 @@ class DeepRacerEnv:
         self.last_actions = torch.zeros(N, 2, device=self.device)
         self.progress_m = torch.zeros(N, device=self.device)
         self.laps = torch.zeros(N, device=self.device)
+        # per-env driving direction: +1 follows waypoint order (counter-
+        # clockwise on re:Invent tracks), -1 drives the track reversed.
+        # Resampled per episode when cfg["random_direction"] is set.
+        self.dir_sign = torch.ones(N, device=self.device)
         self.offtrack_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
         self.flipped_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
         self.emit_cost = bool(env_cfg.get("emit_cost", False))
@@ -360,19 +364,27 @@ class DeepRacerEnv:
         self.wp_idx = loc["wp_idx"]
         self.lateral = loc["lateral"]
         self.half_width = loc["half_width"]
-        self.heading_err = _wrap(self.yaw - loc["track_yaw"])
+        # all track-frame quantities are expressed in the env's own driving
+        # direction (dir_sign): a reversed car aligned with the reversed
+        # tangent has heading_err 0 and accumulates positive progress
+        rev = (self.dir_sign < 0).float()
+        self.heading_err = _wrap(self.yaw - loc["track_yaw"] - rev * math.pi)
         new_progress = loc["progress_m"]
         d = new_progress - self.progress_m
         L = self.track.total_len_env
-        self.d_progress = torch.where(d > 0.5 * L, d - L, torch.where(d < -0.5 * L, d + L, d))
+        wrapped = torch.where(d > 0.5 * L, d - L, torch.where(d < -0.5 * L, d + L, d))
+        self.d_progress = wrapped * self.dir_sign
         if env_ids is not None and len(env_ids) > 0:
             self.d_progress[env_ids] = 0.0
-        # forward wrap through the finish line = one lap completed
-        self.laps += ((d < -0.5 * L) & (self.d_progress > 0)).float()
+        # wrap through the finish line while moving in the env's own forward
+        # direction = one lap completed (either driving direction)
+        self.laps += ((d.abs() > 0.5 * L) & (self.d_progress > 0)).float()
         self.progress_m = new_progress
 
         # ---- state obs ----
-        la_idx = self.track.lookahead(self.wp_idx, self.lookahead_k, self.cfg["lookahead_stride"])
+        la_idx = self.track.lookahead(self.wp_idx, self.lookahead_k,
+                                      self.cfg["lookahead_stride"],
+                                      dir_sign=self.dir_sign)
         la_pts = self.track.lookahead_points(la_idx)             # (N, K, 2)
         rel = la_pts - pos[:, None, :2]
         rel_x = rel[..., 0] * cy[:, None] + rel[..., 1] * sy[:, None]
@@ -383,7 +395,10 @@ class DeepRacerEnv:
                 (self.v_forward / self.cfg["max_speed"]).unsqueeze(1),
                 self.v_lateral.unsqueeze(1),
                 (self.yaw_rate / 5.0).unsqueeze(1),
-                (self.lateral / self.half_width.clamp(min=0.1)).unsqueeze(1),
+                # signed offset in the car's own left/right (flips when
+                # driving the track reversed)
+                (self.lateral * self.dir_sign
+                 / self.half_width.clamp(min=0.1)).unsqueeze(1),
                 torch.sin(self.heading_err).unsqueeze(1),
                 torch.cos(self.heading_err).unsqueeze(1),
                 self.actions,
@@ -468,6 +483,12 @@ class DeepRacerEnv:
         pos_xy, yaw = self.track.spawn_pose(
             env_ids, self.cfg["random_start"],
             lateral_noise=self.cfg["spawn_lateral_noise"], yaw_noise=self.cfg["spawn_yaw_noise"])
+        if self.cfg.get("random_direction", False):
+            # coin-flip the driving direction each episode; the spawn faces
+            # the chosen direction and all track-frame quantities follow it
+            flip = torch.rand(n, device=self.device) < 0.5
+            self.dir_sign[env_ids] = torch.where(flip, -1.0, 1.0)
+            yaw = yaw + flip.float() * math.pi
 
         qpos = torch.zeros(n, 13, device=self.device)
         qpos[:, 0:2] = pos_xy

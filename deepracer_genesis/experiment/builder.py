@@ -72,6 +72,7 @@ class Builder:
         cfg["camera_fov"] = env.fov
         cfg["lookahead_k"] = env.lookahead_k
         cfg["random_start"] = env.random_start
+        cfg["random_direction"] = env.random_direction
         if env.render == "nyx":
             cfg["vision_renderer"] = "nyx"
         if randomize:

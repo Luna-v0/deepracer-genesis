@@ -108,6 +108,7 @@ class FeatureEnvironment(Stage):
     tracks: tuple[str, ...] = ("reinvent_base",)   # >1 => heterogeneous per-env
     num_envs: int = 512
     random_start: bool = True
+    random_direction: bool = False     # coin-flip CW/CCW per episode
 
     KIND = "environment"
 
@@ -117,6 +118,7 @@ class FeatureEnvironment(Stage):
             features=tuple(self.features), lookahead_k=self.lookahead_k,
             tracks=tuple(self.tracks), num_envs=self.num_envs,
             random_start=self.random_start,
+            random_direction=self.random_direction,
         ))
 
 
@@ -132,6 +134,7 @@ class CameraEnvironment(Stage):
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 128
     random_start: bool = True
+    random_direction: bool = False     # coin-flip CW/CCW per episode
 
     KIND = "environment"
 
@@ -141,6 +144,7 @@ class CameraEnvironment(Stage):
             resolution=tuple(self.resolution), fov=self.fov,
             lookahead_k=self.lookahead_k, tracks=tuple(self.tracks),
             num_envs=self.num_envs, random_start=self.random_start,
+            random_direction=self.random_direction,
         ))
 
 

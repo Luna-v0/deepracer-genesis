@@ -38,6 +38,9 @@ class EnvSpec:
     # lateral/yaw noise; laps are measured by cumulative progress from the
     # spawn, so a "completed lap" ends back at that same random location
     random_start: bool = True
+    # coin-flip the driving direction (CW vs CCW) each episode; heading /
+    # progress / lookahead observations follow the chosen direction
+    random_direction: bool = False
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None

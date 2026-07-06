@@ -177,9 +177,15 @@ class MultiTrack:
             "track_yaw": self.track_yaw[ev, wp_idx],
         }
 
-    def lookahead(self, wp_idx, k, stride=2):
+    def lookahead(self, wp_idx, k, stride=2, dir_sign=None):
+        """Indices of the k upcoming waypoints per env, (N, k). `dir_sign`
+        (N,) of +/-1 walks the waypoint order reversed for envs driving the
+        track in the opposite direction."""
         offs = torch.arange(1, k + 1, device=self.device) * stride
-        return torch.remainder(wp_idx[:, None] + offs[None, :], self.n_wps_env[:, None])
+        offs = offs[None, :]
+        if dir_sign is not None:
+            offs = offs * dir_sign[:, None].long()
+        return torch.remainder(wp_idx[:, None] + offs, self.n_wps_env[:, None])
 
     def lookahead_points(self, la_idx):
         ev = self._ev[:, None].expand_as(la_idx)

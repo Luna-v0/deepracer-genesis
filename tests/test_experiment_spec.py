@@ -254,3 +254,14 @@ def test_build_rejects_forgotten_build():
 def test_default_spec_invalid_without_stages():
     with pytest.raises(SpecError):
         ExperimentSpec().validate()
+
+
+def test_random_direction_routes_to_env_spec_and_changes_id():
+    from deepracer_genesis.experiment import FeatureEnvironment, VectorPolicy
+
+    base = (FeatureEnvironment(num_envs=8) >> VectorPolicy()).build()
+    both = (FeatureEnvironment(num_envs=8, random_direction=True)
+            >> VectorPolicy()).build()
+    assert base.env.random_direction is False
+    assert both.env.random_direction is True
+    assert base.id() != both.id()       # driving direction is configuration

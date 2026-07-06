@@ -38,7 +38,7 @@ def _load_actor(builder, ckpt_path: str):
 def _controller(sim) -> torch.Tensor:
     """Privileged P-controller on the centerline (scripted driving for
     previews — no trained policy needed)."""
-    lat = sim.lateral / sim.half_width.clamp(min=0.1)
+    lat = sim.lateral * sim.dir_sign / sim.half_width.clamp(min=0.1)
     steer = (-(1.1 * lat + 0.9 * torch.sin(sim.heading_err))).clamp(-1, 1)
     speed = torch.full_like(steer, -0.3)          # ~1.5 m/s
     return torch.stack([steer, speed], dim=1)

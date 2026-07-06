@@ -143,7 +143,10 @@ own geometry (`cam_multitrack` trains on three tracks simultaneously).
 
 Spawns are randomized (`random_start=True`, plus lateral/yaw noise under DR);
 a lap is measured as cumulative progress from the spawn point, so the finish
-line of a lap is exactly the (random) start location.
+line of a lap is exactly the (random) start location. Adding
+`random_direction=True` to an env stage also coin-flips the driving direction
+(clockwise vs counter-clockwise) each episode — heading, progress and
+lookahead observations all follow the chosen direction.
 
 ### Visual verification & data collection
 
