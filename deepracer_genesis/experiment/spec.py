@@ -51,6 +51,9 @@ class ObsDRSpec:
     image_aug: dict = field(default_factory=dict)
     camera_jitter: dict = field(default_factory=dict)
     physics: dict = field(default_factory=dict)   # applied env-side at reset
+    # scene-level: N baked track texture/color variants as heterogeneous
+    # morphs, one per env (see randomization/appearance.py)
+    appearance: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -187,6 +190,13 @@ class ExperimentSpec:
                                 "policy (VectorPolicy/AsymmetricVectorPolicy)")
 
         # --- obs DR coherence ---
+        if self.obs_dr.appearance:
+            if env.modality != "camera" or env.render != "madrona":
+                raise SpecError("appearance DR needs a Madrona camera env "
+                                "(baked variants render as heterogeneous morphs)")
+            if len(env.tracks) > 1:
+                raise SpecError("appearance DR cannot combine with "
+                                "heterogeneous multi-track training")
         if (self.obs_dr.image_aug or self.obs_dr.camera_jitter) and env.modality != "camera":
             raise SpecError("DomainRandomizationCamera requires a camera env")
 

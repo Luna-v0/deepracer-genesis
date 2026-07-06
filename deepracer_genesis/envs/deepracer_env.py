@@ -77,14 +77,36 @@ class DeepRacerEnv:
             renderer=renderer,
             show_viewer=show_viewer,
         )
+        # appearance DR (scene-level): bake N visual variants of the track
+        # (tinted/swapped textures) + N field colors, loaded as heterogeneous
+        # morphs — each env renders its own variant for the whole run
+        appearance = env_cfg.get("appearance") or {}
+        n_appear = int(appearance.get("variants", 0))
+        if n_appear > 1 and len(self.track.tracks) > 1:
+            raise NotImplementedError(
+                "appearance variants + heterogeneous multi-track cannot be "
+                "combined (env->morph assignment would diverge between them)")
+
         # green ground doubles as the field: some DAE ground materials render
         # transparent under Madrona, and this is what shows through. Must be a
         # surface color — Madrona does not sample ImageTexture on primitives.
         fc = env_cfg.get("field_color", (0.30, 0.48, 0.32))
-        self.plane = self.scene.add_entity(
-            gs.morphs.Plane(pos=(0, 0, -0.001)),
-            surface=gs.surfaces.Rough(color=(*fc, 1.0)),
-        )
+        if n_appear > 1 and appearance.get("randomize_field_color", True):
+            from ..randomization.appearance import generate_field_planes
+            field_objs = generate_field_planes(
+                n_appear, seed=int(appearance.get("seed", 0)), base_color=fc,
+                tint=tuple(appearance.get("field_tint", (0.5, 1.5))))
+            self.plane = self.scene.add_entity(
+                [gs.morphs.Mesh(file=p, pos=(0, 0, -0.001), fixed=True,
+                                collision=False) for p in field_objs])
+            # the quads replace the (infinite) collision plane visually only —
+            # keep an invisible physical ground underneath
+            self.scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.002)))
+        else:
+            self.plane = self.scene.add_entity(
+                gs.morphs.Plane(pos=(0, 0, -0.001)),
+                surface=gs.surfaces.Rough(color=(*fc, 1.0)),
+            )
         # optional workaround knob for gs-madrona texture channel quirks (the
         # alpha-cutout centerline texture renders R<->G swapped; opaque
         # textures render correctly, so this stays off by default)
@@ -100,10 +122,25 @@ class DeepRacerEnv:
         )
         # Nyx cannot read DAE; use the OBJ conversions (same geometry/textures)
         mesh_paths = self.track.obj_paths if self.nyx_vision else self.track.mesh_paths
+        if n_appear > 1:
+            if self.nyx_vision:
+                raise NotImplementedError(
+                    "appearance variants need heterogeneous morphs (Madrona only)")
+            from ..randomization.appearance import generate_track_variants
+            mesh_paths = generate_track_variants(
+                mesh_paths[0], n_appear, seed=int(appearance.get("seed", 0)),
+                tint=tuple(appearance.get("tint", (0.6, 1.4))),
+                line_tint=tuple(appearance.get("line_tint", (0.9, 1.1))),
+                swap_road_materials=bool(appearance.get("swap_road_materials", True)))
         if self.nyx_vision and len(mesh_paths) > 1:
             raise NotImplementedError("heterogeneous tracks are not supported with the Nyx renderer")
-        track_morphs = [gs.morphs.Mesh(file=p, fixed=True, collision=False)
-                        for p in mesh_paths]
+        # per-variant epsilon scale: appearance variants share identical
+        # geometry, which collapses to one render asset somewhere in the
+        # batch pipeline (verified: per-env textures then all show variant 0);
+        # a micrometer-scale size difference keeps every variant distinct
+        track_morphs = [gs.morphs.Mesh(file=p, fixed=True, collision=False,
+                                       scale=1.0 + 1e-6 * i)
+                        for i, p in enumerate(mesh_paths)]
         # a list of morphs makes the entity heterogeneous: each parallel env
         # simulates (and renders) one geometry variant
         self.track_entity = self.scene.add_entity(

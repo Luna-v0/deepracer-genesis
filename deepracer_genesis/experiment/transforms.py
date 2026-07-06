@@ -30,7 +30,7 @@ class ImageAug(Transform):
 
     All parameters resample every call (i.e. every env step), independently
     per sub-env. Config keys: brightness=(lo,hi) contrast=(lo,hi) hue=max_frac
-    blur=max_sigma cutout=prob noise=sigma.
+    saturation=(lo,hi) blur=max_sigma cutout=prob noise=sigma.
     """
 
     def __init__(self, aug: dict, in_keys=("camera",), out_keys=None):
@@ -53,6 +53,9 @@ class ImageAug(Transform):
         if "contrast" in a:
             mean = x.mean(dim=(-3, -2, -1), keepdim=True)
             x = (x - mean) * self._u(*a["contrast"], n, dev) + mean
+        if "saturation" in a:
+            gray = x.mean(dim=-3, keepdim=True)
+            x = gray + (x - gray) * self._u(*a["saturation"], n, dev)
         if a.get("hue"):
             theta = (torch.rand(n, device=dev) * 2 - 1) * a["hue"] * 2 * math.pi
             cos, sin = torch.cos(theta), torch.sin(theta)

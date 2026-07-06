@@ -265,3 +265,29 @@ def test_random_direction_routes_to_env_spec_and_changes_id():
     assert base.env.random_direction is False
     assert both.env.random_direction is True
     assert base.id() != both.id()       # driving direction is configuration
+
+
+def test_appearance_dr_routes_and_validates():
+    from deepracer_genesis.experiment import (AsymmetricCameraPolicy,
+                                              CameraEnvironment,
+                                              DomainRandomizationTrackAppearance,
+                                              FeatureEnvironment, VectorPolicy)
+
+    spec = (CameraEnvironment(num_envs=8)
+            >> DomainRandomizationTrackAppearance(variants=4, seed=7)
+            >> AsymmetricCameraPolicy(actor_keys=("camera",),
+                                      critic_keys=("camera", "state"))).build()
+    assert spec.obs_dr.appearance["variants"] == 4
+    assert spec.obs_dr.appearance["seed"] == 7
+
+    with pytest.raises(SpecError, match="appearance"):     # feature env: no render
+        (FeatureEnvironment(num_envs=8)
+         >> DomainRandomizationTrackAppearance()
+         >> VectorPolicy()).build()
+
+    with pytest.raises(SpecError, match="multi-track"):
+        (CameraEnvironment(num_envs=8, tracks=("reinvent_base",
+                                               "reInvent2019_track"))
+         >> DomainRandomizationTrackAppearance()
+         >> AsymmetricCameraPolicy(actor_keys=("camera",),
+                                   critic_keys=("camera", "state"))).build()

@@ -40,10 +40,23 @@ def test_seeds_fan_out():
 
 
 def test_grid_drops_invalid_combos():
+    # cam_baseline carries appearance DR (Madrona + single track only), so
+    # every combo except madrona x single-track is dropped
     base = run("cam_baseline", build_only=True)
     g = grid(base, {"env.render": ["madrona", "nyx"],
                     "env.tracks": [("reinvent_base",),
                                    ("reinvent_base", "reInvent2019_track")]})
+    assert len(g) == 1
+    assert g[0].env.render == "madrona" and len(g[0].env.tracks) == 1
+
+    # without appearance DR, only nyx x heterogeneous is invalid
+    import dataclasses
+    from deepracer_genesis.experiment import ObsDRSpec
+    plain = dataclasses.replace(base, obs_dr=dataclasses.replace(
+        base.obs_dr, appearance={}))
+    g = grid(plain, {"env.render": ["madrona", "nyx"],
+                     "env.tracks": [("reinvent_base",),
+                                    ("reinvent_base", "reInvent2019_track")]})
     variants = {s.variant for s in g}
     assert len(g) == 3                               # nyx x hetero dropped
     assert not any("nyx" in v and "reInvent2019" in v for v in variants)

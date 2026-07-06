@@ -148,6 +148,33 @@ line of a lap is exactly the (random) start location. Adding
 (clockwise vs counter-clockwise) each episode — heading, progress and
 lookahead observations all follow the chosen direction.
 
+### Domain randomization axes
+
+- **Scene appearance (colors/textures)** — `DomainRandomizationTrackAppearance(variants=16)`:
+  bakes N visual variants of the track (random RGB tints; road surface swapped
+  for the shipped brick/carpet/concrete/grass materials; per-variant field
+  color) and loads them as heterogeneous morphs — each parallel env trains in
+  its own world, so every batch spans the appearance distribution. Variants are
+  fixed per env for the run (Genesis compiles the scene once). Madrona +
+  single-track only. Throughput on a 4060 Ti @128 camera envs: 15.6k steps/s
+  plain → 12.9k with 8 variants → 10.8k with 16.
+- **Image-space** (per step) — `DomainRandomizationCamera`: brightness, contrast,
+  saturation, hue, blur, cutout, pixel noise + camera mount jitter.
+- **Physics** (per episode) — `DomainRandomizationPhysics`: friction, mass/CoM,
+  steering/wheel gains, armature.
+- **Actions** — `DomainRandomizationActions`: steer/speed noise, action delay.
+- **Spawn** — random start waypoint + lateral/yaw noise (`random_start`),
+  random driving direction (`random_direction`).
+
+### Hyperparameter optimization
+
+`experiments/hpo_optuna.py` is a working single-GPU Optuna study: each trial
+trains in a fresh subprocess (Genesis builds one scene per process), the
+trainer's periodic deterministic evals (`eval_every_steps`) stream back as the
+optimization signal, and Hyperband prunes bad trials mid-training. The study
+is resumable (`sqlite:///runs/hpo/study.db`), and the content-hash identity
+cache makes duplicate configs free.
+
 ### Visual verification & data collection
 
 ```python
@@ -155,6 +182,7 @@ from deepracer_genesis.experiment.visualize import rollout_video, dr_preview_vid
 rollout_video("feature_baseline")                       # bird's-eye mp4, trained policy
 rollout_video("feature_baseline", track="reInvent2019_track")   # same policy, new track
 dr_preview_video("cam_baseline")                        # raw|augmented onboard + random-spawn view
+# cam_baseline includes appearance DR: the preview shows each car in its own world
 
 from deepracer_genesis.experiment.data_collection import collect_camera_dataset
 collect_camera_dataset(track="reinvent_base", out="data/reinvent")  # .npz shards:

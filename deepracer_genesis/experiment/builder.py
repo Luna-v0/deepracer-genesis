@@ -81,6 +81,8 @@ class Builder:
             rand["camera_pitch_jitter_deg"] = obs_dr.camera_jitter.get("pitch_deg", 0.0)
             rand["camera_pos_jitter_m"] = obs_dr.camera_jitter.get("pos_m", 0.0)
             cfg["rand"] = rand
+        if obs_dr.appearance:
+            cfg["appearance"] = dict(obs_dr.appearance)
         if env.emits_cost:
             cfg["emit_cost"] = True
             cfg["cost_fn"] = env.cost_fn
