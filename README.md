@@ -49,7 +49,8 @@ benchmarks/throughput.py    # sweep -> results.csv + results.md (final table)
 
 ```bash
 uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install torch genesis-world rsl-rl-lib tensorboard pillow
+uv sync                        # everything (torch, genesis, torchrl, ...)
+uv sync --extra tracking --extra hpo   # + mlflow, optuna
 ```
 
 Requires Linux x86-64 + NVIDIA GPU (BatchRenderer needs CUDA; genesis-world
@@ -72,10 +73,10 @@ output can't be linked by nvJitLink-12 and scene build dies with
 ## Google Colab
 
 [`notebooks/deepracer_genesis_colab.ipynb`](notebooks/deepracer_genesis_colab.ipynb)
-runs the whole pipeline on a Colab GPU runtime (T4 works): pip-installs this
-repo, applies the gs-madrona NVRTC fix, trains a policy, validates the camera
-pipeline, and renders the many-agents spectator video inline. Point the
-`REPO` variable in the install cell at your GitHub fork.
+runs the framework on a Colab GPU runtime (T4): uv-installs this repo,
+defines a single-file experiment in a cell, trains it, renders the
+many-agents spectator video inline, and saves the run directory to Google
+Drive. Point the `REPO` variable in the install cell at your fork.
 
 ## Experiment framework (TorchRL, config-as-code)
 
@@ -133,7 +134,6 @@ import experiments                             # registrations fire
 from deepracer_genesis.experiment import run
 run("feature_baseline")                        # 5M steps in ~90 s on a 4060 Ti
 run("cam_baseline", seed=3)                    # Env 1: camera+asym+full DR
-run("cam_multitrack")                          # heterogeneous: 3 tracks at once
 
 from deepracer_genesis.experiment.ablation import sweep, seeds
 for spec in seeds(sweep(run("safe_feature", build_only=True),
