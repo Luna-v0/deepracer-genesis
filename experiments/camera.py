@@ -15,9 +15,7 @@ def _cam_chain(render="madrona", num_envs=128, dr=True):
     """The Env-1 pipeline; `dr=False` strips every DR stage."""
     chain = CameraEnvironment(render=render, resolution=(160, 120), num_envs=num_envs)
     if dr:
-        if render == "madrona":
-            # scene-level color/texture DR is heterogeneous-morph based
-            chain = chain >> DomainRandomizationTrackAppearance(variants=16)
+        chain = chain >> DomainRandomizationTrackAppearance(strength=0.6)
         chain = (chain
                  >> DomainRandomizationCamera(brightness=(0.7, 1.3), hue=0.05, blur=0.3,
                                               camera_jitter=True)
@@ -55,16 +53,3 @@ def cam_plain():
     """dr_effect pairing: the no-DR baseline."""
     return _cam_chain("madrona", dr=False).build(seed=0, ablation_group="dr_effect",
                                                  variant="no_dr")
-
-
-@experiment
-def cam_multitrack():
-    """Heterogeneous training: each parallel env simulates + renders its own
-    track (Genesis balanced block assignment across the three tracks)."""
-    return (
-        CameraEnvironment(render="madrona", resolution=(160, 120), num_envs=126,
-                          tracks=("reinvent_base", "reInvent2019_track",
-                                  "2022_reinvent_champ"))
-        >> AsymmetricCameraPolicy(actor_keys=("camera",),
-                                  critic_keys=("camera", "state"))
-    ).build(seed=0, ablation_group="tracks", variant="hetero3")

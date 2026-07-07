@@ -159,14 +159,14 @@ def test_vector_policy_cannot_eat_raw_camera():
 
 
 def test_nyx_heterogeneous_rejected():
-    with pytest.raises(SpecError, match="Madrona-only"):
-        (CameraEnvironment(render="nyx",
-                           tracks=("reinvent_base", "reInvent2019_track"))
-         >> AsymmetricCameraPolicy()).build()
-    # same combination on madrona is fine
-    (CameraEnvironment(render="madrona",
-                       tracks=("reinvent_base", "reInvent2019_track"))
-     >> AsymmetricCameraPolicy()).build()
+    # heterogeneous CAMERA training is rejected for every renderer: nyx by
+    # repo constraint, madrona because genesis 1.2.1 has no per-env variant
+    # visibility on the batch-render path (all variants superimpose)
+    for render in ("nyx", "madrona"):
+        with pytest.raises(SpecError):
+            (CameraEnvironment(render=render,
+                               tracks=("reinvent_base", "reInvent2019_track"))
+             >> AsymmetricCameraPolicy()).build()
 
 
 def test_lagrangian_without_cost_env_rejected():
@@ -274,20 +274,23 @@ def test_appearance_dr_routes_and_validates():
                                               FeatureEnvironment, VectorPolicy)
 
     spec = (CameraEnvironment(num_envs=8)
-            >> DomainRandomizationTrackAppearance(variants=4, seed=7)
+            >> DomainRandomizationTrackAppearance(strength=0.4)
             >> AsymmetricCameraPolicy(actor_keys=("camera",),
                                       critic_keys=("camera", "state"))).build()
-    assert spec.obs_dr.appearance["variants"] == 4
-    assert spec.obs_dr.appearance["seed"] == 7
+    assert spec.obs_dr.appearance == {"world_color": 0.4}
 
-    with pytest.raises(SpecError, match="appearance"):     # feature env: no render
+    with pytest.raises(SpecError, match="camera"):      # feature env: no render
         (FeatureEnvironment(num_envs=8)
          >> DomainRandomizationTrackAppearance()
          >> VectorPolicy()).build()
 
+    # multi-track camera is unsound under the batch renderer (no per-env
+    # variant visibility in genesis 1.2.1); multi-track feature is fine
     with pytest.raises(SpecError, match="multi-track"):
         (CameraEnvironment(num_envs=8, tracks=("reinvent_base",
                                                "reInvent2019_track"))
-         >> DomainRandomizationTrackAppearance()
          >> AsymmetricCameraPolicy(actor_keys=("camera",),
                                    critic_keys=("camera", "state"))).build()
+    (FeatureEnvironment(num_envs=8, tracks=("reinvent_base",
+                                            "reInvent2019_track"))
+     >> VectorPolicy()).build()

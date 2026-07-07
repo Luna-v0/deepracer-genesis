@@ -176,29 +176,25 @@ class SafeRLCameraEnvironment(CameraEnvironment):
 # Observation DR stages
 @dataclass(frozen=True)
 class DomainRandomizationTrackAppearance(Stage):
-    """Scene-level color/texture DR: bake `variants` visual versions of the
-    track (per-variant RGB tints; road surface optionally swapped for the
-    shipped brick/carpet/concrete/grass materials; per-variant field color)
-    and give each parallel env one of them for the whole run — every batch
-    then spans the appearance distribution. Madrona + single track only."""
+    """World-appearance DR: every episode, every env draws its own color
+    remap (hue rotation + saturation/value scaling + channel mixing + bias)
+    applied to the rendered observation — each agent trains in a
+    differently-colored world, coherent within the episode. `strength` in
+    [0, 1] scales all ranges (1.0 = hues rotate the full circle).
 
-    variants: int = 8
-    tint: tuple[float, float] = (0.6, 1.4)          # RGB multiplier range
-    line_tint: tuple[float, float] = (0.9, 1.1)     # lane lines: milder
-    swap_road_materials: bool = True
-    randomize_field_color: bool = True
-    field_tint: tuple[float, float] = (0.5, 1.5)
-    seed: int = 0
+    Renderer-agnostic and ~free at runtime. True per-env scene TEXTURES are
+    not possible under the Madrona batch renderer today: genesis 1.2.1 never
+    passes per-env variant visibility (vgeom.active_envs_mask) to it, so
+    heterogeneous texture-variant morphs z-fight instead of dispatching
+    (randomization/appearance.py bakes such variants for rasterizer use)."""
+
+    strength: float = 0.6
 
     KIND = "obs_dr_appearance"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, obs_dr=replace(spec.obs_dr, appearance={
-            "variants": self.variants, "tint": tuple(self.tint),
-            "line_tint": tuple(self.line_tint),
-            "swap_road_materials": self.swap_road_materials,
-            "randomize_field_color": self.randomize_field_color,
-            "field_tint": tuple(self.field_tint), "seed": self.seed,
+            "world_color": float(self.strength),
         }))
 
 

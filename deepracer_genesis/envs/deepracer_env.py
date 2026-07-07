@@ -18,6 +18,14 @@ from tensordict import TensorDict
 
 import genesis as gs
 
+# RGB <-> YIQ (luma / chroma) for the world-color DR remap
+_RGB2YIQ = torch.tensor([[0.299, 0.587, 0.114],
+                         [0.596, -0.274, -0.322],
+                         [0.211, -0.523, 0.312]])
+_YIQ2RGB = torch.tensor([[1.0, 0.956, 0.621],
+                         [1.0, -0.272, -0.647],
+                         [1.0, -1.106, 1.703]])
+
 from .track import MultiTrack
 from ..randomization.domain_rand import randomize_physics, randomize_camera_mount
 
@@ -77,36 +85,24 @@ class DeepRacerEnv:
             renderer=renderer,
             show_viewer=show_viewer,
         )
-        # appearance DR (scene-level): bake N visual variants of the track
-        # (tinted/swapped textures) + N field colors, loaded as heterogeneous
-        # morphs — each env renders its own variant for the whole run
+        # world-color DR: per-env color remap of the rendered observation,
+        # resampled every episode (see reset_idx / get_observations). NOTE:
+        # scene-level texture variants via heterogeneous morphs do NOT work
+        # under the Madrona batch renderer — genesis 1.2.1 never feeds
+        # vgeom.active_envs_mask to it, so every env renders ALL variants
+        # superimposed (z-fighting picks the pixels). active_envs is only
+        # honored by the rasterizer path (vis/rasterizer_context.py).
         appearance = env_cfg.get("appearance") or {}
-        n_appear = int(appearance.get("variants", 0))
-        if n_appear > 1 and len(self.track.tracks) > 1:
-            raise NotImplementedError(
-                "appearance variants + heterogeneous multi-track cannot be "
-                "combined (env->morph assignment would diverge between them)")
+        self.world_color_s = float(appearance.get("world_color", 0.0))
 
         # green ground doubles as the field: some DAE ground materials render
         # transparent under Madrona, and this is what shows through. Must be a
         # surface color — Madrona does not sample ImageTexture on primitives.
         fc = env_cfg.get("field_color", (0.30, 0.48, 0.32))
-        if n_appear > 1 and appearance.get("randomize_field_color", True):
-            from ..randomization.appearance import generate_field_planes
-            field_objs = generate_field_planes(
-                n_appear, seed=int(appearance.get("seed", 0)), base_color=fc,
-                tint=tuple(appearance.get("field_tint", (0.5, 1.5))))
-            self.plane = self.scene.add_entity(
-                [gs.morphs.Mesh(file=p, pos=(0, 0, -0.001), fixed=True,
-                                collision=False) for p in field_objs])
-            # the quads replace the (infinite) collision plane visually only —
-            # keep an invisible physical ground underneath
-            self.scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.002)))
-        else:
-            self.plane = self.scene.add_entity(
-                gs.morphs.Plane(pos=(0, 0, -0.001)),
-                surface=gs.surfaces.Rough(color=(*fc, 1.0)),
-            )
+        self.plane = self.scene.add_entity(
+            gs.morphs.Plane(pos=(0, 0, -0.001)),
+            surface=gs.surfaces.Rough(color=(*fc, 1.0)),
+        )
         # optional workaround knob for gs-madrona texture channel quirks (the
         # alpha-cutout centerline texture renders R<->G swapped; opaque
         # textures render correctly, so this stays off by default)
@@ -122,25 +118,16 @@ class DeepRacerEnv:
         )
         # Nyx cannot read DAE; use the OBJ conversions (same geometry/textures)
         mesh_paths = self.track.obj_paths if self.nyx_vision else self.track.mesh_paths
-        if n_appear > 1:
-            if self.nyx_vision:
-                raise NotImplementedError(
-                    "appearance variants need heterogeneous morphs (Madrona only)")
-            from ..randomization.appearance import generate_track_variants
-            mesh_paths = generate_track_variants(
-                mesh_paths[0], n_appear, seed=int(appearance.get("seed", 0)),
-                tint=tuple(appearance.get("tint", (0.6, 1.4))),
-                line_tint=tuple(appearance.get("line_tint", (0.9, 1.1))),
-                swap_road_materials=bool(appearance.get("swap_road_materials", True)))
         if self.nyx_vision and len(mesh_paths) > 1:
             raise NotImplementedError("heterogeneous tracks are not supported with the Nyx renderer")
-        # per-variant epsilon scale: appearance variants share identical
-        # geometry, which collapses to one render asset somewhere in the
-        # batch pipeline (verified: per-env textures then all show variant 0);
-        # a micrometer-scale size difference keeps every variant distinct
-        track_morphs = [gs.morphs.Mesh(file=p, fixed=True, collision=False,
-                                       scale=1.0 + 1e-6 * i)
-                        for i, p in enumerate(mesh_paths)]
+        if self.vision and len(mesh_paths) > 1:
+            raise NotImplementedError(
+                "heterogeneous multi-track CAMERA training is unsound under the "
+                "batch renderer: genesis 1.2.1 never feeds vgeom.active_envs_mask "
+                "to it, so every env renders ALL track variants superimposed "
+                "(z-fighting). Feature-mode multi-track (no rendering) is fine.")
+        track_morphs = [gs.morphs.Mesh(file=p, fixed=True, collision=False)
+                        for p in mesh_paths]
         # a list of morphs makes the entity heterogeneous: each parallel env
         # simulates (and renders) one geometry variant
         self.track_entity = self.scene.add_entity(
@@ -284,6 +271,11 @@ class DeepRacerEnv:
         # clockwise on re:Invent tracks), -1 drives the track reversed.
         # Resampled per episode when cfg["random_direction"] is set.
         self.dir_sign = torch.ones(N, device=self.device)
+        if self.vision and self.world_color_s > 0:
+            # per-env, EPISODE-static color remap (resampled in reset_idx):
+            # each agent sees the same world through its own random palette
+            self.color_mat = torch.eye(3, device=self.device).repeat(N, 1, 1)
+            self.color_bias = torch.zeros(N, 1, 3, device=self.device)
         self.offtrack_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
         self.flipped_buf = torch.zeros(N, device=self.device, dtype=torch.bool)
         self.emit_cost = bool(env_cfg.get("emit_cost", False))
@@ -456,7 +448,15 @@ class DeepRacerEnv:
                 rgb = self.cam.render(rgb=True)[0]               # (N, H, W, 3) uint8 cuda
                 if self.rg_swap:
                     rgb = rgb[..., [1, 0, 2]]
-            img = rgb.permute(0, 3, 1, 2).float() / 255.0
+            imgf = rgb.float().div_(255.0)               # (N, H, W, 3) contiguous
+            if self.world_color_s > 0:
+                # color remap in native NHWC: (N, H*W, 3) is a free view here,
+                # and the tall-skinny batched GEMM is ~10x cheaper than any
+                # NCHW formulation (which pays a strided full-image copy)
+                n, h, w, c = imgf.shape
+                imgf = ((imgf.view(n, h * w, c) @ self.color_mat.transpose(1, 2)
+                         + self.color_bias).clamp_(0.0, 1.0).view(n, h, w, c))
+            img = imgf.permute(0, 3, 1, 2)
             if self.cfg.get("pixel_noise", 0.0) > 0:
                 img = (img + torch.randn_like(img) * self.cfg["pixel_noise"]).clamp(0, 1)
             self.image_buf = img
@@ -466,6 +466,32 @@ class DeepRacerEnv:
                     img, size=(ph, pw), mode="area")
             else:
                 self.obs_image_buf = img
+
+    # ------------------------------------------------------------------
+    def _resample_world_color(self, env_ids):
+        """Draw a fresh per-env color remap: hue rotation (full circle) +
+        saturation/value scaling + channel mixing + bias, strength-scaled.
+        Invertible by construction, so distinct scene features stay distinct
+        — the world looks different, the task stays readable."""
+        n = len(env_ids)
+        s = self.world_color_s
+        dev = self.device
+        theta = (torch.rand(n, device=dev) * 2 - 1) * math.pi * s
+        cos, sin = torch.cos(theta), torch.sin(theta)
+        rot = torch.zeros(n, 3, 3, device=dev)
+        rot[:, 0, 0] = 1.0
+        rot[:, 1, 1] = cos; rot[:, 1, 2] = -sin
+        rot[:, 2, 1] = sin; rot[:, 2, 2] = cos
+        sat = 1.0 + (torch.rand(n, device=dev) * 2 - 1) * 0.6 * s
+        val = 1.0 + (torch.rand(n, device=dev) * 2 - 1) * 0.35 * s
+        scale = torch.zeros(n, 3, 3, device=dev)
+        scale[:, 0, 0] = val
+        scale[:, 1, 1] = sat; scale[:, 2, 2] = sat
+        m = _YIQ2RGB.to(dev) @ scale @ rot @ _RGB2YIQ.to(dev)
+        mix = torch.randn(n, 3, 3, device=dev) * 0.08 * s
+        self.color_mat[env_ids] = m + mix
+        self.color_bias[env_ids] = ((torch.rand(n, 1, 3, device=dev) * 2 - 1)
+                                    * 0.12 * s)
 
     # ------------------------------------------------------------------
     def _compute_reward(self):
@@ -526,6 +552,9 @@ class DeepRacerEnv:
             flip = torch.rand(n, device=self.device) < 0.5
             self.dir_sign[env_ids] = torch.where(flip, -1.0, 1.0)
             yaw = yaw + flip.float() * math.pi
+
+        if self.vision and self.world_color_s > 0:
+            self._resample_world_color(env_ids)
 
         qpos = torch.zeros(n, 13, device=self.device)
         qpos[:, 0:2] = pos_xy

@@ -51,8 +51,8 @@ class ObsDRSpec:
     image_aug: dict = field(default_factory=dict)
     camera_jitter: dict = field(default_factory=dict)
     physics: dict = field(default_factory=dict)   # applied env-side at reset
-    # scene-level: N baked track texture/color variants as heterogeneous
-    # morphs, one per env (see randomization/appearance.py)
+    # per-env, per-episode color remap of the rendered observation
+    # ({"world_color": strength}); see DomainRandomizationTrackAppearance
     appearance: dict = field(default_factory=dict)
 
 
@@ -190,13 +190,15 @@ class ExperimentSpec:
                                 "policy (VectorPolicy/AsymmetricVectorPolicy)")
 
         # --- obs DR coherence ---
-        if self.obs_dr.appearance:
-            if env.modality != "camera" or env.render != "madrona":
-                raise SpecError("appearance DR needs a Madrona camera env "
-                                "(baked variants render as heterogeneous morphs)")
-            if len(env.tracks) > 1:
-                raise SpecError("appearance DR cannot combine with "
-                                "heterogeneous multi-track training")
+        if self.obs_dr.appearance and env.modality != "camera":
+            raise SpecError("appearance DR recolors the rendered observation; "
+                            "it needs a camera env")
+        if env.modality == "camera" and len(env.tracks) > 1:
+            raise SpecError(
+                "multi-track camera training is unsound under the batch "
+                "renderer (per-env variant visibility is not implemented in "
+                "genesis 1.2.1 — all tracks render superimposed); "
+                "multi-track works for feature envs")
         if (self.obs_dr.image_aug or self.obs_dr.camera_jitter) and env.modality != "camera":
             raise SpecError("DomainRandomizationCamera requires a camera env")
 

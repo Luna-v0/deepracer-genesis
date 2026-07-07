@@ -137,9 +137,11 @@ from deepracer_genesis.experiment.report import build_report
 build_report("runs")                           # report.md + report.csv
 ```
 
-Multi-track training: pass `tracks=(...)` to any env stage — Genesis builds a
-heterogeneous morph per track and each parallel env simulates + renders its
-own geometry (`cam_multitrack` trains on three tracks simultaneously).
+Multi-track training: pass `tracks=(...)` to a feature env stage — Genesis
+builds a heterogeneous morph per track and each parallel env simulates its
+own geometry. (Camera multi-track is rejected: the batch renderer has no
+per-env variant visibility in genesis 1.2.1, so all tracks would render
+superimposed.)
 
 Spawns are randomized (`random_start=True`, plus lateral/yaw noise under DR);
 a lap is measured as cumulative progress from the spawn point, so the finish
@@ -150,14 +152,18 @@ lookahead observations all follow the chosen direction.
 
 ### Domain randomization axes
 
-- **Scene appearance (colors/textures)** — `DomainRandomizationTrackAppearance(variants=16)`:
-  bakes N visual variants of the track (random RGB tints; road surface swapped
-  for the shipped brick/carpet/concrete/grass materials; per-variant field
-  color) and loads them as heterogeneous morphs — each parallel env trains in
-  its own world, so every batch spans the appearance distribution. Variants are
-  fixed per env for the run (Genesis compiles the scene once). Madrona +
-  single-track only. Throughput on a 4060 Ti @128 camera envs: 15.6k steps/s
-  plain → 12.9k with 8 variants → 10.8k with 16.
+- **World appearance (colors)** — `DomainRandomizationTrackAppearance(strength=0.6)`:
+  every episode, every env draws its own color remap (hue rotation +
+  saturation/value scaling + channel mixing + bias) applied to the rendered
+  observation — each agent trains in a differently-colored world, coherent
+  within the episode, resampled at every reset. Renderer-agnostic.
+  Cost @128 camera envs on a 4060 Ti: 16k -> 12k steps/s.
+  True per-env scene *textures* are blocked today: genesis 1.2.1 never passes
+  per-env variant visibility (`vgeom.active_envs_mask`) to the Madrona batch
+  renderer, so heterogeneous texture-variant morphs z-fight instead of
+  dispatching (`randomization/appearance.py` can still bake texture variants
+  for rasterizer-based use). For the same reason, multi-track training with a
+  CAMERA is rejected by validation — multi-track feature-mode is fine.
 - **Image-space** (per step) — `DomainRandomizationCamera`: brightness, contrast,
   saturation, hue, blur, cutout, pixel noise + camera mount jitter.
 - **Physics** (per episode) — `DomainRandomizationPhysics`: friction, mass/CoM,

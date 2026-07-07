@@ -1,12 +1,14 @@
-"""Scene-level appearance randomization: per-env track colors and textures.
+"""Baked track texture variants (rasterizer use only — see WARNING).
 
-Genesis compiles the scene once, so appearance cannot be resampled per
-episode. Instead this module bakes N *visual variants* of a track (same
-geometry, different textures/colors) and the env loads them as one
-heterogeneous entity — each parallel env renders its own variant, so every
-training batch contains the full appearance distribution. This is the same
-mechanism (and the same balanced env->morph assignment) as heterogeneous
-multi-track training.
+WARNING: heterogeneous texture-variant morphs DO NOT dispatch per env under
+the Madrona batch renderer: genesis 1.2.1 never passes vgeom.active_envs_mask
+to it (only vis/rasterizer_context.py honors it), so every env renders ALL
+variants superimposed and z-fighting picks the pixels. The env therefore does
+NOT use this module for camera training — world-appearance DR is done as a
+per-env, per-episode color remap of the rendered observation instead (see
+DeepRacerEnv._resample_world_color). This module remains for rasterizer-based
+tooling and as the baked-variant generator should the batch renderer grow
+per-env visibility.
 
 Variant recipe, per texture of the track's composite mesh:
 - every texture gets a random per-variant RGB tint (`tint` range);
@@ -109,21 +111,22 @@ def generate_track_variants(mesh_path: str, n: int, *, seed: int = 0,
                                         f"textures/{var_name}")
             img = Image.open(os.path.join(tex_dir, name))
             if _ROAD_RE.search(name) and swap_to:
-                # band-limit hard: Madrona samples without mipmaps, so any
-                # high-frequency, high-contrast pattern (brick, grass) aliases
-                # into pixel noise at road viewing distances. Downsampling to
-                # 32px and bilinear-upscaling keeps the material's color
-                # character but kills the frequencies that speckle. The
-                # ORIGINAL texture's alpha channel is kept — some alternates
-                # carry transparency masks that Madrona bleeds magenta through
-                alt = (Image.open(os.path.join(tex_dir, swap_to)).convert("RGB")
-                       .resize((32, 32), Image.LANCZOS)
-                       .resize(img.size, Image.BILINEAR))
-                if img.mode == "RGBA":
-                    img = Image.merge("RGBA", (*alt.split(),
-                                               img.convert("RGBA").getchannel("A")))
-                else:
-                    img = alt
+                # RECOLOR, don't replace: the road mesh's UVs are an atlas —
+                # different track segments sample different regions of the
+                # image, so any spatially-varying replacement turns one road
+                # into a patchwork that changes as the car drives. The
+                # original road texture is spatially uniform (that's why the
+                # atlas is invisible); keep its structure and alpha, and move
+                # only its color to the alternate material's mean palette.
+                alt = np.asarray(Image.open(os.path.join(tex_dir, swap_to))
+                                 .convert("RGB"), dtype=np.float32)
+                palette = alt.reshape(-1, 3).mean(axis=0)
+                mode = "RGBA" if img.mode == "RGBA" else "RGB"
+                base = np.asarray(img.convert(mode)).astype(np.float32)
+                gray = base[..., :3].mean(axis=-1, keepdims=True)
+                gray /= max(float(gray.mean()), 1e-3)     # unit-mean structure
+                base[..., :3] = (gray * palette).clip(0, 255)
+                img = Image.fromarray(base.astype(np.uint8), mode)
             rgb = line_rgb if _LINE_RE.search(name) else body_rgb
             out = _tint_image(img, rgb)
             if name.lower().endswith((".jpg", ".jpeg")):
