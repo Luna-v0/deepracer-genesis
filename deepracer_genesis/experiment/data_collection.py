@@ -130,3 +130,190 @@ def collect_camera_dataset(
         json.dump(meta, f, indent=2)
     print(f"[collect] {written} frames -> {out} ({shard} shard(s))")
     return out
+
+
+# ======================================================================
+# Rollout collection: temporally-coherent frames from a noisy expert
+# ======================================================================
+def collect_rollout_dataset(
+    target,
+    *,
+    out: str = "datasets/rollouts",
+    steps: int = 2048,
+    num_envs: Optional[int] = None,
+    noise: float = 0.35,
+    noise_theta: float = 0.05,
+    speed_cmd: float = -0.3,
+    shard_steps: int = 256,
+    seed: int = 0,
+    compress: bool = True,
+) -> str:
+    """Drive a noisy PRIVILEGED expert under the pipeline's DR and record
+    temporally-contiguous (frame, feature-vector) sequences.
+
+    `target` is any experiment handle — most usefully a `>>` chain whose env
+    and DR stages define what gets collected (the policy stage is optional
+    for collection and ignored):
+
+        from deepracer_genesis.experiment import (CameraEnvironment,
+            DomainRandomizationCamera, DomainRandomizationPhysics,
+            DomainRandomizationTrackAppearance)
+        from deepracer_genesis.experiment.data_collection import collect_rollout_dataset
+
+        collect_rollout_dataset(
+            CameraEnvironment(resolution=(160, 120), num_envs=16)
+            >> DomainRandomizationTrackAppearance(strength=0.6)
+            >> DomainRandomizationCamera(brightness=(0.7, 1.3), hue=0.05)
+            >> DomainRandomizationPhysics(),
+            out="datasets/reinvent_rollouts", steps=4096)
+
+    The expert steers from privileged track state (lateral offset + heading
+    error against the waypoints) with Ornstein-Uhlenbeck noise on top —
+    temporally-correlated wandering, so trajectories drift off the centerline
+    and DO go off-track sometimes (those episodes end and respawn, exactly
+    the data a frame-stacking CNN needs to see). Collection is deterministic
+    in `seed`.
+
+    Output: parquet shards, rows sorted (env, t) — env-major and
+    time-contiguous, so a k-frame stack is k consecutive rows of one env:
+
+      rollout_XXXX.parquet columns:
+        env int16, t int32, episode int32   temporal bookkeeping
+        done bool                           True at the LAST step of an episode
+        image binary                        PNG, HxWx3 — the policy camera
+                                            view AFTER world-color + image-aug
+        state list<float32>[28]             aligned privileged feature vector
+        action list<float32>[2]             expert action actually applied
+        pose  list<float32>[4]              [x, y, yaw, progress_m]
+      meta.json (shapes, dt, DR config, seed).
+
+    A k-stack window (env e, ending at t) is valid iff all k rows share the
+    same `episode` value — no window ever crosses a respawn.
+    """
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from PIL import Image
+
+    from .builder import Builder
+    from .run import build
+    from .spec import SpecError
+    from .stages import Pipeline, Stage, VectorPolicy
+    from .transforms import ImageAug
+
+    if isinstance(target, Stage):
+        target = Pipeline((target,))
+    if isinstance(target, Pipeline):
+        try:
+            spec = target.build()
+        except SpecError:
+            spec = (target >> VectorPolicy()).build()   # policy unused; validation only
+    else:
+        spec = build(target)
+    if spec.env.modality != "camera":
+        raise SpecError("rollout collection records the camera; use a camera env stage")
+    if num_envs:
+        from .ablation import override
+        spec = override(spec, "env.num_envs", num_envs)
+
+    torch.manual_seed(seed)
+    b = Builder(spec)
+    sim = b.sim()
+    n = sim.num_envs
+    dev = sim.device
+    aug = ImageAug(spec.obs_dr.image_aug) if spec.obs_dr.image_aug else None
+
+    os.makedirs(out, exist_ok=True)
+    ou = torch.zeros(n, 2, device=dev)           # temporally-correlated noise
+    buf: dict[str, list] = {k: [] for k in ("image", "state", "action", "pose", "done")}
+    shard_idx, t_base, frames_out = 0, 0, 0
+    episode = np.zeros(n, dtype=np.int64)
+    pool = ThreadPoolExecutor(max_workers=8)
+
+    def _png(frame: np.ndarray) -> bytes:
+        bio = io.BytesIO()
+        Image.fromarray(frame).save(bio, "PNG",
+                                    compress_level=6 if compress else 1)
+        return bio.getvalue()
+
+    def flush():
+        nonlocal shard_idx, t_base, frames_out, episode
+        if not buf["image"]:
+            return
+        T = len(buf["image"])
+        img = np.stack(buf["image"], axis=1)          # (N, T, H, W, 3)
+        st = np.stack(buf["state"], axis=1)
+        ac = np.stack(buf["action"], axis=1)
+        po = np.stack(buf["pose"], axis=1)
+        dn = np.stack(buf["done"], axis=1)            # (N, T)
+        # per-row episode ids: increment AFTER each done row
+        ep = episode[:, None] + np.concatenate(
+            [np.zeros((n, 1), dtype=np.int64), np.cumsum(dn[:, :-1], axis=1)], axis=1)
+        episode = ep[:, -1] + dn[:, -1]
+        pngs = list(pool.map(_png, img.reshape(-1, *img.shape[2:])))  # env-major
+        table = pa.table({
+            "env": pa.array(np.repeat(np.arange(n, dtype=np.int16), T)),
+            "t": pa.array(np.tile(t_base + np.arange(T, dtype=np.int32), n)),
+            "episode": pa.array(ep.reshape(-1).astype(np.int32)),
+            "done": pa.array(dn.reshape(-1)),
+            "image": pa.array(pngs, type=pa.binary()),
+            "state": pa.array(list(st.reshape(n * T, -1))),
+            "action": pa.array(list(ac.reshape(n * T, -1))),
+            "pose": pa.array(list(po.reshape(n * T, -1))),
+        })
+        pq.write_table(table, os.path.join(out, f"rollout_{shard_idx:04d}.parquet"),
+                       compression="zstd")
+        frames_out += n * T
+        t_base += T
+        shard_idx += 1
+        for v in buf.values():
+            v.clear()
+
+    sim.reset_idx(torch.arange(n, device=dev))
+    sim._post_physics(torch.arange(n, device=dev))
+    with torch.no_grad():
+        for _ in range(steps):
+            # privileged expert: track-frame P-controller ...
+            lat = sim.lateral * sim.dir_sign / sim.half_width.clamp(min=0.1)
+            steer = -(1.1 * lat + 0.9 * torch.sin(sim.heading_err))
+            act = torch.stack([steer, torch.full_like(steer, speed_cmd)], dim=1)
+            # ... + OU noise so it wanders (and sometimes leaves the track)
+            ou.mul_(1.0 - noise_theta).add_(torch.randn_like(ou),
+                                            alpha=noise * (2 * noise_theta) ** 0.5)
+            act = (act + ou).clamp(-1.0, 1.0)
+
+            img = sim.obs_image_buf                                # post world-color
+            if aug is not None:
+                img = aug._apply_transform(img)
+            state = sim.state_buf.clone()
+            pose = torch.stack([sim.base_pos[:, 0], sim.base_pos[:, 1],
+                                sim.yaw, sim.progress_m], dim=1)
+
+            _, _, dones, _ = sim.step(act)
+
+            buf["image"].append((img.permute(0, 2, 3, 1) * 255).byte().cpu().numpy())
+            buf["state"].append(state.cpu().numpy())
+            buf["action"].append(act.cpu().numpy())
+            buf["pose"].append(pose.cpu().numpy())
+            buf["done"].append(dones.bool().cpu().numpy())
+            if len(buf["image"]) >= shard_steps:
+                flush()
+    flush()
+
+    pool.shutdown()
+    meta = {"num_envs": n, "steps": steps, "shard_steps": shard_steps,
+            "frames": frames_out,
+            "resolution": list(spec.env.resolution), "control_dt": sim.dt,
+            "noise": noise, "noise_theta": noise_theta, "seed": seed,
+            "layout": "rows sorted (env, t); k-stack valid iff same episode",
+            "appearance": dict(spec.obs_dr.appearance),
+            "image_aug": dict(spec.obs_dr.image_aug),
+            "physics_dr": dict(spec.obs_dr.physics), "shards": shard_idx,
+            "tracks": list(spec.env.tracks)}
+    with open(os.path.join(out, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"[collect] {frames_out} frames in {shard_idx} parquet shard(s) -> {out}",
+          flush=True)
+    return out
