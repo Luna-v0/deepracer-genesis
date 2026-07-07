@@ -150,27 +150,50 @@ line of a lap is exactly the (random) start location. Adding
 (clockwise vs counter-clockwise) each episode — heading, progress and
 lookahead observations all follow the chosen direction.
 
-### Domain randomization axes
+### Domain randomization: what varies, when, and what can't (yet)
 
-- **World appearance (colors)** — `DomainRandomizationTrackAppearance(strength=0.6)`:
-  every episode, every env draws its own color remap (hue rotation +
-  saturation/value scaling + channel mixing + bias) applied to the rendered
-  observation — each agent trains in a differently-colored world, coherent
-  within the episode, resampled at every reset. Renderer-agnostic.
-  Cost @128 camera envs on a 4060 Ti: 16k -> 12k steps/s.
-  True per-env scene *textures* are blocked today: genesis 1.2.1 never passes
-  per-env variant visibility (`vgeom.active_envs_mask`) to the Madrona batch
-  renderer, so heterogeneous texture-variant morphs z-fight instead of
-  dispatching (`randomization/appearance.py` can still bake texture variants
-  for rasterizer-based use). For the same reason, multi-track training with a
-  CAMERA is rejected by validation — multi-track feature-mode is fine.
-- **Image-space** (per step) — `DomainRandomizationCamera`: brightness, contrast,
-  saturation, hue, blur, cutout, pixel noise + camera mount jitter.
-- **Physics** (per episode) — `DomainRandomizationPhysics`: friction, mass/CoM,
-  steering/wheel gains, armature.
-- **Actions** — `DomainRandomizationActions`: steer/speed noise, action delay.
-- **Spawn** — random start waypoint + lateral/yaw noise (`random_start`),
-  random driving direction (`random_direction`).
+**Per step — effectively unlimited.** Anything expressible as a tensor op on
+observations or actions runs at full speed with fresh draws every step:
+
+- `DomainRandomizationCamera` → image aug on the rendered obs: brightness,
+  contrast, saturation, hue rotation, gaussian blur, cutout patches, pixel
+  noise (per env, per step).
+- `DomainRandomizationActions` → gaussian steer/speed noise on the action
+  path (per env, per step).
+
+**Per episode — resampled at every reset, env-side.** These change the world
+each episode without touching the compiled scene:
+
+- `DomainRandomizationPhysics` → friction, mass shift, center-of-mass shift,
+  steering kp scale, wheel kv scale, armature (per env, batched via Genesis's
+  `batch_dofs_info`/`batch_links_info`).
+- Camera mount jitter (pitch/position of the onboard camera).
+- Spawn: random waypoint + lateral/yaw noise (`random_start`), coin-flip
+  driving direction (`random_direction`).
+- `DomainRandomizationTrackAppearance` → world-color remap of the rendered
+  obs (hue rotation + saturation/value + channel mix + bias; invertible so
+  the task stays readable). Cost @128 camera envs: 16k → 12k steps/s.
+
+**Fixed for the whole run — the scene compiles once.** Changing these means
+a new process/run (cheap: content-hashed runs make sweeps over them easy):
+
+- Track geometry and scene textures/meshes.
+- Lighting (one sun per scene: direction/intensity — **no per-env lighting**
+  in Genesis 1.2).
+- Camera FOV/resolution, number of envs.
+- Action DELAY depth: `delay_steps=k` is a constant latency (the ring buffer
+  is fixed size); the noise on top varies per step, but per-episode-random
+  latency would need a variable-depth read (easy extension, not built).
+
+**Hard renderer limits (the brick wall).** Genesis 1.2.1 never passes
+per-env variant visibility (`vgeom.active_envs_mask`) to the Madrona batch
+renderer — only the (slow, ~600 steps/s) rasterizer path honors it. Until
+that lands upstream, under Madrona there is no per-env: scene textures,
+track meshes, or multi-track camera training (all variants render
+superimposed and z-fight). Nyx additionally refuses heterogeneous morphs
+outright and reads only OBJ. `randomization/appearance.py` still bakes
+texture-variant meshes for rasterizer-based use, and validation rejects the
+unsound combinations with an explanation.
 
 ### Hyperparameter optimization
 
@@ -180,6 +203,33 @@ trainer's periodic deterministic evals (`eval_every_steps`) stream back as the
 optimization signal, and Hyperband prunes bad trials mid-training. The study
 is resumable (`sqlite:///runs/hpo/study.db`), and the content-hash identity
 cache makes duplicate configs free.
+
+### Tracks
+
+17 tracks ship registered (3 original DAE + 14 generated); any of the 126
+official DeepRacer routes is one call away, and custom tracks are drawn in a
+notebook:
+
+```python
+from deepracer_genesis.tools.track_builder import fetch_official_track, build_route, install_track
+fetch_official_track("penbay_pro")          # any name from deepracer-race-data
+route = build_route([(0,0), (6,0), (8,2), (6,4), (2,4)], half_width=0.53)
+install_track("my_track", route)            # -> tracks=("my_track",) anywhere
+```
+
+Generated tracks get a procedural road mesh (asphalt, border lines, dashed
+centerline) that renders identically under Madrona/Nyx/rasterizer. The
+interactive flow lives in `notebooks/track_designer.ipynb`: sketch a polygon,
+preview, install, sanity-drive with the built-in controller, train.
+
+### Observability
+
+TensorBoard always (event file per run dir). MLflow when
+`MLFLOW_TRACKING_URI` is set (e.g. `sqlite:////path/mlflow.db`): spec params,
+per-iteration training metrics, periodic + final eval metrics, spec/record
+artifacts. Both log per collector iteration (~200 per 5M-step run), never per
+env-step — the overhead is unmeasurable. `runs/report.md` aggregation and the
+identity cache work regardless.
 
 ### Visual verification & data collection
 
