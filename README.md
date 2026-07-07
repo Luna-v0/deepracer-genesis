@@ -1,5 +1,7 @@
 # deepracer-genesis
 
+**New here? Start with [TUTORIAL.md](TUTORIAL.md).**
+
 AWS DeepRacer RL environment ported from ROS/Gazebo to [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) —
 ROS-free, GPU-batched, vision-based, trained with rsl-rl-lib PPO.
 
@@ -14,11 +16,15 @@ ROS-free, GPU-batched, vision-based, trained with rsl-rl-lib PPO.
 
 ## Renderers (one stack, three options)
 
-| Renderer | Quality | Colors | Vision steps/s (RTX 4060 Ti, 160x120) |
-|---|---|---|---|
-| Madrona batch (`vision_renderer="batch"`, default) | rasterized | dash-hue quirk | ~27.5k @ 256 envs |
-| Nyx (`vision_renderer="nyx"`, `pip install gs-nyx-plugin`) | path traced | correct | ~1.5k @ 256 envs |
-| per-env rasterizer (`raster-vision` branch) | rasterized | correct | ~600 ceiling |
+| Renderer | Use for | Quality | Colors | Vision steps/s (RTX 4060 Ti, 160x120) |
+|---|---|---|---|---|
+| Madrona batch (`vision_renderer="batch"`, default) | **training camera policies** | rasterized | dash-hue quirk | ~27.5k @ 256 envs |
+| Nyx (`vision_renderer="nyx"`, `pip install gs-nyx-plugin`) | correct-color eval / validation | path traced | correct | ~1.5k @ 256 envs |
+| per-env rasterizer (`raster-vision` branch; also the spectator cam) | videos, debugging, per-env scene variants | rasterized | correct | ~600 ceiling |
+
+Default recipe: train on Madrona, validate frames on Nyx, record videos with
+the rasterizer spectator (`rollout_video` does this automatically). Full
+decision guide + walkthrough: [TUTORIAL.md](TUTORIAL.md).
 
 Nyx facts: reads OBJ not DAE (tracks ship converted under `assets/tracks/*/obj/`),
 requires unmerged URDF links, denoise/AA kept off (temporal history smears

@@ -188,8 +188,15 @@ def write_results(rows):
         "Peak row (bold) is the headline number: max steps/s per agent x number of agents "
         "running in parallel.",
     ]
+    methodology = (
+        "Each row is one (mode, n_envs) config in a fresh process: n_envs "
+        "parallel agents step together; aggregate steps/s = n_envs x steps / "
+        "wall-time, median of --repeats timed blocks of --steps control steps "
+        "each, after --warmup steps (JIT excluded). Random actions unless the "
+        "mode says PPO.\n\n")
     md_path = os.path.join(HERE, f"results{TAG}.md")
     with open(md_path, "w") as f:
+        f.write(methodology)
         f.write("\n".join(lines) + "\n")
     print(f"wrote {csv_path} and {md_path}")
 

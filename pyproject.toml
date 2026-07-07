@@ -7,12 +7,18 @@ dependencies = [
     "genesis-world>=1.2.0",
     "rsl-rl-lib>=5.4.0",
     "torch>=2.5",
+    "torchrl>=0.13",
     "tensordict>=0.7",
     "tensorboard",
     "pillow",
     "numpy",
+    "pyarrow",
     "imageio[ffmpeg]",
 ]
+
+[project.optional-dependencies]
+tracking = ["mlflow"]
+hpo = ["optuna"]
 
 [build-system]
 requires = ["setuptools>=64"]
@@ -23,3 +29,20 @@ include = ["deepracer_genesis*"]
 
 [tool.setuptools.package-data]
 deepracer_genesis = ["assets/**/*"]
+
+[dependency-groups]
+dev = [
+    "catppuccin-jupyterlab>=0.2.5",
+    "ipykernel>=7.3.0",
+    "ipywidgets>=8.1.8",
+    "jupyter-collaboration>=4.4.1",
+    "jupyter-mcp-tools>=0.1.6",
+    "jupyterlab>=4.6.1",
+    "jupyterlab-git>=0.54.0",
+    "jupyterlab-lsp>=5.3.0",
+    "jupyterlab-vim>=4.1.4",
+    "jupytext>=1.19.4",
+    "lckr-jupyterlab-variableinspector>=3.2.4",
+    "pycrdt>=0.13.1",
+    "python-lsp-server[all]>=1.14.0",
+]
