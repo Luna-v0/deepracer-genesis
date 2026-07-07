@@ -24,6 +24,16 @@ TRACKS = {
                             "routes/2022_reinvent_champ.npy", None),
 }
 
+# generated tracks (official routes with procedural meshes, custom-designed
+# tracks) are discovered on import — see tools/track_builder.py
+_GENERATED = os.path.join(ASSETS_DIR, "tracks", "generated")
+if os.path.isdir(_GENERATED):
+    for _name in sorted(os.listdir(_GENERATED)):
+        _d = os.path.join(_GENERATED, _name)
+        if os.path.exists(os.path.join(_d, "route.npy")) and _name not in TRACKS:
+            _rel = os.path.relpath(_d, ASSETS_DIR)
+            TRACKS[_name] = (f"{_rel}/track.obj", f"{_rel}/route.npy", None)
+
 
 class Track:
     """Vectorized (GPU) track geometry queries against the centerline."""
@@ -33,9 +43,13 @@ class Track:
         self.name = name
         self.mesh_path = os.path.join(ASSETS_DIR, mesh_rel)
         self.field_path = os.path.join(ASSETS_DIR, field_rel) if field_rel else None
-        # OBJ conversion (same geometry/textures) for renderers that can't read DAE (Nyx)
-        base = os.path.basename(mesh_rel).rsplit(".", 1)[0]
-        self.obj_path = os.path.join(os.path.dirname(self.mesh_path), "obj", base + ".obj")
+        # OBJ conversion (same geometry/textures) for renderers that can't read DAE (Nyx);
+        # generated tracks are OBJ already
+        if self.mesh_path.endswith(".obj"):
+            self.obj_path = self.mesh_path
+        else:
+            base = os.path.basename(mesh_rel).rsplit(".", 1)[0]
+            self.obj_path = os.path.join(os.path.dirname(self.mesh_path), "obj", base + ".obj")
         self.device = device
 
         wps = np.load(os.path.join(ASSETS_DIR, route_rel)).astype(np.float32)

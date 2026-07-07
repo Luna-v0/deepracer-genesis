@@ -23,10 +23,14 @@ HETERO_TRACKS = ["reinvent_base", "reInvent2019_track", "2022_reinvent_champ"]
 
 MODES = {
     "physics": dict(vision=False, policy=False),
+    "physics_hetero": dict(vision=False, policy=False, tracks=HETERO_TRACKS),
     "vision": dict(vision=True, policy=False),
     "vision_ppo": dict(vision=True, policy=True),
     "vision_dr": dict(vision=True, policy=False, randomize=True),
-    "vision_hetero": dict(vision=True, policy=False, randomize=True, tracks=HETERO_TRACKS),
+    # per-episode world-color remap (scene-appearance DR)
+    "vision_worldcolor": dict(vision=True, policy=False, world_color=0.6),
+    # full DR stack: physics + camera jitter + world color
+    "vision_fulldr": dict(vision=True, policy=False, randomize=True, world_color=0.6),
 }
 
 
@@ -43,6 +47,8 @@ def run_single(n_envs, mode, steps, warmup, repeats):
     m = MODES[mode]
     track = m.get("tracks", "reinvent_base")
     env_cfg = get_env_cfg(vision=m["vision"], randomize=m.get("randomize", False), track=track)
+    if m.get("world_color"):
+        env_cfg["appearance"] = {"world_color": m["world_color"]}
     env = DeepRacerEnv(num_envs=n_envs, env_cfg=env_cfg)
 
     runner = None
@@ -90,13 +96,18 @@ def sweep(args):
     import torch
 
     configs = []
-    for n in [1, 64, 256, 1024, 4096]:
+    feature_envs = [int(x) for x in args.feature_envs.split(",")]
+    vision_envs = [int(x) for x in args.vision_envs.split(",")] if args.vision else []
+    for n in feature_envs:
         configs.append(("physics", n))
-    for n in [1, 64, 256, 512, 1024]:
+    for n in vision_envs:
         configs.append(("vision", n))
-    configs.append(("vision_dr", 256))
-    configs.append(("vision_hetero", 256))
-    configs.append(("vision_ppo", 256))
+    if args.vision:
+        for n in vision_envs:
+            configs.append(("vision_worldcolor", n))
+        configs.append(("vision_dr", 256))
+        configs.append(("vision_fulldr", 256))
+        configs.append(("vision_ppo", 256))
 
     rows = []
     for mode, n_envs in configs:
@@ -115,7 +126,12 @@ def sweep(args):
         except subprocess.TimeoutExpired:
             print("  TIMEOUT")
 
+    global TAG
+    TAG = f"_{args.out_tag}" if args.out_tag else ""
     write_results(rows)
+
+
+TAG = ""
 
 
 def write_results(rows):
@@ -124,7 +140,7 @@ def write_results(rows):
 
     import torch
 
-    csv_path = os.path.join(HERE, "results.csv")
+    csv_path = os.path.join(HERE, f"results{TAG}.csv")
     with open(csv_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["mode", "n_envs", "per_agent_sps", "agg_sps", "vram_gb", "runs"])
         w.writeheader()
@@ -137,6 +153,9 @@ def write_results(rows):
     peak = max(rows, key=lambda r: r["agg_sps"]) if rows else None
     labels = {
         "physics": ("Physics only", "state", "no rendering, random actions"),
+        "physics_hetero": ("Physics, 3 tracks", "state", "heterogeneous multi-track"),
+        "vision_worldcolor": ("Vision + world-color DR", "RGB camera", "per-episode color remap"),
+        "vision_fulldr": ("Vision, full DR", "RGB camera", "physics+jitter+world color"),
         "vision": ("Vision 160x120", "RGB camera", "BatchRenderer, random actions"),
         "vision_ppo": ("Vision + PPO update", "RGB camera", "full training loop (render + CNN fwd/bwd)"),
         "vision_dr": ("Vision + DR", "RGB camera", "physics + camera-mount randomization"),
@@ -169,7 +188,7 @@ def write_results(rows):
         "Peak row (bold) is the headline number: max steps/s per agent x number of agents "
         "running in parallel.",
     ]
-    md_path = os.path.join(HERE, "results.md")
+    md_path = os.path.join(HERE, f"results{TAG}.md")
     with open(md_path, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"wrote {csv_path} and {md_path}")
@@ -183,6 +202,14 @@ if __name__ == "__main__":
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument("--warmup", type=int, default=100)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--feature_envs", default="64,256,1024,2048,4096,8192",
+                        help="comma list of n_envs for the feature sweep")
+    parser.add_argument("--vision_envs", default="32,64,128,256,512",
+                        help="comma list of n_envs for the camera sweep")
+    parser.add_argument("--vision", action=argparse.BooleanOptionalAction, default=True,
+                        help="--no-vision for machines without Madrona (e.g. Colab)")
+    parser.add_argument("--out_tag", default="",
+                        help="suffix for results files (e.g. t4)")
     args = parser.parse_args()
     if args.sweep:
         sweep(args)

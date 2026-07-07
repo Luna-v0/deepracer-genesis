@@ -6,6 +6,12 @@ behind the Algorithm protocol (see experiment/algorithms.py). Training-time
 episode stats come from the SIM's own logs (the autoreset machinery
 NaN-fills ("next", obs) at done rows, so collector data is unreliable for
 episode metrics); evaluation drives the raw sim deterministically.
+
+Observability: TensorBoard always (one event file per run dir); MLflow when
+`MLFLOW_TRACKING_URI` is set (or mlflow is importable and `DRG_MLFLOW=1`).
+Both log per COLLECTOR ITERATION (num_envs x horizon env-steps, ~200
+iterations for a 5M-step run), never per env-step — logging overhead is
+unmeasurable at this cadence.
 """
 
 from __future__ import annotations
@@ -18,6 +24,29 @@ from typing import Callable, Optional
 import torch
 
 from .evaluator import EvalRecord, evaluate_policy
+
+
+def _maybe_mlflow():
+    """The mlflow module iff tracking is configured; never a hard dependency."""
+    if not (os.environ.get("MLFLOW_TRACKING_URI") or os.environ.get("DRG_MLFLOW")):
+        return None
+    try:
+        import mlflow
+        return mlflow
+    except ImportError:
+        print("[trainer] MLFLOW_TRACKING_URI set but mlflow is not installed")
+        return None
+
+
+def _flatten(d: dict, prefix: str = "") -> dict:
+    out = {}
+    for k, v in d.items():
+        key = f"{prefix}{k}"
+        if isinstance(v, dict):
+            out.update(_flatten(v, key + "."))
+        else:
+            out[key] = v
+    return out
 
 
 class Trainer:
@@ -48,6 +77,12 @@ class Trainer:
 
         from torch.utils.tensorboard import SummaryWriter
         writer = SummaryWriter(run_dir)
+        mlflow = _maybe_mlflow()
+        if mlflow:
+            mlflow.set_experiment(spec.ablation_group or "deepracer-genesis")
+            mlflow.start_run(run_name=f"{spec.variant or 'run'}-{spec.seed}-{spec.id()}")
+            mlflow.log_params({k: str(v)[:250]
+                               for k, v in _flatten(spec.to_dict()).items()})
 
         sim = self.b.sim()
         obs_transform = self._eval_obs_transform()
@@ -72,6 +107,11 @@ class Trainer:
             for k, v in logs.items():
                 writer.add_scalar(k, v, frames)
             writer.add_scalar("Train/steps_per_s", sps, frames)
+            if mlflow:
+                payload = {k.replace("/", "."): float(v) for k, v in
+                           {**sim.extras.get("log", {}), **logs,
+                            "Train.steps_per_s": sps}.items()}
+                mlflow.log_metrics(payload, step=frames)
 
             if i % 10 == 0 or i == iterations - 1:
                 ep = sim.extras.get("log", {})
@@ -92,6 +132,11 @@ class Trainer:
                 for k, v in metrics.items():
                     if isinstance(v, (int, float)) and v == v:
                         writer.add_scalar(f"eval/{k}", v, frames)
+                if mlflow:
+                    mlflow.log_metrics({f"eval.{k}": float(v)
+                                        for k, v in metrics.items()
+                                        if isinstance(v, (int, float)) and v == v},
+                                       step=frames)
                 print(f"[trainer] eval @ {frames}: "
                       f"completion {metrics.get('completion_rate', 0):.2f}",
                       flush=True)
@@ -119,6 +164,12 @@ class Trainer:
                    "checkpoint": ckpt},
         )
         record.save(run_dir)
+        if mlflow:
+            mlflow.log_metrics({f"final.{k}": float(v) for k, v in metrics.items()
+                                if isinstance(v, (int, float)) and v == v})
+            mlflow.log_artifact(os.path.join(run_dir, "spec.json"))
+            mlflow.log_artifact(os.path.join(run_dir, "eval_record.json"))
+            mlflow.end_run()
         print(f"[trainer] done: {run_dir}\n{json.dumps(metrics, indent=2)}")
         return record
 
