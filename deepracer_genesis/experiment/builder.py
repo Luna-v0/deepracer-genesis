@@ -73,6 +73,8 @@ class Builder:
         cfg["lookahead_k"] = env.lookahead_k
         cfg["random_start"] = env.random_start
         cfg["random_direction"] = env.random_direction
+        cfg["reward_fn"] = env.reward_fn
+        cfg["reward_scale_overrides"] = dict(env.reward_scales)
         if env.render == "nyx":
             cfg["vision_renderer"] = "nyx"
         if randomize:
@@ -83,6 +85,8 @@ class Builder:
             cfg["rand"] = rand
         if obs_dr.appearance:
             cfg["appearance"] = dict(obs_dr.appearance)
+        if self.spec.policy is not None and self.spec.policy.actions:
+            cfg["action_table"] = [list(a) for a in self.spec.policy.actions]
         if env.emits_cost:
             cfg["emit_cost"] = True
             cfg["cost_fn"] = env.cost_fn
@@ -186,9 +190,13 @@ class Builder:
         return modules, head_keys, in_dim
 
     def actor(self) -> ProbabilisticActor:
-        """TanhNormal actor over spec.policy.actor_keys ((camera via CNN
-        trunk) + vector keys fused in the MLP head)."""
+        """Actor over spec.policy.actor_keys ((camera via CNN trunk) + vector
+        keys fused in the MLP head). Continuous => TanhNormal over
+        [steer, speed]; policy.actions set => Categorical over that list
+        (indices; the sim looks up the (steer, speed) pair)."""
         spec = self.spec
+        if spec.policy.actions is not None:
+            return self._discrete_actor()
         keys = list(spec.policy.actor_keys)
         dims = self._key_dims()
         # NormalParamExtractor is its own tensordict stage: only MLP.forward
@@ -213,6 +221,29 @@ class Builder:
             in_keys=["loc", "scale"], out_keys=["action"],
             distribution_class=TanhNormal,
             distribution_kwargs={"low": -1.0, "high": 1.0},
+            return_log_prob=True,
+            default_interaction_type=ExplorationType.RANDOM,
+        )
+
+    def _discrete_actor(self) -> ProbabilisticActor:
+        spec = self.spec
+        keys = list(spec.policy.actor_keys)
+        dims = self._key_dims()
+        n_actions = len(spec.policy.actions)
+        if spec.policy.cnn is not None and "camera" in keys:
+            modules, head_keys, in_dim = self._head(keys, dims, "actor_cam_feat")
+            mlp = self._mlp(in_dim, n_actions)
+            modules.append(TensorDictModule(mlp, in_keys=head_keys,
+                                            out_keys=["logits"]))
+            self._actor_cnn, self._actor_mlp = modules[0].module, mlp
+        else:
+            mlp = self._mlp(sum(dims[k] for k in keys), n_actions)
+            self._actor_cnn = self._actor_mlp = None
+            modules = [TensorDictModule(mlp, in_keys=keys, out_keys=["logits"])]
+        return ProbabilisticActor(
+            TensorDictSequential(*modules),
+            in_keys=["logits"], out_keys=["action"],
+            distribution_class=torch.distributions.Categorical,
             return_log_prob=True,
             default_interaction_type=ExplorationType.RANDOM,
         )

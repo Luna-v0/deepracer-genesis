@@ -141,9 +141,7 @@ def collect_rollout_dataset(
     out: str = "datasets/rollouts",
     steps: int = 2048,
     num_envs: Optional[int] = None,
-    noise: float = 0.35,
-    noise_theta: float = 0.05,
-    speed_cmd: float = -0.3,
+    agent=None,
     shard_steps: int = 256,
     seed: int = 0,
     compress: bool = True,
@@ -167,12 +165,13 @@ def collect_rollout_dataset(
             >> DomainRandomizationPhysics(),
             out="datasets/reinvent_rollouts", steps=4096)
 
-    The expert steers from privileged track state (lateral offset + heading
-    error against the waypoints) with Ornstein-Uhlenbeck noise on top —
-    temporally-correlated wandering, so trajectories drift off the centerline
-    and DO go off-track sometimes (those episodes end and respawn, exactly
-    the data a frame-stacking CNN needs to see). Collection is deterministic
-    in `seed`.
+    `agent` is any PrivilegedAgent (see experiment/agents.py); the default
+    NoisyExpert steers from privileged track state with Ornstein-Uhlenbeck
+    noise on top — temporally-correlated wandering, so trajectories drift off
+    the centerline and DO go off-track sometimes (those episodes end and
+    respawn, exactly the data a frame-stacking CNN needs to see). Subclass
+    PrivilegedAgent for custom behavior. Collection is deterministic in
+    `seed` for a given agent.
 
     Output: parquet shards, rows sorted (env, t) — env-major and
     time-contiguous, so a k-frame stack is k consecutive rows of one env:
@@ -197,11 +196,14 @@ def collect_rollout_dataset(
     import pyarrow.parquet as pq
     from PIL import Image
 
+    from .agents import NoisyExpert
     from .builder import Builder
     from .run import build
     from .spec import SpecError
     from .stages import Pipeline, Stage, VectorPolicy
     from .transforms import ImageAug
+
+    agent = agent or NoisyExpert()
 
     if isinstance(target, Stage):
         target = Pipeline((target,))
@@ -226,7 +228,6 @@ def collect_rollout_dataset(
     aug = ImageAug(spec.obs_dr.image_aug) if spec.obs_dr.image_aug else None
 
     os.makedirs(out, exist_ok=True)
-    ou = torch.zeros(n, 2, device=dev)           # temporally-correlated noise
     buf: dict[str, list] = {k: [] for k in ("image", "state", "action", "pose", "done")}
     shard_idx, t_base, frames_out = 0, 0, 0
     episode = np.zeros(n, dtype=np.int64)
@@ -275,14 +276,7 @@ def collect_rollout_dataset(
     sim._post_physics(torch.arange(n, device=dev))
     with torch.no_grad():
         for _ in range(steps):
-            # privileged expert: track-frame P-controller ...
-            lat = sim.lateral * sim.dir_sign / sim.half_width.clamp(min=0.1)
-            steer = -(1.1 * lat + 0.9 * torch.sin(sim.heading_err))
-            act = torch.stack([steer, torch.full_like(steer, speed_cmd)], dim=1)
-            # ... + OU noise so it wanders (and sometimes leaves the track)
-            ou.mul_(1.0 - noise_theta).add_(torch.randn_like(ou),
-                                            alpha=noise * (2 * noise_theta) ** 0.5)
-            act = (act + ou).clamp(-1.0, 1.0)
+            act = agent.act(sim)
 
             img = sim.obs_image_buf                                # post world-color
             if aug is not None:
@@ -292,6 +286,9 @@ def collect_rollout_dataset(
                                 sim.yaw, sim.progress_m], dim=1)
 
             _, _, dones, _ = sim.step(act)
+            reset_ids = dones.nonzero(as_tuple=False).flatten()
+            if len(reset_ids):
+                agent.reset(reset_ids)
 
             buf["image"].append((img.permute(0, 2, 3, 1) * 255).byte().cpu().numpy())
             buf["state"].append(state.cpu().numpy())
@@ -306,7 +303,7 @@ def collect_rollout_dataset(
     meta = {"num_envs": n, "steps": steps, "shard_steps": shard_steps,
             "frames": frames_out,
             "resolution": list(spec.env.resolution), "control_dt": sim.dt,
-            "noise": noise, "noise_theta": noise_theta, "seed": seed,
+            "agent": type(agent).__name__, "seed": seed,
             "layout": "rows sorted (env, t); k-stack valid iff same episode",
             "appearance": dict(spec.obs_dr.appearance),
             "image_aug": dict(spec.obs_dr.image_aug),

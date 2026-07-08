@@ -62,12 +62,14 @@ def build(target, **overrides) -> ExperimentSpec:
 
 
 def run(target, *, root: str = "runs", build_only: bool = False,
-        force: bool = False, **overrides) -> "EvalRecord | ExperimentSpec":
+        force: bool = False, on_eval=None,
+        **overrides) -> "EvalRecord | ExperimentSpec":
     """Build the spec and train it. `run('cam_baseline', seed=3)`;
-    `force=True` retrains even when the identity cache has a record."""
+    `force=True` retrains even when the identity cache has a record;
+    `on_eval(frames, metrics)` fires at every periodic eval (HPO pruning)."""
     spec = build(target, **overrides)
     if build_only:
         return spec
     from .builder import Builder      # heavy imports live behind this line
     from .trainer import Trainer
-    return Trainer(Builder(spec), root=root).fit(force=force)
+    return Trainer(Builder(spec), root=root).fit(force=force, on_eval=on_eval)

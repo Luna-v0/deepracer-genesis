@@ -172,6 +172,40 @@ class SafeRLCameraEnvironment(CameraEnvironment):
             spec.env, emits_cost=True, cost_fn=self.cost, cost_budget=self.budget))
 
 
+def discrete_grid(steer_bins: int = 5, speed_bins: int = 2,
+                  max_speed_frac: float = 1.0) -> tuple:
+    """The classic DeepRacer action list: a (steer x speed) grid of pairs in
+    normalized [-1, 1] units — pass to any policy stage's `actions=`."""
+    import numpy as np
+    steers = np.linspace(-1.0, 1.0, steer_bins)
+    # throttle -1 maps to min speed; spread the bins over the upper range
+    speeds = np.linspace(-0.4, -1.0 + 2.0 * max_speed_frac, speed_bins)
+    return tuple((round(float(st), 3), round(float(sp), 3))
+                 for sp in speeds for st in steers)
+
+
+# ----------------------------------------------------------------------
+# Reward stage
+@dataclass(frozen=True)
+class RewardShaping(Stage):
+    """Select a registered reward fn and/or override term scales.
+
+    `fn` names a function registered with
+    `deepracer_genesis.envs.rewards.register_reward` (write it in plain
+    torch over the batched env — see that module's docstring). `scales`
+    overrides entries of the default reward_scales dict.
+    """
+
+    fn: str = "deepracer"
+    scales: Optional[dict] = None
+
+    KIND = "reward"
+
+    def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
+        return replace(spec, env=replace(
+            spec.env, reward_fn=self.fn, reward_scales=dict(self.scales or {})))
+
+
 # ----------------------------------------------------------------------
 # Observation DR stages
 @dataclass(frozen=True)
@@ -278,6 +312,7 @@ class AsymmetricCameraPolicy(Stage):
     critic_keys: tuple[str, ...] = ("camera", "state")
     cnn: Optional[dict] = None
     mlp: Optional[dict] = None
+    actions: Optional[tuple] = None       # (steer, speed) pairs => discrete
 
     KIND = "policy"
 
@@ -285,6 +320,7 @@ class AsymmetricCameraPolicy(Stage):
         return replace(spec, policy=PolicySpec(
             actor_keys=tuple(self.actor_keys), critic_keys=tuple(self.critic_keys),
             cnn=dict(self.cnn or DEFAULT_CNN), mlp=dict(self.mlp or DEFAULT_MLP),
+            actions=tuple(map(tuple, self.actions)) if self.actions else None,
         ))
 
 
@@ -292,6 +328,7 @@ class AsymmetricCameraPolicy(Stage):
 class VectorPolicy(Stage):
     keys: tuple[str, ...] = ("state",)
     mlp: Optional[dict] = None
+    actions: Optional[tuple] = None       # (steer, speed) pairs => discrete
 
     KIND = "policy"
 
@@ -299,6 +336,7 @@ class VectorPolicy(Stage):
         return replace(spec, policy=PolicySpec(
             actor_keys=tuple(self.keys), critic_keys=tuple(self.keys),
             cnn=None, mlp=dict(self.mlp or DEFAULT_MLP),
+            actions=tuple(map(tuple, self.actions)) if self.actions else None,
         ))
 
 
@@ -307,6 +345,7 @@ class AsymmetricVectorPolicy(Stage):
     actor_keys: tuple[str, ...] = ("state",)
     critic_keys: tuple[str, ...] = ("state",)
     mlp: Optional[dict] = None
+    actions: Optional[tuple] = None       # (steer, speed) pairs => discrete
 
     KIND = "policy"
 
@@ -314,6 +353,7 @@ class AsymmetricVectorPolicy(Stage):
         return replace(spec, policy=PolicySpec(
             actor_keys=tuple(self.actor_keys), critic_keys=tuple(self.critic_keys),
             cnn=None, mlp=dict(self.mlp or DEFAULT_MLP),
+            actions=tuple(map(tuple, self.actions)) if self.actions else None,
         ))
 
 

@@ -33,7 +33,12 @@ class TorchRLDeepRacerEnv(EnvBase):
             obs["camera"] = Unbounded(shape=(n, 3, h, w),
                                       dtype=torch.float32, device=device)
         self.observation_spec = Composite(**obs, shape=(n,), device=device)
-        self.action_spec = Bounded(-1.0, 1.0, shape=(n, 2),
+        if sim.action_table is not None:
+            self.action_spec = Categorical(
+                n=sim.action_table.shape[0], shape=(n,),
+                device=sim.device, dtype=torch.long)
+        else:
+            self.action_spec = Bounded(-1.0, 1.0, shape=(n, 2),
                                    dtype=torch.float32, device=device)
         reward = {"reward": Unbounded(shape=(n, 1), dtype=torch.float32, device=device)}
         if emit_cost:

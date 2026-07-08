@@ -294,3 +294,24 @@ def test_appearance_dr_routes_and_validates():
     (FeatureEnvironment(num_envs=8, tracks=("reinvent_base",
                                             "reInvent2019_track"))
      >> VectorPolicy()).build()
+
+
+def test_discrete_action_space_routes_and_validates():
+    from deepracer_genesis.experiment import FeatureEnvironment, VectorPolicy
+    from deepracer_genesis.experiment.stages import (DomainRandomizationActions,
+                                                     discrete_grid)
+
+    grid_acts = discrete_grid(steer_bins=3, speed_bins=2)
+    spec = (FeatureEnvironment(num_envs=8)
+            >> VectorPolicy(actions=grid_acts)).build()
+    assert len(spec.policy.actions) == 6
+    assert all(len(a) == 2 for a in spec.policy.actions)
+
+    with pytest.raises(SpecError, match="continuous"):   # action DR needs continuous
+        (FeatureEnvironment(num_envs=8)
+         >> VectorPolicy(actions=grid_acts)
+         >> DomainRandomizationActions(steer_noise=0.02)).build()
+
+    with pytest.raises(SpecError, match="pairs"):
+        (FeatureEnvironment(num_envs=8)
+         >> VectorPolicy(actions=((-2.0, 0.0), (1.0, 0.0)))).build()

@@ -23,6 +23,8 @@ from __future__ import annotations
 import os
 import urllib.request
 
+from typing import Optional
+
 import numpy as np
 
 from .. import ASSETS_DIR
@@ -78,6 +80,39 @@ def build_route(points_xy, half_width: float, n_waypoints: int = 150,
     inner = center + normal * half_width
     outer = center - normal * half_width
     return np.concatenate([center, inner, outer], axis=1)
+
+
+def route_from_waypoints(waypoints_xy, width: float,
+                         n_waypoints: Optional[int] = None) -> np.ndarray:
+    """The DeepRacer-native way to define a track: CENTERLINE waypoints + a
+    track WIDTH. No smoothing — your waypoints ARE the centerline (optionally
+    resampled to `n_waypoints` for even spacing); borders are offset half the
+    width along the left/right normals.
+
+        route = route_from_waypoints([(0,0), (5,0), (5,4), (0,4)], width=1.06)
+        install_track("my_square", route)
+    """
+    pts = np.asarray(waypoints_xy, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 3:
+        raise ValueError("waypoints_xy must be (P, 2) with P >= 3")
+    if np.allclose(pts[0], pts[-1]):
+        pts = pts[:-1]                        # closed automatically
+    if n_waypoints:
+        seg = np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        samples = np.linspace(0.0, cum[-1], n_waypoints, endpoint=False)
+        idx = np.clip(np.searchsorted(cum, samples, side="right") - 1,
+                      0, len(pts) - 1)
+        frac = (samples - cum[idx]) / np.maximum(seg[idx], 1e-9)
+        nxt = np.roll(pts, -1, axis=0)
+        pts = pts[idx] * (1 - frac[:, None]) + nxt[idx] * frac[:, None]
+
+    tangent = np.roll(pts, -1, axis=0) - np.roll(pts, 1, axis=0)
+    tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-9)
+    normal = np.stack([-tangent[:, 1], tangent[:, 0]], axis=1)
+    inner = pts + normal * (width / 2)
+    outer = pts - normal * (width / 2)
+    return np.concatenate([pts, inner, outer], axis=1)
 
 
 def _quad(f, base, flip):

@@ -55,8 +55,12 @@ class Trainer:
         self.root = root
 
     # ------------------------------------------------------------------
-    def fit(self, force: bool = False) -> EvalRecord:
-        """Train the spec to completion (or return the cached record)."""
+    def fit(self, force: bool = False, on_eval=None) -> EvalRecord:
+        """Train the spec to completion (or return the cached record).
+
+        `on_eval(frames, metrics)` fires after every periodic evaluation
+        (see eval_every_steps); exceptions propagate out of fit() — that is
+        the supported way for HPO pruners to stop a bad run mid-training."""
         spec = self.b.spec
         run_dir = spec.run_dir(self.root)
         record_path = os.path.join(run_dir, "eval_record.json")
@@ -141,6 +145,15 @@ class Trainer:
                       f"completion {metrics.get('completion_rate', 0):.2f}",
                       flush=True)
                 next_eval += spec.eval_every_steps
+                if on_eval is not None:
+                    try:
+                        on_eval(frames, metrics)
+                    except BaseException:
+                        collector.shutdown()
+                        if mlflow:
+                            mlflow.end_run(status="KILLED")
+                        writer.close()
+                        raise
 
         collector.shutdown()
         wall = time.perf_counter() - t0

@@ -51,6 +51,13 @@ class DeepRacerEnv:
         self.num_envs = num_envs
         self.num_actions = 2
         self.vision = env_cfg["vision"]
+        # discrete action support: a (K, 2) table of [steer, speed] pairs.
+        # step() accepts index tensors (N,) and looks them up — every
+        # consumer (training, eval, collection) stays agnostic.
+        table = env_cfg.get("action_table")
+        self.action_table = (torch.tensor(table, dtype=torch.float32,
+                                          device=self.device)
+                             if table else None)
 
         self.dt = env_cfg["dt"] * env_cfg["decimation"]  # control dt
         self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.dt)
@@ -296,7 +303,22 @@ class DeepRacerEnv:
             self.policy_res = env_cfg.get("policy_res") or env_cfg["camera_res"]
             self.obs_image_buf = self.image_buf
 
-        self.reward_scales = dict(env_cfg["reward_scales"])
+        from .rewards import resolve_reward
+        reward_fn = env_cfg.get("reward_fn", "deepracer")
+        self.reward_terms = resolve_reward(reward_fn)
+        overrides = env_cfg.get("reward_scale_overrides", {})
+        if reward_fn == "deepracer":
+            # tweaks merge over the tuned defaults
+            self.reward_scales = dict(env_cfg["reward_scales"])
+            self.reward_scales.update(overrides)
+        else:
+            # custom fn: its scales stand alone (defaults reference terms
+            # the custom fn does not produce)
+            if not overrides:
+                raise ValueError(
+                    f"custom reward fn {reward_fn!r} needs explicit scales "
+                    "(RewardShaping(fn=..., scales={...}))")
+            self.reward_scales = dict(overrides)
         if self.emit_cost:
             # the cost stream replaces the offtrack shaping term (plan: pull
             # offtrack/crash OUT of the reward, constrain them instead)
@@ -326,6 +348,8 @@ class DeepRacerEnv:
 
     # ------------------------------------------------------------------
     def step(self, actions):
+        if self.action_table is not None and actions.dim() == 1:
+            actions = self.action_table[actions.long()]
         self.actions = torch.clip(actions, -1.0, 1.0)
         steer = self.actions[:, 0:1] * math.radians(self.cfg["max_steering_deg"])
         speed = self.cfg["min_speed"] + (self.actions[:, 1:2] + 1) * 0.5 * (
@@ -495,19 +519,15 @@ class DeepRacerEnv:
 
     # ------------------------------------------------------------------
     def _compute_reward(self):
-        on_track = self.lateral.abs() < (self.half_width - self.cfg["wheel_margin"])
-        terms = {
-            "progress": self.d_progress,
-            "speed": self.v_forward.clamp(0.0, self.cfg["max_speed"]) * self.dt,
-            "centered": torch.exp(-((self.lateral / self.half_width.clamp(min=0.1)) ** 2)) * self.dt,
-            "heading": -self.heading_err.abs() * self.dt,
-            "steering": -self.actions[:, 0].abs() * self.dt,
-            "action_rate": -((self.actions - self.last_actions) ** 2).sum(dim=1) * self.dt,
-            "off_track": (~on_track).float() * self.dt,
-        }
+        terms = self.reward_terms(self)          # named per-step terms (rewards.py)
         self.rew_buf.zero_()
         for name, scale in self.reward_scales.items():
-            r = terms[name] * scale
+            try:
+                r = terms[name] * scale
+            except KeyError:
+                raise KeyError(
+                    f"reward_scales references term {name!r} but the reward fn "
+                    f"produced {sorted(terms)}") from None
             self.rew_buf += r
             self.episode_sums[name] += r
 

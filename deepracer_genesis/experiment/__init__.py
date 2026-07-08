@@ -30,6 +30,7 @@ from .stages import (
     FrozenCNNToFeatureVector,
     Pipeline,
     PPOLagrangian,
+    RewardShaping,
     SafeRLCameraEnvironment,
     SafeRLFeatureEnvironment,
     Stage,
@@ -49,7 +50,7 @@ __all__ = [
     "DomainRandomizationActions",
     "FrozenCNNToFeatureVector",
     "AsymmetricCameraPolicy", "VectorPolicy", "AsymmetricVectorPolicy",
-    "PPO", "PPOLagrangian", "Algo",
+    "PPO", "PPOLagrangian", "Algo", "RewardShaping",
     "REGISTRY", "experiment", "Experiment",
     "build", "run",
 ]

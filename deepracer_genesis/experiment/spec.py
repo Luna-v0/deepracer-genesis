@@ -41,6 +41,11 @@ class EnvSpec:
     # coin-flip the driving direction (CW vs CCW) each episode; heading /
     # progress / lookahead observations follow the chosen direction
     random_direction: bool = False
+    # reward: name of a registered reward fn (envs/rewards.py) + scale
+    # overrides. The NAME is hashed, not the function body — rename your fn
+    # after editing it (or run(force=True)).
+    reward_fn: str = "deepracer"
+    reward_scales: dict = field(default_factory=dict)
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None
@@ -71,6 +76,10 @@ class PolicySpec:
     critic_keys: tuple[str, ...]
     cnn: Optional[dict] = None               # None => pure vector policy
     mlp: dict = field(default_factory=dict)
+    # None => continuous TanhNormal over [steer, speed] in [-1, 1]^2 (default).
+    # A tuple of (steer, speed) pairs => DISCRETE Categorical policy over that
+    # action list — the original AWS DeepRacer action-space style.
+    actions: Optional[tuple] = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +182,18 @@ class ExperimentSpec:
         if not a_keys <= c_keys:
             raise SpecError("asymmetric policies require critic_keys ⊇ actor_keys; "
                             "actor has %s the critic lacks" % sorted(a_keys - c_keys))
+        if policy.actions is not None:
+            acts = policy.actions
+            if len(acts) < 2:
+                raise SpecError("a discrete action space needs >= 2 actions")
+            for a in acts:
+                if len(a) != 2 or not all(-1.0 <= float(x) <= 1.0 for x in a):
+                    raise SpecError(
+                        f"discrete actions are (steer, speed) pairs in [-1, 1]; got {a}")
+            if (self.action_dr.steer_noise or self.action_dr.speed_noise
+                    or self.action_dr.delay_steps):
+                raise SpecError("action DR (noise/delay) operates on continuous "
+                                "actions; not compatible with a discrete policy")
         if policy.cnn is None and "camera" in (a_keys | c_keys):
             raise SpecError("a vector policy cannot consume the raw 'camera' key; "
                             "add an encoder stage or use a camera policy")

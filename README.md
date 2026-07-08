@@ -156,6 +156,45 @@ line of a lap is exactly the (random) start location. Adding
 (clockwise vs counter-clockwise) each episode — heading, progress and
 lookahead observations all follow the chosen direction.
 
+### Custom rewards, discrete actions, agents
+
+- **Reward functions** are named, registered, plain-torch:
+  `@register_reward("time_trial")` over the batched env, then
+  `>> RewardShaping(fn="time_trial", scales={"progress": 10.0})` — every term
+  is logged per episode. (The spec hashes the NAME, not the body — rename
+  after editing, or `force=True`.)
+- **Action space**: continuous TanhNormal `[steer, speed]` by default; pass
+  `actions=discrete_grid(steer_bins=5, speed_bins=2)` (or any list of
+  `(steer, speed)` pairs) to a policy stage for the original DeepRacer-style
+  DISCRETE Categorical policy. The sim accepts indices transparently.
+- **Scripted agents** (`experiment/agents.py`): `CenterlineFollower` /
+  `NoisyExpert` drive collection and previews; subclass `PrivilegedAgent`
+  to script your own behavior over the sim's track-frame state.
+
+### Deployment: ONNX + model card
+
+```python
+from deepracer_genesis.experiment.export import export_policy
+export_policy("feature_baseline")     # -> run_dir/export/policy.onnx + model_card.json
+```
+
+The actor exports with a deterministic head (verified against torch to
+1e-6); `model_card.json` records the observation definitions (camera
+res/FOV, state layout), the action space (continuous bounds + physical
+mapping, or the discrete table), the full training spec and final metrics.
+
+### Track dataset for ML
+
+```python
+from deepracer_genesis.tools.track_split import TrackDataset
+ds = TrackDataset()        # holdout: the physically printed tracks
+ds.train, ds.test, ds.holdout
+```
+
+Deterministic train/test split over all registered tracks with a by-name
+holdout (default: `reinvent_base`, `Oval_track`) that never enters training
+or tuning; `scripts/collect_sim2real.py --split train` collects accordingly.
+
 ### Domain randomization: what varies, when, and what can't (yet)
 
 **Per step — effectively unlimited.** Anything expressible as a tensor op on

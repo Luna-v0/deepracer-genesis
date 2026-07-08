@@ -20,9 +20,11 @@ from typing import Optional
 import torch
 
 from .ablation import override
+from .agents import CenterlineFollower
 from .run import build
 from .spec import ActionDRSpec, ExperimentSpec, ObsDRSpec
 
+_CONTROLLER = CenterlineFollower()
 _SPECTATOR = {"spectator": True, "spectator_res": (1280, 960)}
 
 
@@ -33,15 +35,6 @@ def _load_actor(builder, ckpt_path: str):
                          weights_only=False)
     actor.load_state_dict(payload["actor"])
     return actor
-
-
-def _controller(sim) -> torch.Tensor:
-    """Privileged P-controller on the centerline (scripted driving for
-    previews — no trained policy needed)."""
-    lat = sim.lateral * sim.dir_sign / sim.half_width.clamp(min=0.1)
-    steer = (-(1.1 * lat + 0.9 * torch.sin(sim.heading_err))).clamp(-1, 1)
-    speed = torch.full_like(steer, -0.3)          # ~1.5 m/s
-    return torch.stack([steer, speed], dim=1)
 
 
 def rollout_video(target, *, root: str = "runs", ckpt: Optional[str] = None,
@@ -162,7 +155,7 @@ def dr_preview_video(target="cam_baseline", *, steps: int = 300,
     paired, spectator = [], []
     with torch.no_grad():
         for _ in range(steps):
-            sim.step(_controller(sim))
+            sim.step(_CONTROLLER.act(sim))
             raw = sim.image_buf[0]                       # (3, H, W) in [0,1]
             seen = aug._apply_transform(sim.image_buf)[0]
             frame = torch.cat([raw, seen], dim=2)        # side by side

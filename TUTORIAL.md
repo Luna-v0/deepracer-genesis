@@ -119,8 +119,9 @@ build_report("runs")                            # runs/report.md aggregate table
 ```
 
 Hyperparameter optimization with pruning: `uv run experiments/hpo_optuna.py`
-(TPE + Hyperband over lr/entropy/epochs/clip; trials are subprocesses; the
-trainer's periodic evals are the pruning signal).
+(TPE + Hyperband over lr/entropy/epochs/clip; trials run in-process; the
+trainer's periodic evals are the pruning signal). For the CNN-architecture
+search (kernels/channels/head + lr/entropy), open `notebooks/hpo_cnn.ipynb`.
 
 ## 8. Experiment tracking
 
