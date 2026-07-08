@@ -2,7 +2,7 @@
 
 The Trainer owns collection, logging, checkpointing, periodic + final
 evaluation and the identity cache; everything algorithm-specific lives
-behind the Algorithm protocol (see experiment/algorithms.py). Training-time
+behind the Algorithm protocol (see deepracer_genesis.algorithms). Training-time
 episode stats come from the SIM's own logs (the autoreset machinery
 NaN-fills ("next", obs) at done rows, so collector data is unreliable for
 episode metrics); evaluation drives the raw sim deterministically.
@@ -50,6 +50,19 @@ def _flatten(d: dict, prefix: str = "") -> dict:
 
 
 class Trainer:
+    """Algorithm-agnostic outer loop driving one Builder to an EvalRecord.
+
+    Owns collection, logging, checkpointing, periodic + final evaluation and
+    the identity cache; everything algorithm-specific lives behind the
+    Algorithm protocol (see the module docstring for the episode-stats and
+    observability details).
+
+    Args:
+        builder: The Builder holding the validated spec (and, lazily, the
+            sim, env, models and collector).
+        root: Runs directory; the run dir is root/<spec_id>.
+    """
+
     def __init__(self, builder, root: str = "runs") -> None:
         self.b = builder
         self.root = root
@@ -58,9 +71,17 @@ class Trainer:
     def fit(self, force: bool = False, on_eval=None) -> EvalRecord:
         """Train the spec to completion (or return the cached record).
 
-        `on_eval(frames, metrics)` fires after every periodic evaluation
-        (see eval_every_steps); exceptions propagate out of fit() — that is
-        the supported way for HPO pruners to stop a bad run mid-training."""
+        Args:
+            force: Re-train even when the run directory already holds an
+                eval_record.json (the identity cache).
+            on_eval: Callback `on_eval(frames, metrics)`; fires after every
+                periodic evaluation (see eval_every_steps). Exceptions
+                propagate out of fit() — that is the supported way for HPO
+                pruners to stop a bad run mid-training.
+
+        Returns:
+            The EvalRecord (freshly trained or loaded from cache).
+        """
         spec = self.b.spec
         run_dir = spec.run_dir(self.root)
         record_path = os.path.join(run_dir, "eval_record.json")
@@ -74,7 +95,7 @@ class Trainer:
 
         torch.manual_seed(spec.seed)
 
-        from .algorithms import make_algorithm
+        from ..algorithms import make_algorithm
         env = self.b.env()
         algo = make_algorithm(self.b)
         collector = self.b.collector(env, algo.collect_policy)

@@ -5,6 +5,7 @@ Waypoint .npy files come from the original AWS DeepRacer simapp
 [center_x, center_y, inner_x, inner_y, outer_x, outer_y].
 """
 
+import math
 import os
 
 import numpy as np
@@ -74,6 +75,11 @@ class Track:
         self.track_yaw = torch.atan2(self.tangent[:, 1], self.tangent[:, 0])
         self.cum_len = torch.cat([torch.zeros(1, device=device), seg_len.cumsum(0)[:-1]])  # (W,)
         self.total_len = seg_len.sum()
+        # signed curvature per waypoint: d(yaw)/ds in waypoint order
+        # (+ = left turn when driving in waypoint order)
+        dyaw = torch.remainder(torch.roll(self.track_yaw, -1) - self.track_yaw
+                               + math.pi, 2 * math.pi) - math.pi
+        self.curvature = dyaw / seg_len                        # (W,)
 
     def localize(self, pos_xy):
         """For a batch of positions (N, 2), return per-env track frame quantities.
@@ -152,7 +158,8 @@ class MultiTrack:
         self.tangent = pad("tangent", 0.0)
         self.normal = pad("normal", 0.0)
         self.track_yaw = pad("track_yaw", 0.0)
-        self.cum_len = pad("cum_len", 0.0)
+        self.cum_len = pad("cum_len", float("inf"))   # +inf pad keeps rows sorted
+        self.curvature = pad("curvature", 0.0)
         self.half_width = pad("half_width", 1.0)
         self.n_wps_v = torch.tensor([t.n_wps for t in self.tracks], device=device)
         self.total_len_v = torch.stack([t.total_len for t in self.tracks])
@@ -200,6 +207,30 @@ class MultiTrack:
         if dir_sign is not None:
             offs = offs * dir_sign[:, None].long()
         return torch.remainder(wp_idx[:, None] + offs, self.n_wps_env[:, None])
+
+    def curvature_ahead(self, progress_m, distances, dir_sign=None):
+        """Signed track curvature sampled at fixed arclengths ahead.
+
+        Args:
+            progress_m: (N,) current arc position of each env.
+            distances: (H,) meters ahead (in each env's own driving
+                direction) at which to probe.
+            dir_sign: (N,) of +/-1; reversed envs probe backwards along the
+                waypoint order and see the curvature sign flipped.
+
+        Returns:
+            (N, H) curvature in 1/m, signed in the env's own driving frame
+            (+ = the road bends left, from the driver's perspective).
+        """
+        d = torch.as_tensor(distances, device=self.device, dtype=progress_m.dtype)
+        sign = torch.ones_like(progress_m) if dir_sign is None else dir_sign
+        s = torch.remainder(progress_m[:, None] + sign[:, None] * d[None, :],
+                            self.total_len_env[:, None])       # (N, H)
+        rows = self.cum_len[self._ev]                           # (N, W), inf-padded
+        idx = (torch.searchsorted(rows, s.contiguous()) - 1).clamp(min=0)
+        idx = torch.minimum(idx, (self.n_wps_env[:, None] - 1).long())
+        k = torch.gather(self.curvature[self._ev], 1, idx)      # (N, H)
+        return k * sign[:, None]
 
     def lookahead_points(self, la_idx):
         ev = self._ev[:, None].expand_as(la_idx)

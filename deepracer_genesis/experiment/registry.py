@@ -14,7 +14,21 @@ REGISTRY: dict[str, Union[Callable, type]] = {}
 
 def experiment(fn=None, *, name: str | None = None):
     # (decorator) register a zero-arg spec factory under `name` or fn.__name__
-    """Register an experiment-building function under its (or a given) name."""
+    """Register an experiment-building function under its (or a given) name.
+
+    Usable bare (`@experiment`) or parameterized (`@experiment(name="foo")`).
+
+    Args:
+        fn: The zero-arg spec factory (filled in automatically in the bare
+            form).
+        name: Registry key; defaults to fn.__name__.
+
+    Returns:
+        The registered function unchanged (bare form) or the decorator.
+
+    Raises:
+        ValueError: If the name is already registered.
+    """
     def deco(f):
         key = name or f.__name__
         if key in REGISTRY:
@@ -26,13 +40,12 @@ def experiment(fn=None, *, name: str | None = None):
 
 
 class Experiment:
-    """Class idiom for authoring experiments — a single file defines the
-    whole run: hyperparameters as class attributes, the env/DR/policy
-    pipeline in pipeline(), and `MyExp().run()` executes it.
+    """Class idiom for authoring experiments.
 
-    Standard attributes every experiment carries (override freely):
-        seed, total_env_steps, eval_every_steps (0 = final eval only),
-        ablation_group, variant.
+    A single file defines the whole run: hyperparameters as class
+    attributes, the env/DR/policy pipeline in pipeline(), and
+    `MyExp().run()` executes it.
+
     A variant is a subclass with one attribute overridden, or an instance
     with keyword overrides:
 
@@ -46,6 +59,14 @@ class Experiment:
 
         if __name__ == "__main__":
             MyExperiment().run()
+
+    Attributes:
+        seed: Training seed.
+        total_env_steps: Total environment steps to train for.
+        eval_every_steps: Periodic-evaluation cadence in env steps
+            (0 = final eval only).
+        ablation_group: Group tag for the reporter's delta tables.
+        variant: Variant tag within the group; defaults to the class name.
     """
 
     # ---- standard training configuration (overridable per subclass) ----
@@ -80,13 +101,31 @@ class Experiment:
 
     # ------------------------------------------------------------------
     def pipeline(self) -> "Stage | Pipeline":
-        """Return the `>>` stage chain (NOT built); the standard attributes
-        (seed, total_env_steps, ...) are applied by spec()."""
+        """Return the `>>` stage chain (NOT built).
+
+        The standard attributes (seed, total_env_steps, ...) are applied by
+        spec() afterwards.
+
+        Returns:
+            The Stage or Pipeline defining the experiment.
+
+        Raises:
+            NotImplementedError: If the subclass overrides neither
+                pipeline() nor spec().
+        """
         raise NotImplementedError(
             f"{type(self).__name__} must implement pipeline() or spec()")
 
     def spec(self) -> ExperimentSpec:
-        """Build the final ExperimentSpec. Default: finalize pipeline()."""
+        """Build the final ExperimentSpec.
+
+        The default implementation finalizes pipeline() with the standard
+        attributes (seed, total_env_steps, eval_every_steps, ablation_group,
+        variant); override for full control over spec construction.
+
+        Returns:
+            The validated ExperimentSpec.
+        """
         return self.pipeline().build(
             seed=self.seed,
             total_env_steps=self.total_env_steps,
@@ -96,6 +135,14 @@ class Experiment:
         )
 
     def run(self, *, root: str = "runs", force: bool = False) -> "EvalRecord":
-        """Train this experiment (identity-cached); returns the EvalRecord."""
+        """Train this experiment (identity-cached).
+
+        Args:
+            root: Runs directory.
+            force: Re-train even when a cached record exists.
+
+        Returns:
+            The EvalRecord of the finished (or cached) run.
+        """
         from .run import run as _run
         return _run(self, root=root, force=force)

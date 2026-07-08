@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 tracking = ["mlflow"]
 hpo = ["optuna"]
+docs = ["mkdocs-material", "mkdocstrings[python]"]
 
 [build-system]
 requires = ["setuptools>=64"]

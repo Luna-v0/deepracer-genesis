@@ -31,7 +31,11 @@ class EnvSpec:
     resolution: tuple[int, int] = (160, 120)
     fov: float = 90.0
     lookahead_k: int = 10
-    features: tuple[str, ...] = ()          # extra feature-vector channels
+    # which "state" vector the env assembles (envs/features.py):
+    # "classic" (waypoint lookahead) or "perception" (CNN targets + error
+    # channels for sim2real); feature_params tunes horizons/history lengths
+    feature_set: str = "classic"
+    feature_params: dict = field(default_factory=dict)
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 512
     # spawn randomization: every episode starts at a random waypoint with
@@ -92,7 +96,7 @@ class ActionDRSpec:
 @dataclass(frozen=True)
 class AlgorithmSpec:
     """Training-algorithm slice. `kind` selects a registered Algorithm
-    implementation (see experiment/algorithms.py) — "ppo" and
+    implementation (see deepracer_genesis.algorithms) — "ppo" and
     "ppo_lagrangian" ship; custom kinds resolve at build time."""
 
     kind: str = "ppo"

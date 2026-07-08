@@ -51,6 +51,17 @@ def _ensure_genesis():
 
 
 class Builder:
+    """Turn a validated ExperimentSpec into live Genesis + TorchRL objects.
+
+    The only layer that imports the heavy stuff. The sim is built once and
+    cached on the instance; every other product (env, actor, critic, GAE,
+    loss, collector, buffer, optimizer, frozen encoder) derives from the
+    spec and that sim.
+
+    Args:
+        spec: The experiment spec; validated on construction.
+    """
+
     def __init__(self, spec: ExperimentSpec):
         spec.validate()
         self.spec = spec
@@ -60,9 +71,6 @@ class Builder:
     def sim_cfg(self) -> dict:
         """Translate the EnvSpec (+DR spec) into the sim's config dict."""
         env = self.spec.env
-        if env.features:
-            raise NotImplementedError(f"extra features not implemented: {env.features}")
-
         obs_dr = self.spec.obs_dr
         randomize = bool(obs_dr.physics or obs_dr.camera_jitter)
         track = list(env.tracks) if len(env.tracks) > 1 else env.tracks[0]
@@ -73,6 +81,8 @@ class Builder:
         cfg["lookahead_k"] = env.lookahead_k
         cfg["random_start"] = env.random_start
         cfg["random_direction"] = env.random_direction
+        cfg["feature_set"] = env.feature_set
+        cfg["feature_params"] = dict(env.feature_params)
         cfg["reward_fn"] = env.reward_fn
         cfg["reward_scale_overrides"] = dict(env.reward_scales)
         if env.render == "nyx":
@@ -93,9 +103,16 @@ class Builder:
         return cfg
 
     def sim(self, extra_cfg: dict | None = None) -> DeepRacerEnv:
-        """Build (once) and return the Genesis sim. `extra_cfg` merges into
-        the spec-derived config on first construction (e.g. spectator camera
-        for visualization rollouts)."""
+        """Build (once) and return the Genesis sim.
+
+        Args:
+            extra_cfg: Merged into the spec-derived config on FIRST
+                construction only (e.g. spectator camera for visualization
+                rollouts); ignored once the sim exists.
+
+        Returns:
+            The cached DeepRacerEnv.
+        """
         if self._sim is None:
             _ensure_genesis()
             cfg = self.sim_cfg()
@@ -122,9 +139,15 @@ class Builder:
         return ts
 
     def env(self) -> "TorchRLDeepRacerEnv | TransformedEnv":
-        """The TorchRL training env: wrapper (+ TransformedEnv when the spec
-        carries transforms). Collection-side only; evaluation drives the raw
-        sim (see evaluator.evaluate_policy)."""
+        """The TorchRL training env.
+
+        Collection-side only; evaluation drives the raw sim (see
+        evaluator.evaluate_policy).
+
+        Returns:
+            The wrapper around the sim, inside a TransformedEnv when the
+            spec carries transforms.
+        """
         base = TorchRLDeepRacerEnv(self.sim(), emit_cost=self.spec.env.emits_cost)
         transforms = self.transforms()
         if not transforms:
@@ -190,10 +213,17 @@ class Builder:
         return modules, head_keys, in_dim
 
     def actor(self) -> ProbabilisticActor:
-        """Actor over spec.policy.actor_keys ((camera via CNN trunk) + vector
-        keys fused in the MLP head). Continuous => TanhNormal over
-        [steer, speed]; policy.actions set => Categorical over that list
-        (indices; the sim looks up the (steer, speed) pair)."""
+        """Actor over spec.policy.actor_keys.
+
+        (camera via CNN trunk) + vector keys fused in the MLP head.
+        Continuous => TanhNormal over [steer, speed]; policy.actions set =>
+        Categorical over that list (indices; the sim looks up the
+        (steer, speed) pair).
+
+        Returns:
+            The ProbabilisticActor (exploration type RANDOM; evaluation
+            switches to deterministic via set_exploration_type).
+        """
         spec = self.spec
         if spec.policy.actions is not None:
             return self._discrete_actor()
@@ -249,8 +279,16 @@ class Builder:
         )
 
     def critic(self, out_key: str = "state_value") -> "ValueOperator | TensorDictSequential":
-        """Value head over spec.policy.critic_keys. `out_key` lets the
-        Lagrangian build a second (cost) critic with its own CNN trunk."""
+        """Value head over spec.policy.critic_keys.
+
+        Args:
+            out_key: Output value key; lets the Lagrangian build a second
+                (cost) critic with its own CNN trunk.
+
+        Returns:
+            A ValueOperator, or a TensorDictSequential when a CNN trunk on
+            'camera' feeds the value head.
+        """
         spec = self.spec
         keys = list(spec.policy.critic_keys)
         dims = self._key_dims()

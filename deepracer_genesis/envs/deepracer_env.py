@@ -1,13 +1,24 @@
-"""DeepRacer environment on Genesis, exposing the rsl-rl-lib 5.x VecEnv contract.
+"""The batched DeepRacer environment on Genesis.
 
-Observation groups (TensorDict):
-  - "state":  (N, 28) proprioception + track-frame features (teacher / critic obs)
-  - "camera": (N, 3, H, W) float in [0,1], front RGB camera (only when vision=True)
+Exposes the rsl-rl-lib 5.x VecEnv contract (TensorDict observation groups,
+no ``reset()`` from the runner — done envs respawn inside ``step()``) and is
+wrapped for TorchRL by :class:`~deepracer_genesis.envs.torchrl_env.TorchRLDeepRacerEnv`.
 
-Action space (2,): [steering, throttle] in [-1, 1], mapped to the original
-DeepRacer Box([-30deg, 0.1 m/s], [+30deg, 4.0 m/s]).
+Observation groups:
+    state: ``(N, D)`` vector assembled by the selected feature set
+        (:mod:`deepracer_genesis.envs.features`).
+    camera: ``(N, 3, H, W)`` float in ``[0, 1]``, front RGB camera
+        (``vision=True`` only).
 
-The runner never calls reset(); done envs are re-spawned inside step().
+Actions:
+    ``(N, 2)`` of ``[steering, throttle]`` in ``[-1, 1]``, mapped to the
+    original DeepRacer ``Box([-30deg, 0.1 m/s], [+30deg, 4.0 m/s])``; or
+    ``(N,)`` integer indices when ``cfg["action_table"]`` defines a discrete
+    action list.
+
+Related modules — rewards: :mod:`deepracer_genesis.envs.rewards`; feature
+vectors: :mod:`deepracer_genesis.envs.features`; track geometry:
+:mod:`deepracer_genesis.envs.track`.
 """
 
 import math
@@ -65,6 +76,14 @@ class DeepRacerEnv:
         names = env_cfg["track"] if isinstance(env_cfg["track"], (list, tuple)) else [env_cfg["track"]]
         self.track = MultiTrack(names, num_envs, self.device)
 
+        self._build_scene(env_cfg, show_viewer)
+        self._init_dof_bookkeeping(env_cfg)
+        self._init_buffers(env_cfg)
+
+    # ------------------------------------------------------------ build
+    def _build_scene(self, env_cfg, show_viewer):
+        """Genesis scene: renderer choice, ground/field plane, car URDF,
+        track morphs, spectator/onboard cameras and lights."""
         # ------------- scene -------------
         # vision_renderer "nyx": observations come from Nyx path-tracer camera
         # sensors (batched per env, correct texture colors) instead of Madrona;
@@ -191,8 +210,8 @@ class DeepRacerEnv:
                 t0 = self.track.tracks[0]
                 c = t0.center.mean(dim=0).cpu().numpy()
                 extent = (t0.center.max(dim=0).values - t0.center.min(dim=0).values).max().item()
-                self.top_cam_center = t0.center.mean(dim=0).expand(num_envs, 2).clone()
-                self.top_cam_height = torch.full((num_envs,), extent * 1.2, device=self.device)
+                self.top_cam_center = t0.center.mean(dim=0).expand(self.num_envs, 2).clone()
+                self.top_cam_height = torch.full((self.num_envs,), extent * 1.2, device=self.device)
                 self.nyx_top = self.scene.add_sensor(NyxCameraOptions(
                     res=res, fov=60,
                     pos=(float(c[0]), float(c[1]), extent * 1.2),
@@ -227,16 +246,18 @@ class DeepRacerEnv:
                     GUI=False,
                 )
 
-        self.scene.build(n_envs=num_envs)
+        self.scene.build(n_envs=self.num_envs)
 
         if self.top_cam is not None:
             pos = torch.cat([self.top_cam_center,
                              self.top_cam_height[:, None]], dim=1)
             lookat = torch.cat([self.top_cam_center,
-                                torch.zeros(num_envs, 1, device=self.device)], dim=1)
-            up = torch.tensor([[0.0, 1.0, 0.0]], device=self.device).expand(num_envs, 3)
+                                torch.zeros(self.num_envs, 1, device=self.device)], dim=1)
+            up = torch.tensor([[0.0, 1.0, 0.0]], device=self.device).expand(self.num_envs, 3)
             self.top_cam.set_pose(pos=pos, lookat=lookat, up=up)
 
+    def _init_dof_bookkeeping(self, env_cfg):
+        """Resolve joint indices, wheel radius and the camera mount."""
         # ------------- dof bookkeeping -------------
         self.wheel_dofs = [self.car.get_joint(n).dof_idx_local for n in WHEEL_DOFS]
         self.steer_dofs = [self.car.get_joint(n).dof_idx_local for n in STEER_DOFS]
@@ -264,8 +285,11 @@ class DeepRacerEnv:
             self.cam_offset_T = self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0))
             self.cam.attach(self.car.get_link("camera_link"), self.cam_offset_T)
 
+    def _init_buffers(self, env_cfg):
+        """Per-env episode state: reward/termination/DR buffers, the
+        feature-set state vector and camera image buffers."""
         # ------------- buffers -------------
-        N = num_envs
+        N = self.num_envs
         self.episode_length_buf = torch.zeros(N, device=self.device, dtype=torch.long)
         self.reset_buf = torch.ones(N, device=self.device, dtype=torch.bool)
         self.rew_buf = torch.zeros(N, device=self.device)
@@ -348,6 +372,17 @@ class DeepRacerEnv:
 
     # ------------------------------------------------------------------
     def step(self, actions):
+        """Advance every env by one control step (``decimation`` physics steps).
+
+        Args:
+            actions: ``(N, 2)`` normalized ``[steering, throttle]`` — or
+                ``(N,)`` action-table indices for discrete policies.
+
+        Returns:
+            Tuple of ``(obs_tensordict, reward (N,), done (N,), extras)``;
+            ``extras["log"]`` carries per-episode stats at reset boundaries
+            and ``extras["time_outs"]`` flags truncations.
+        """
         if self.action_table is not None and actions.dim() == 1:
             actions = self.action_table[actions.long()]
         self.actions = torch.clip(actions, -1.0, 1.0)
@@ -560,6 +595,16 @@ class DeepRacerEnv:
 
     # ------------------------------------------------------------------
     def reset_idx(self, env_ids):
+        """Respawn the given envs and resample their per-episode DR draws.
+
+        Spawns are random waypoints (+ lateral/yaw noise), direction is
+        coin-flipped under ``random_direction``, physics/camera-mount/world
+        -color randomizations are redrawn, and episode logs are emitted to
+        ``extras["log"]``.
+
+        Args:
+            env_ids: 1-D tensor of env indices to reset.
+        """
         n = len(env_ids)
         if n == 0:
             return
@@ -614,6 +659,7 @@ class DeepRacerEnv:
 
     # ------------------------------------------------------------------
     def get_observations(self):
+        """Current observation TensorDict (``state`` + ``camera`` groups)."""
         groups = {"state": self.state_buf}
         if self.vision:
             groups["camera"] = self.obs_image_buf

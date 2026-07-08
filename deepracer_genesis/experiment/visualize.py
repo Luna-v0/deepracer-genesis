@@ -20,7 +20,7 @@ from typing import Optional
 import torch
 
 from .ablation import override
-from .agents import CenterlineFollower
+from ..agents import CenterlineFollower
 from .run import build
 from .spec import ActionDRSpec, ExperimentSpec, ObsDRSpec
 
@@ -44,11 +44,32 @@ def rollout_video(target, *, root: str = "runs", ckpt: Optional[str] = None,
                   **overrides) -> str:
     """Record a deterministic rollout of a trained experiment.
 
-    `target` is any experiment handle (registered name / function / class /
-    spec). The checkpoint resolves from the experiment's own run directory
-    unless `ckpt` is given; `track` evaluates the SAME policy on a different
-    track (policies are track-agnostic — observations are track-relative).
-    Returns the spectator video path; prints eval metrics.
+    Evaluation runs under NOMINAL conditions (no image aug, no action
+    noise/delay, no physics randomization) — the footage shows the policy,
+    not the DR. Eval metrics are printed.
+
+    Args:
+        target: Any experiment handle (registered name / function / class /
+            spec).
+        root: Runs directory the run dir resolves under.
+        ckpt: Checkpoint path; defaults to best.pt in the experiment's own
+            run directory.
+        track: Evaluate the SAME policy on a different track (policies are
+            track-agnostic — observations are track-relative).
+        steps: Number of control steps to record.
+        num_envs: Override the number of parallel cars.
+        out: Output directory; defaults to <run_dir>/videos.
+        spectator_res: Spectator camera resolution (width, height).
+        **overrides: Keyword overrides forwarded to build(target).
+
+    Returns:
+        Path of the spectator MP4 (bird's-eye, every parallel car in one
+        frame); camera policies additionally get an onboard MP4 of env 0
+        next to it.
+
+    Raises:
+        FileNotFoundError: If no checkpoint exists — train the experiment
+            first.
     """
     import imageio.v2 as imageio
 
@@ -134,6 +155,21 @@ def dr_preview_video(target="cam_baseline", *, steps: int = 300,
     with the AUGMENTED frame the policy would see (side by side), plus the
     spectator view where per-episode random respawns are visible. Physics DR
     (per-env friction/mass/COM/gains) resamples at every reset underneath.
+
+    Args:
+        target: Experiment handle; must be a camera experiment with
+            DomainRandomizationCamera (e.g. cam_baseline).
+        steps: Number of control steps to record.
+        num_envs: Number of parallel cars.
+        out: Output directory for the two MP4s.
+        **overrides: Keyword overrides forwarded to build(target).
+
+    Returns:
+        Path of the raw-vs-augmented onboard MP4.
+
+    Raises:
+        ValueError: If the target is not a camera experiment with image
+            augmentation.
     """
     import imageio.v2 as imageio
     import numpy as np

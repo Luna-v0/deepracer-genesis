@@ -5,9 +5,7 @@
 """
 
 import argparse
-import copy
 import os
-import pickle
 
 import genesis as gs
 
@@ -28,9 +26,8 @@ def main():
 
     gs.init(backend=gs.cuda, logging_level="warning")
 
-    from rsl_rl.runners import OnPolicyRunner
-
-    from deepracer_genesis.configs.cfgs import get_env_cfg, get_train_cfg
+    from deepracer_genesis.algorithms.rsl_rl import build_runner
+    from deepracer_genesis.configs.cfgs import get_env_cfg
     from deepracer_genesis.envs import DeepRacerEnv
 
     if args.nyx:
@@ -38,16 +35,10 @@ def main():
     env_cfg = get_env_cfg(vision=args.vision, track=args.track, randomize=args.randomize)
     if args.nyx:
         env_cfg["vision_renderer"] = "nyx"
-    train_cfg = get_train_cfg(vision=args.vision)
-
     log_dir = os.path.join("logs", args.exp_name)
-    os.makedirs(log_dir, exist_ok=True)
-    with open(os.path.join(log_dir, "cfgs.pkl"), "wb") as f:
-        pickle.dump({"env_cfg": env_cfg, "train_cfg": copy.deepcopy(train_cfg),
-                     "num_envs": args.num_envs}, f)
-
     env = DeepRacerEnv(num_envs=args.num_envs, env_cfg=env_cfg)
-    runner = OnPolicyRunner(env, train_cfg, log_dir, device=str(gs.device))
+    runner = build_runner(env, vision=args.vision, log_dir=log_dir,
+                          device=str(gs.device), num_envs=args.num_envs)
     if args.resume:
         runner.load(args.resume)
     runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)

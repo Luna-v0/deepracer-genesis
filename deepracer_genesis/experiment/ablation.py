@@ -11,11 +11,25 @@ from .spec import ExperimentSpec, SpecError
 
 
 def override(spec: ExperimentSpec, path: str, value) -> ExperimentSpec:
-    """dataclasses.replace along a dotted path, e.g. 'env.num_envs' or
-    'algorithm.lagrangian.budget' (dict leaves are copied, not mutated).
+    """Replace one field of a frozen spec along a dotted path.
 
+    dataclasses.replace along a dotted path, e.g. 'env.num_envs' or
+    'algorithm.lagrangian.budget' (dict leaves are copied, not mutated).
     Coupled fields stay in sync: the cost budget lives on the env AND in the
     inferred lagrangian config — changing either updates both.
+
+    Args:
+        spec: The frozen ExperimentSpec to derive from.
+        path: Dotted path to the field, e.g. 'env.num_envs' or
+            'algorithm.lagrangian.budget'.
+        value: New value for the addressed field.
+
+    Returns:
+        A new ExperimentSpec with the field (and any coupled field) replaced.
+
+    Raises:
+        SpecError: If a path segment does not exist or cannot be descended
+            into.
     """
     out = _override(spec, path, value)
     if isinstance(out, ExperimentSpec):
@@ -51,7 +65,21 @@ def _override(spec: "ExperimentSpec", path: str, value) -> "ExperimentSpec":
 
 
 def sweep(base, path: str, values, group: str | None = None) -> list[ExperimentSpec]:
-    """One axis, many values -> specs auto-tagged into one ablation_group."""
+    """Sweep one axis over many values.
+
+    One axis, many values -> specs auto-tagged into one ablation_group.
+
+    Args:
+        base: Any experiment handle accepted by run.build (registered name /
+            function / class / spec / pipeline).
+        path: Dotted override path (see override()).
+        values: Values to place at `path`, one spec per value.
+        group: Ablation group name; defaults to 'sweep_<leaf>'.
+
+    Returns:
+        List of validated ExperimentSpecs, each tagged with the
+        ablation_group and a '<leaf>=<value>' variant.
+    """
     spec = build(base)
     leaf = path.rsplit(".", 1)[-1]
     group = group or f"sweep_{leaf}"
@@ -65,15 +93,37 @@ def sweep(base, path: str, values, group: str | None = None) -> list[ExperimentS
 
 
 def seeds(specs, k: int) -> list[ExperimentSpec]:
-    """spec x range(k) -> mean +- std material for the reporter."""
+    """Fan specs out across seeds.
+
+    spec x range(k) -> mean +- std material for the reporter.
+
+    Args:
+        specs: A single ExperimentSpec or a list of them.
+        k: Number of seeds; each spec is replicated with seed = 0..k-1.
+
+    Returns:
+        List of len(specs) * k specs.
+    """
     if isinstance(specs, ExperimentSpec):
         specs = [specs]
     return [replace(s, seed=seed) for s in specs for seed in range(k)]
 
 
 def grid(base, axes: dict[str, list], group: str | None = None) -> list[ExperimentSpec]:
-    """Cartesian product over dotted-path axes; invalid combos are dropped
-    with a printed reason (e.g. nyx x heterogeneous self-excludes)."""
+    """Cartesian product over dotted-path axes.
+
+    Invalid combinations are dropped with a printed reason (e.g. nyx x
+    heterogeneous self-excludes).
+
+    Args:
+        base: Any experiment handle accepted by run.build.
+        axes: Mapping of dotted override path -> list of values.
+        group: Ablation group name; defaults to 'grid_<leaf1>_<leaf2>_...'.
+
+    Returns:
+        List of validated specs, one per surviving combination, each tagged
+        with the ablation_group and a 'k1=v1,k2=v2' variant.
+    """
     spec = build(base)
     group = group or "grid_" + "_".join(p.rsplit(".", 1)[-1] for p in axes)
     paths = list(axes)

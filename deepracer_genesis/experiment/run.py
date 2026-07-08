@@ -17,9 +17,19 @@ from .stages import Pipeline
 def build(target, **overrides) -> ExperimentSpec:
     """Resolve any experiment handle into a validated ExperimentSpec.
 
-    Overrides route by name: keys matching the Experiment class's config
-    attributes go to the class (`run("SafeTransfer", budget=10.0)`); the rest
-    must be ExperimentSpec fields (`seed`, `variant`, ...).
+    Args:
+        target: a registered name, an ``@experiment`` function, an
+            ``Experiment`` class or instance, a ``Pipeline``, or a spec.
+        **overrides: route by name — keys matching the Experiment class's
+            config attributes go to the class
+            (``run("SafeTransfer", budget=10.0)``); the rest must be
+            ExperimentSpec fields (``seed``, ``variant``, ...).
+
+    Returns:
+        The validated, frozen ExperimentSpec.
+
+    Raises:
+        SpecError: unknown target, unknown override, or invalid config.
     """
     if isinstance(target, str):
         try:
@@ -64,9 +74,20 @@ def build(target, **overrides) -> ExperimentSpec:
 def run(target, *, root: str = "runs", build_only: bool = False,
         force: bool = False, on_eval=None,
         **overrides) -> "EvalRecord | ExperimentSpec":
-    """Build the spec and train it. `run('cam_baseline', seed=3)`;
-    `force=True` retrains even when the identity cache has a record;
-    `on_eval(frames, metrics)` fires at every periodic eval (HPO pruning)."""
+    """Build the spec and train it (or return the cached record).
+
+    Args:
+        target: anything :func:`build` accepts.
+        root: runs directory root.
+        build_only: return the spec instead of training.
+        force: retrain even when the identity cache has a record.
+        on_eval: ``fn(frames, metrics)`` fired at every periodic eval —
+            raise inside it to stop the run (HPO pruning).
+        **overrides: forwarded to :func:`build`.
+
+    Returns:
+        The run's EvalRecord (or the ExperimentSpec when ``build_only``).
+    """
     spec = build(target, **overrides)
     if build_only:
         return spec

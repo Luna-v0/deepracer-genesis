@@ -47,10 +47,23 @@ def build_route(points_xy, half_width: float, n_waypoints: int = 150,
                 smooth_passes: int = 3) -> np.ndarray:
     """Turn a rough closed polygon into a (W, 6) DeepRacer route.
 
-    `points_xy` is any (P, 2) sequence of corner points (P >= 3), traversed
-    in order and closed automatically. Chaikin corner-cutting smooths it into
-    a drivable loop, arclength resampling spaces the waypoints evenly, and
-    the borders are offset `half_width` along the left/right normals.
+    Chaikin corner-cutting smooths the polygon into a drivable loop,
+    arclength resampling spaces the waypoints evenly, and the borders are
+    offset `half_width` along the left/right normals.
+
+    Args:
+        points_xy: Any (P, 2) sequence of corner points (P >= 3), traversed
+            in order and closed automatically.
+        half_width: Border offset from the centerline in meters (half the
+            track width).
+        n_waypoints: Number of output waypoints.
+        smooth_passes: Chaikin corner-cutting iterations.
+
+    Returns:
+        (W, 6) float array of [center_xy, inner_xy, outer_xy] per waypoint.
+
+    Raises:
+        ValueError: If points_xy is not (P, 2) with P >= 3.
     """
     pts = np.asarray(points_xy, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 3:
@@ -83,29 +96,51 @@ def build_route(points_xy, half_width: float, n_waypoints: int = 150,
 
 
 def route_from_waypoints(waypoints_xy, width: float,
-                         n_waypoints: Optional[int] = None) -> np.ndarray:
-    """The DeepRacer-native way to define a track: CENTERLINE waypoints + a
-    track WIDTH. No smoothing — your waypoints ARE the centerline (optionally
-    resampled to `n_waypoints` for even spacing); borders are offset half the
-    width along the left/right normals.
+                         n_waypoints: Optional[int] = None,
+                         waypoint_spacing: float = 0.3) -> np.ndarray:
+    """Build a route the DeepRacer-native way: centerline waypoints + width.
 
-        route = route_from_waypoints([(0,0), (5,0), (5,4), (0,4)], width=1.06)
-        install_track("my_square", route)
+    No smoothing — your waypoints ARE the centerline. The polyline is
+    densified to roughly `waypoint_spacing` meters between waypoints
+    (official tracks use ~0.15 m), so a 4-corner square becomes a properly
+    sampled loop instead of 4 points; the sim's localization, lookahead and
+    curvature features all assume dense waypoints.
+
+    Args:
+        waypoints_xy: (P, 2) centerline points in meters, in driving order.
+            The loop closes automatically (a repeated last point is dropped).
+        width: full track width in meters (official tracks: ~1.06).
+        n_waypoints: exact number of output waypoints. Overrides
+            `waypoint_spacing` when given.
+        waypoint_spacing: target distance between output waypoints in meters
+            (used when `n_waypoints` is None; output count is capped at 5000).
+
+    Returns:
+        (W, 6) float array of [center_xy, inner_xy, outer_xy] per waypoint.
+
+    Raises:
+        ValueError: fewer than 3 points or a malformed array.
+
+    Example:
+        >>> route = route_from_waypoints([(0, 0), (5, 0), (5, 4), (0, 4)], width=1.06)
+        >>> install_track("my_square", route)
     """
     pts = np.asarray(waypoints_xy, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 3:
         raise ValueError("waypoints_xy must be (P, 2) with P >= 3")
     if np.allclose(pts[0], pts[-1]):
         pts = pts[:-1]                        # closed automatically
-    if n_waypoints:
-        seg = np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1)
-        cum = np.concatenate([[0.0], np.cumsum(seg)])
-        samples = np.linspace(0.0, cum[-1], n_waypoints, endpoint=False)
-        idx = np.clip(np.searchsorted(cum, samples, side="right") - 1,
-                      0, len(pts) - 1)
-        frac = (samples - cum[idx]) / np.maximum(seg[idx], 1e-9)
-        nxt = np.roll(pts, -1, axis=0)
-        pts = pts[idx] * (1 - frac[:, None]) + nxt[idx] * frac[:, None]
+
+    seg = np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1)
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+    if n_waypoints is None:
+        n_waypoints = int(np.clip(round(cum[-1] / waypoint_spacing), 32, 5000))
+    samples = np.linspace(0.0, cum[-1], n_waypoints, endpoint=False)
+    idx = np.clip(np.searchsorted(cum, samples, side="right") - 1,
+                  0, len(pts) - 1)
+    frac = (samples - cum[idx]) / np.maximum(seg[idx], 1e-9)
+    nxt = np.roll(pts, -1, axis=0)
+    pts = pts[idx] * (1 - frac[:, None]) + nxt[idx] * frac[:, None]
 
     tangent = np.roll(pts, -1, axis=0) - np.roll(pts, 1, axis=0)
     tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-9)
@@ -113,6 +148,51 @@ def route_from_waypoints(waypoints_xy, width: float,
     inner = pts + normal * (width / 2)
     outer = pts - normal * (width / 2)
     return np.concatenate([pts, inner, outer], axis=1)
+
+
+def track_metrics(route: np.ndarray) -> dict:
+    """Physical measurements for building the track in real life.
+
+    Args:
+        route: (W, 6) route array ([center, inner, outer] per waypoint).
+
+    Returns:
+        Dict with:
+            length_m: centerline lap length.
+            width_m: mean track width.
+            road_area_m2: paved surface area (shoelace of the outer border
+                polygon minus the inner one — exact for the ribbon).
+            footprint_m: (x, y) bounding-box size — the floor space you
+                need, borders included.
+            min_turn_radius_m: tightest centerline turn (1/max curvature);
+                AWS suggests keeping physical turns manageable for the car
+                (~0.4 m radius is already tight at DeepRacer scale).
+    """
+    center, inner, outer = route[:, 0:2], route[:, 2:4], route[:, 4:6]
+    seg = np.linalg.norm(np.roll(center, -1, axis=0) - center, axis=1)
+    length = float(seg.sum())
+
+    def shoelace(poly):
+        x, y = poly[:, 0], poly[:, 1]
+        return 0.5 * abs(float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)))
+
+    width = float(np.linalg.norm(outer - inner, axis=1).mean())
+    lo = np.minimum(inner, outer).min(axis=0)
+    hi = np.maximum(inner, outer).max(axis=0)
+
+    yaw = np.arctan2(*(np.roll(center, -1, axis=0) - center).T[::-1])
+    dyaw = np.abs((np.diff(yaw, append=yaw[:1]) + np.pi) % (2 * np.pi) - np.pi)
+    curvature = dyaw / np.maximum(seg, 1e-9)
+    max_k = float(np.percentile(curvature, 99))          # robust to kinks
+
+    return {
+        "length_m": round(length, 2),
+        "width_m": round(width, 3),
+        "road_area_m2": round(abs(shoelace(outer) - shoelace(inner)), 2),
+        "footprint_m": (round(float(hi[0] - lo[0]), 2),
+                        round(float(hi[1] - lo[1]), 2)),
+        "min_turn_radius_m": round(1.0 / max_k, 2) if max_k > 1e-6 else float("inf"),
+    }
 
 
 def _quad(f, base, flip):
@@ -146,7 +226,23 @@ def _write_strip(f, left, right, z, vert_offset, flip):
 def build_track_mesh(route: np.ndarray, out_obj: str, *,
                      line_width: float = 0.04, dash_len: float = 0.30,
                      dash_gap: float = 0.35) -> str:
-    """Write a road-ribbon OBJ (road / border lines / dashed centerline)."""
+    """Write a road-ribbon OBJ (road / border lines / dashed centerline).
+
+    Materials are solid colors delivered as tiny 4x4 PNG textures (see the
+    _PALETTE note: Madrona's textureless path misassigns per-submesh Kd
+    colors), so the mesh renders identically under Madrona / Nyx /
+    rasterizer. The .mtl and PNGs are written next to the OBJ.
+
+    Args:
+        route: (W, 6) route array ([center, inner, outer] per waypoint).
+        out_obj: Output .obj path (parent directories are created).
+        line_width: Border-line width in meters.
+        dash_len: Centerline dash length in meters.
+        dash_gap: Gap between centerline dashes in meters.
+
+    Returns:
+        The written .obj path.
+    """
     center, inner, outer = route[:, 0:2], route[:, 2:4], route[:, 4:6]
     normal = (inner - center)
     normal /= np.maximum(np.linalg.norm(normal, axis=1, keepdims=True), 1e-9)
@@ -205,6 +301,16 @@ def install_track(name: str, route: np.ndarray) -> str:
     After this (and in every later process — generated tracks are discovered
     at import), the track is usable anywhere a track name is accepted:
     `FeatureEnvironment(tracks=(name,))`, `rollout_video(..., track=name)`...
+
+    Args:
+        name: Track name to register under.
+        route: (W, 6) [center, inner, outer] route array.
+
+    Returns:
+        The track directory under the generated-assets tree.
+
+    Raises:
+        ValueError: If the route is not shaped (W, 6).
     """
     from ..envs.track import TRACKS
 
@@ -229,6 +335,17 @@ def fetch_official_track(name: str, *, force: bool = False) -> str:
     Canada_Training, China_track, Mexico_track, New_York_Track, Spain_track,
     Tokyo_Training_track, Vegas_track, Monaco, Austin, Singapore,
     arctic_open, penbay_pro, ... (see the repo for the full list).
+
+    Args:
+        name: Official track name, exactly as spelled in the repo.
+        force: Re-download and rebuild even when already installed.
+
+    Returns:
+        The installed track directory.
+
+    Raises:
+        RuntimeError: If the download fails or the fetched route has an
+            unexpected shape.
     """
     from ..envs.track import TRACKS
 

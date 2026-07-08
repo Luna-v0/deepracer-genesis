@@ -47,7 +47,11 @@ DEFAULT_PID = (0.05, 0.0005, 0.1)
 
 # ----------------------------------------------------------------------
 class Stage:
-    """One slice of the spec. Subclasses implement apply(spec) -> spec."""
+    """One slice of the spec.
+
+    Subclasses implement `apply(spec) -> spec` (a pure fold step over the
+    frozen spec) and set KIND; `>>` composes stages into a Pipeline.
+    """
 
     KIND: str = "stage"
 
@@ -59,6 +63,14 @@ class Stage:
 
 
 class Pipeline:
+    """An ordered chain of Stages, composed with `>>`.
+
+    build() checks the structure (Environment first, exactly one Policy,
+    at-most-one limits per kind), left-folds the stages over an empty spec,
+    applies keyword overrides, infers the algorithm and validates.
+    Build-time only — nothing here runs per-step.
+    """
+
     def __init__(self, stages):
         self.stages = list(stages)
 
@@ -101,9 +113,10 @@ class Pipeline:
 # Environment stages (source; must be first)
 @dataclass(frozen=True)
 class FeatureEnvironment(Stage):
-    """State-vector env: waypoint-relative features, no rendering."""
+    """State-vector env: no rendering; the vector is picked by feature_set."""
 
-    features: tuple[str, ...] = ()
+    feature_set: str = "classic"        # or "perception" (see envs/features.py)
+    feature_params: Optional[dict] = None
     lookahead_k: int = 10
     tracks: tuple[str, ...] = ("reinvent_base",)   # >1 => heterogeneous per-env
     num_envs: int = 512
@@ -115,7 +128,9 @@ class FeatureEnvironment(Stage):
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, env=EnvSpec(
             modality="feature", render="none",
-            features=tuple(self.features), lookahead_k=self.lookahead_k,
+            feature_set=self.feature_set,
+            feature_params=dict(self.feature_params or {}),
+            lookahead_k=self.lookahead_k,
             tracks=tuple(self.tracks), num_envs=self.num_envs,
             random_start=self.random_start,
             random_direction=self.random_direction,
@@ -131,6 +146,8 @@ class CameraEnvironment(Stage):
     resolution: tuple[int, int] = (160, 120)
     fov: float = 90.0
     lookahead_k: int = 10
+    feature_set: str = "classic"
+    feature_params: Optional[dict] = None
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 128
     random_start: bool = True
@@ -142,7 +159,10 @@ class CameraEnvironment(Stage):
         return replace(spec, env=EnvSpec(
             modality="camera", render=self.render,
             resolution=tuple(self.resolution), fov=self.fov,
-            lookahead_k=self.lookahead_k, tracks=tuple(self.tracks),
+            lookahead_k=self.lookahead_k,
+            feature_set=self.feature_set,
+            feature_params=dict(self.feature_params or {}),
+            tracks=tuple(self.tracks),
             num_envs=self.num_envs, random_start=self.random_start,
             random_direction=self.random_direction,
         ))
@@ -174,8 +194,20 @@ class SafeRLCameraEnvironment(CameraEnvironment):
 
 def discrete_grid(steer_bins: int = 5, speed_bins: int = 2,
                   max_speed_frac: float = 1.0) -> tuple:
-    """The classic DeepRacer action list: a (steer x speed) grid of pairs in
-    normalized [-1, 1] units — pass to any policy stage's `actions=`."""
+    """The classic DeepRacer action list: a (steer x speed) grid.
+
+    Pairs are in normalized [-1, 1] units — pass the result to any policy
+    stage's `actions=` to make the policy discrete.
+
+    Args:
+        steer_bins: Number of steering values, evenly spaced over [-1, 1].
+        speed_bins: Number of speed values; throttle -1 maps to min speed,
+            so the bins spread over the upper speed range.
+        max_speed_frac: Fraction of full speed reached by the fastest bin.
+
+    Returns:
+        Tuple of (steer, speed) pairs, rounded to 3 decimals.
+    """
     import numpy as np
     steers = np.linspace(-1.0, 1.0, steer_bins)
     # throttle -1 maps to min speed; spread the bins over the upper range
@@ -428,7 +460,7 @@ class Algo(PPO):
     The PPO hyperparameters double as generic on-policy knobs (horizon,
     minibatches, lr, ...); `params` carries anything algorithm-specific.
     Register the implementation with
-    `@register_algorithm("my_kind")` in experiment/algorithms.py's registry —
+    `@register_algorithm("my_kind")` in deepracer_genesis.algorithms —
     see the Algorithm protocol there for the full contract.
     """
 

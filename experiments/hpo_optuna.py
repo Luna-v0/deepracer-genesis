@@ -16,8 +16,7 @@ import os
 
 import optuna
 
-from deepracer_genesis.experiment import FeatureEnvironment, VectorPolicy, run
-from deepracer_genesis.experiment.ablation import override
+from deepracer_genesis.experiment import PPO, FeatureEnvironment, VectorPolicy, run
 
 STEPS = int(os.environ.get("HPO_STEPS", 5_000_000))
 EVAL_EVERY = int(os.environ.get("HPO_EVAL_EVERY", 500_000))
@@ -26,17 +25,17 @@ METRIC = "completion_rate"
 
 
 def objective(trial: optuna.Trial) -> float:
-    spec = (FeatureEnvironment(lookahead_k=10, num_envs=1024)
-            >> VectorPolicy()).build(seed=0, total_env_steps=STEPS,
-                                     eval_every_steps=EVAL_EVERY,
-                                     ablation_group="hpo")
-    for key, value in {
-        "lr": trial.suggest_float("lr", 1e-4, 1e-2, log=True),
-        "entropy_coef": trial.suggest_float("entropy_coef", 1e-3, 3e-2, log=True),
-        "epochs": trial.suggest_int("epochs", 3, 8),
-        "clip": trial.suggest_float("clip", 0.1, 0.3),
-    }.items():
-        spec = override(spec, f"algorithm.ppo.{key}", value)
+    # the sampled values go straight into the PPO stage — the same pipeline
+    # syntax as any experiment, no path-string overrides
+    spec = (
+        FeatureEnvironment(lookahead_k=10, num_envs=1024)
+        >> VectorPolicy()
+        >> PPO(lr=trial.suggest_float("lr", 1e-4, 1e-2, log=True),
+               entropy_coef=trial.suggest_float("entropy_coef", 1e-3, 3e-2, log=True),
+               epochs=trial.suggest_int("epochs", 3, 8),
+               clip=trial.suggest_float("clip", 0.1, 0.3))
+    ).build(seed=0, total_env_steps=STEPS, eval_every_steps=EVAL_EVERY,
+            ablation_group="hpo")
 
     def report(frames: int, metrics: dict) -> None:
         trial.report(metrics[METRIC], frames)

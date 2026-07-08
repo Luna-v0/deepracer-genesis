@@ -1,0 +1,131 @@
+{
+  "spec_id": "c42d6f33a36a",
+  "spec": {
+    "env": {
+      "modality": "feature",
+      "render": "none",
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "lookahead_k": 10,
+      "features": [],
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 1024,
+      "random_start": true,
+      "random_direction": false,
+      "reward_fn": "deepracer",
+      "reward_scales": {},
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {},
+      "appearance": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "state"
+      ],
+      "critic_keys": [
+        "state"
+      ],
+      "cnn": null,
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      },
+      "actions": null
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "kind": "ppo",
+      "ppo": {
+        "clip": 0.20897663659937937,
+        "epochs": 6,
+        "minibatches": 4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 0.0012520653814999472,
+        "entropy_coef": 0.011387317092169062,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "total_env_steps": 98304,
+    "eval_every_steps": 49152,
+    "seed": 0,
+    "ablation_group": "hpo",
+    "variant": null
+  },
+  "seed": 0,
+  "ablation_group": "hpo",
+  "variant": null,
+  "metrics": {
+    "episodes": 8972,
+    "mean_return": 41.765708923339844,
+    "mean_progress_m": 4.732537269592285,
+    "mean_episode_s": 3.869778871536255,
+    "completion_rate": 0.0,
+    "mean_laps": 0.2672366797924042,
+    "offtrack_rate": 1.0,
+    "lap_time_s": NaN,
+    "mean_speed_mps": 1.180707335472107
+  },
+  "train": {
+    "wall_clock_s": 21.0,
+    "steps_per_s": 4679.3,
+    "total_env_steps": 98304,
+    "checkpoint": "runs/hpo/hpo/run-0-c42d6f33a36a/best.pt"
+  },
+  "eval_history": [
+    {
+      "frames": 49152,
+      "episodes": 11216,
+      "mean_return": -5.690087795257568,
+      "mean_progress_m": 0.10211669653654099,
+      "mean_episode_s": 3.137165069580078,
+      "completion_rate": 0.0,
+      "mean_laps": 0.0057663219049572945,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.03343717381358147
+    },
+    {
+      "frames": 98304,
+      "episodes": 8870,
+      "mean_return": -3.65708589553833,
+      "mean_progress_m": 0.18382351100444794,
+      "mean_episode_s": 3.916295289993286,
+      "completion_rate": 0.0,
+      "mean_laps": 0.010380136780440807,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.04812100529670715
+    }
+  ],
+  "created_at": "2026-07-08T18:55:23"
+}

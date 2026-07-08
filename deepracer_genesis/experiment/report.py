@@ -24,7 +24,14 @@ TABLE_METRICS = ("completion_rate", "lap_time_s", "mean_progress_m",
 
 
 def load_records(root: str = "runs") -> list[EvalRecord]:
-    """Every eval_record.json under `root` (one per finished run)."""
+    """Load every eval_record.json under `root` (one per finished run).
+
+    Args:
+        root: Runs directory, scanned recursively.
+
+    Returns:
+        EvalRecords in sorted file-path order.
+    """
     return [EvalRecord.load(p)
             for p in sorted(glob.glob(os.path.join(root, "**", "eval_record.json"),
                                       recursive=True))]
@@ -121,6 +128,21 @@ def delta_rows(records: list[EvalRecord]) -> dict[str, dict]:
 
 def build_report(root: str = "runs", out_md: str | None = None,
                  out_csv: str | None = None) -> str:
+    """Regenerate the markdown + CSV report from stored eval records.
+
+    No re-training: everything derives from the eval_record.json files under
+    `root`. The report holds the grouped combination table (plan section 5.1
+    axes, metrics mean ± std over seeds) and per-ablation-group before/after
+    delta tables (treatment - baseline; see BASELINE_HINTS).
+
+    Args:
+        root: Runs directory scanned for eval_record.json files.
+        out_md: Markdown output path; defaults to <root>/report.md.
+        out_csv: CSV output path; defaults to <root>/report.csv.
+
+    Returns:
+        The markdown report as a string (also written to out_md).
+    """
     records = load_records(root)
     out_md = out_md or os.path.join(root, "report.md")
     out_csv = out_csv or os.path.join(root, "report.csv")

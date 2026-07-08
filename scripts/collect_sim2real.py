@@ -4,7 +4,7 @@ Loops tracks in ONE process (Genesis scenes rebuild fine in-process) and
 runs `collect_rollout_dataset` on each with the full DR stack — per-episode
 world-color remap, per-step image aug, physics DR, random spawn + driving
 direction — driven by a `NoisyExpert` agent that wanders off the centerline
-(and off the track). See deepracer_genesis/experiment/agents.py to plug in
+(and off the track). See deepracer_genesis.agents to plug in
 your own driving behavior.
 
     python scripts/collect_sim2real.py --out /mnt/models/dr_perception/sim2real_rollouts
@@ -46,9 +46,9 @@ def main():
         DomainRandomizationPhysics,
         DomainRandomizationTrackAppearance,
     )
-    from deepracer_genesis.experiment.agents import NoisyExpert
-    from deepracer_genesis.experiment.data_collection import collect_rollout_dataset
-    from deepracer_genesis.tools.track_split import TrackDataset
+    from deepracer_genesis.agents import NoisyExpert
+    from deepracer_genesis.datasets import collect_rollout_dataset
+    from deepracer_genesis.datasets import TrackDataset
 
     if args.tracks:
         tracks = args.tracks.split(",")

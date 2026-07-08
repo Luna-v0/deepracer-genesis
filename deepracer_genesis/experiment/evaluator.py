@@ -18,7 +18,19 @@ import torch
 
 @dataclass
 class EvalRecord:
-    """One run's provenance + measurements; the Reporter's input unit."""
+    """One run's provenance + measurements; the Reporter's input unit.
+
+    Attributes:
+        spec_id: Identity hash of the spec (the run-directory key).
+        spec: One-way dump of the ExperimentSpec.
+        seed: Training seed.
+        ablation_group: Group tag for the reporter's delta tables.
+        variant: Variant tag within the ablation group.
+        metrics: Final evaluation metrics (see aggregate_episodes).
+        train: Training stats (steps_per_s, wall_clock_s, ...).
+        eval_history: Periodic evals: [{frames, **metrics}].
+        created_at: ISO timestamp, filled on save() when empty.
+    """
 
     spec_id: str
     spec: dict                      # one-way dump of the ExperimentSpec
@@ -31,6 +43,14 @@ class EvalRecord:
     created_at: str = ""
 
     def save(self, run_dir: str) -> str:
+        """Write this record as eval_record.json under `run_dir`.
+
+        Args:
+            run_dir: Run directory (created if missing).
+
+        Returns:
+            Path of the written JSON file.
+        """
         os.makedirs(run_dir, exist_ok=True)
         path = os.path.join(run_dir, "eval_record.json")
         payload = dataclasses.asdict(self)
@@ -41,6 +61,14 @@ class EvalRecord:
 
     @staticmethod
     def load(path: str) -> "EvalRecord":
+        """Load a record previously written by save().
+
+        Args:
+            path: Path to an eval_record.json file.
+
+        Returns:
+            The reconstructed EvalRecord.
+        """
         with open(path) as f:
             return EvalRecord(**json.load(f))
 
@@ -51,8 +79,20 @@ def evaluate_policy(sim, actor, steps: Optional[int] = None,
 
     Bypasses the collector/autoreset machinery entirely: per-step episode
     info comes straight from sim.step_info, so terminal-step stats are exact.
-    `obs_transform` (e.g. the frozen encoder) is applied to observations
-    before the policy when the trained policy expects derived keys.
+
+    Args:
+        sim: The raw Genesis sim (DeepRacerEnv), not the TorchRL wrapper.
+        actor: TensorDict policy module producing an "action" key; run with
+            deterministic (mean) actions.
+        steps: Rollout length; defaults to sim.max_episode_length + 300.
+        obs_transform: Optional callable applied to observations before the
+            policy (e.g. the frozen encoder) when the trained policy expects
+            derived keys.
+        cost_budget: Per-episode cost budget; enables the cost metrics when
+            the sim exposes a cost_buf.
+
+    Returns:
+        Scalar metrics dict from aggregate_episodes().
     """
     from torchrl.envs.utils import ExplorationType, set_exploration_type
 
@@ -106,6 +146,24 @@ def aggregate_episodes(
     partial trailing episode of each env never biases the stats. Laps derive
     from cumulative progress / track_length — robust to random spawn points
     (a car spawning just before the finish line does not get a free "lap").
+
+    Args:
+        reward: (T, N) per-step rewards.
+        done: (T, N) bool; True where the episode ended after this step.
+        progress_delta: (T, N) meters gained this step.
+        offtrack: (T, N) bool; offtrack termination event.
+        control_dt: Control timestep in seconds.
+        track_length: Scalar or (N,): meters per lap (per env).
+        cost: Optional (T, N) per-step cost.
+        cost_budget: Per-episode budget; adds the violation metrics when
+            `cost` is given.
+
+    Returns:
+        Metrics dict: episodes, mean_return, mean_progress_m, mean_episode_s,
+        completion_rate, mean_laps, offtrack_rate, lap_time_s, mean_speed_mps
+        (+ mean_cost, cost_violation_rate, budget_satisfied when cost is
+        given). Just {"episodes": 0} when no episode finished inside the
+        window.
     """
     T, N = reward.shape
     device = reward.device
