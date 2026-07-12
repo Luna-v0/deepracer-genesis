@@ -20,9 +20,15 @@ import genesis as gs
 
 from .track import MultiTrack
 from ..randomization.domain_rand import randomize_physics, randomize_camera_mount
+from .scene import define_scene
+from .entities import build_field, build_car
 
-WHEEL_DOFS = ["left_rear_wheel_joint", "right_rear_wheel_joint",
-              "left_front_wheel_joint", "right_front_wheel_joint"]
+WHEEL_DOFS = [
+    "left_rear_wheel_joint",
+    "right_rear_wheel_joint",
+    "left_front_wheel_joint",
+    "right_front_wheel_joint",
+]
 STEER_DOFS = ["left_steering_hinge_joint", "right_steering_hinge_joint"]
 
 
@@ -47,36 +53,27 @@ class DeepRacerEnv:
         self.dt = env_cfg["dt"] * env_cfg["decimation"]  # control dt
         self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.dt)
 
-        names = env_cfg["track"] if isinstance(env_cfg["track"], (list, tuple)) else [env_cfg["track"]]
+        names = (
+            env_cfg["track"]
+            if isinstance(env_cfg["track"], (list, tuple))
+            else [env_cfg["track"]]
+        )
         self.track = MultiTrack(names, num_envs, self.device)
 
         # ------------- scene -------------
         # vision_renderer "nyx": observations come from Nyx path-tracer camera
         # sensors (batched per env, correct texture colors) instead of Madrona;
         # the scene renderer is then only used by the spectator camera.
-        self.nyx_vision = self.vision and env_cfg.get("vision_renderer", "batch") == "nyx"
-        renderer = (gs.renderers.BatchRenderer(use_rasterizer=True)
-                    if self.vision and not self.nyx_vision else gs.renderers.Rasterizer())
-        self.scene = gs.Scene(
-            sim_options=gs.options.SimOptions(dt=env_cfg["dt"], substeps=1),
-            rigid_options=gs.options.RigidOptions(
-                dt=env_cfg["dt"],
-                constraint_solver=gs.constraint_solver.Newton,
-                enable_collision=True,
-                enable_joint_limit=True,
-                # per-env dofs/links properties (kp/kv/armature/mass/COM DR)
-                # need batched physics info, per the Genesis DR guide
-                batch_dofs_info=bool(env_cfg.get("randomize", False)),
-                batch_links_info=bool(env_cfg.get("randomize", False)),
-            ),
-            vis_options=gs.options.VisOptions(
-                shadow=False,
-                ambient_light=(0.35, 0.35, 0.35),
-                background_color=tuple(env_cfg.get("background_color", (0.55, 0.72, 0.9))),
-            ),
-            renderer=renderer,
-            show_viewer=show_viewer,
+        self.nyx_vision = (
+            self.vision and env_cfg.get("vision_renderer", "batch") == "nyx"
         )
+        renderer = (
+            gs.renderers.BatchRenderer(use_rasterizer=True)
+            if self.vision and not self.nyx_vision
+            else gs.renderers.Rasterizer()
+        )
+
+        self.scene = define_scene(env_cfg, renderer, show_viewer)
         # green ground doubles as the field: some DAE ground materials render
         # transparent under Madrona, and this is what shows through. Must be a
         # surface color — Madrona does not sample ImageTexture on primitives.
@@ -101,13 +98,17 @@ class DeepRacerEnv:
         # Nyx cannot read DAE; use the OBJ conversions (same geometry/textures)
         mesh_paths = self.track.obj_paths if self.nyx_vision else self.track.mesh_paths
         if self.nyx_vision and len(mesh_paths) > 1:
-            raise NotImplementedError("heterogeneous tracks are not supported with the Nyx renderer")
-        track_morphs = [gs.morphs.Mesh(file=p, fixed=True, collision=False)
-                        for p in mesh_paths]
+            raise NotImplementedError(
+                "heterogeneous tracks are not supported with the Nyx renderer"
+            )
+        track_morphs = [
+            gs.morphs.Mesh(file=p, fixed=True, collision=False) for p in mesh_paths
+        ]
         # a list of morphs makes the entity heterogeneous: each parallel env
         # simulates (and renders) one geometry variant
         self.track_entity = self.scene.add_entity(
-            track_morphs if len(track_morphs) > 1 else track_morphs[0])
+            track_morphs if len(track_morphs) > 1 else track_morphs[0]
+        )
 
         self.cam = None
         self.top_cam = None
@@ -119,7 +120,9 @@ class DeepRacerEnv:
             # batch pipeline.
             t0 = self.track.tracks[0]
             c = t0.center.mean(dim=0).cpu().numpy()
-            extent = (t0.center.max(dim=0).values - t0.center.min(dim=0).values).max().item()
+            extent = (
+                (t0.center.max(dim=0).values - t0.center.min(dim=0).values).max().item()
+            )
             sw, sh = env_cfg.get("spectator_res", (1280, 960))
             self.spec_cam = self.scene.add_camera(
                 res=(sw, sh),
@@ -135,57 +138,87 @@ class DeepRacerEnv:
             import gs_nyx.nyx_py_sdk as nps
             from gs_nyx_plugin.nyx_camera_options import NyxCameraOptions
 
-            sun = {"type": "directional", "dir": (0.4, 0.3, -1.0), "color": (1.0, 1.0, 1.0),
-                   "intensity": float(env_cfg.get("nyx_light_intensity", 3.0)), "shadow": False}
+            sun = {
+                "type": "directional",
+                "dir": (0.4, 0.3, -1.0),
+                "color": (1.0, 1.0, 1.0),
+                "intensity": float(env_cfg.get("nyx_light_intensity", 3.0)),
+                "shadow": False,
+            }
             mode = getattr(npr.ERenderMode, env_cfg.get("nyx_mode", "Forward"))
             res = env_cfg["camera_res"]
             # denoise/AA off: their temporal history smears moving objects
             # across frames — bad for RL observations and for validation diffs
             nyx_common = dict(
-                spp=int(env_cfg.get("nyx_spp", 4)), render_mode=mode, lights=[sun],
-                denoise=False, anti_aliasing=nps.EAntiAliasing.Off,
+                spp=int(env_cfg.get("nyx_spp", 4)),
+                render_mode=mode,
+                lights=[sun],
+                denoise=False,
+                anti_aliasing=nps.EAntiAliasing.Off,
             )
             # same link->camera mount transform as the Madrona path (camera
             # looks along -z of offset_T), including the downward pitch;
             # note: camera sensors ignore pos_offset/euler_offset
-            self.nyx_cam = self.scene.add_sensor(NyxCameraOptions(
-                res=res, fov=env_cfg["camera_fov"],
-                entity_idx=self.car.idx,
-                link_idx_local=self.car.get_link("camera_link").idx_local,
-                offset_T=self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0)),
-                **nyx_common,
-            ))
+            self.nyx_cam = self.scene.add_sensor(
+                NyxCameraOptions(
+                    res=res,
+                    fov=env_cfg["camera_fov"],
+                    entity_idx=self.car.idx,
+                    link_idx_local=self.car.get_link("camera_link").idx_local,
+                    offset_T=self._camera_offset_T(
+                        env_cfg.get("camera_pitch_deg", 0.0)
+                    ),
+                    **nyx_common,
+                )
+            )
             self.nyx_top = None
             if env_cfg.get("topdown_camera", False):
                 t0 = self.track.tracks[0]
                 c = t0.center.mean(dim=0).cpu().numpy()
-                extent = (t0.center.max(dim=0).values - t0.center.min(dim=0).values).max().item()
+                extent = (
+                    (t0.center.max(dim=0).values - t0.center.min(dim=0).values)
+                    .max()
+                    .item()
+                )
                 self.top_cam_center = t0.center.mean(dim=0).expand(num_envs, 2).clone()
-                self.top_cam_height = torch.full((num_envs,), extent * 1.2, device=self.device)
-                self.nyx_top = self.scene.add_sensor(NyxCameraOptions(
-                    res=res, fov=60,
-                    pos=(float(c[0]), float(c[1]), extent * 1.2),
-                    lookat=(float(c[0]), float(c[1]), 0.0), up=(0.0, 1.0, 0.0),
-                    **nyx_common,
-                ))
+                self.top_cam_height = torch.full(
+                    (num_envs,), extent * 1.2, device=self.device
+                )
+                self.nyx_top = self.scene.add_sensor(
+                    NyxCameraOptions(
+                        res=res,
+                        fov=60,
+                        pos=(float(c[0]), float(c[1]), extent * 1.2),
+                        lookat=(float(c[0]), float(c[1]), 0.0),
+                        up=(0.0, 1.0, 0.0),
+                        **nyx_common,
+                    )
+                )
         elif self.vision:
             self.scene.add_light(
-                pos=(0.0, 0.0, 10.0), dir=(0.4, 0.3, -1.0), directional=True,
-                castshadow=False, intensity=float(env_cfg.get("light_intensity", 6.0)),
+                pos=(0.0, 0.0, 10.0),
+                dir=(0.4, 0.3, -1.0),
+                directional=True,
+                castshadow=False,
+                intensity=float(env_cfg.get("light_intensity", 6.0)),
             )
             res = env_cfg["camera_res"]  # (W, H)
-            self.cam = self.scene.add_camera(res=res, fov=env_cfg["camera_fov"], GUI=False)
+            self.cam = self.scene.add_camera(
+                res=res, fov=env_cfg["camera_fov"], GUI=False
+            )
             if env_cfg.get("topdown_camera", False):
                 # per-env bird's-eye pose over each env's own track variant
                 centers, heights = [], []
                 for t in self.track.tracks:
                     c = t.center.mean(dim=0)
-                    extent = (t.center.max(dim=0).values - t.center.min(dim=0).values).max()
+                    extent = (
+                        t.center.max(dim=0).values - t.center.min(dim=0).values
+                    ).max()
                     centers.append(c)
                     heights.append(extent * 1.2)
                 ev = self.track.variant_idx
-                self.top_cam_center = torch.stack(centers)[ev]          # (N, 2)
-                self.top_cam_height = torch.stack(heights)[ev]          # (N,)
+                self.top_cam_center = torch.stack(centers)[ev]  # (N, 2)
+                self.top_cam_height = torch.stack(heights)[ev]  # (N,)
                 c0 = centers[0].cpu().numpy()
                 self.top_cam = self.scene.add_camera(
                     res=res,
@@ -199,10 +232,11 @@ class DeepRacerEnv:
         self.scene.build(n_envs=num_envs)
 
         if self.top_cam is not None:
-            pos = torch.cat([self.top_cam_center,
-                             self.top_cam_height[:, None]], dim=1)
-            lookat = torch.cat([self.top_cam_center,
-                                torch.zeros(num_envs, 1, device=self.device)], dim=1)
+            pos = torch.cat([self.top_cam_center, self.top_cam_height[:, None]], dim=1)
+            lookat = torch.cat(
+                [self.top_cam_center, torch.zeros(num_envs, 1, device=self.device)],
+                dim=1,
+            )
             up = torch.tensor([[0.0, 1.0, 0.0]], device=self.device).expand(num_envs, 3)
             self.top_cam.set_pose(pos=pos, lookat=lookat, up=up)
 
@@ -210,27 +244,35 @@ class DeepRacerEnv:
         self.wheel_dofs = [self.car.get_joint(n).dof_idx_local for n in WHEEL_DOFS]
         self.steer_dofs = [self.car.get_joint(n).dof_idx_local for n in STEER_DOFS]
         self.car.set_dofs_kp(
-            torch.full((2,), env_cfg["steer_kp"], device=self.device), self.steer_dofs)
+            torch.full((2,), env_cfg["steer_kp"], device=self.device), self.steer_dofs
+        )
         self.car.set_dofs_kv(
-            torch.full((2,), env_cfg["steer_kv"], device=self.device), self.steer_dofs)
+            torch.full((2,), env_cfg["steer_kv"], device=self.device), self.steer_dofs
+        )
         self.car.set_dofs_kv(
-            torch.full((4,), env_cfg["wheel_kv"], device=self.device), self.wheel_dofs)
+            torch.full((4,), env_cfg["wheel_kv"], device=self.device), self.wheel_dofs
+        )
         # cap drive torque near the traction limit; unbounded torque with a
         # P velocity controller causes wheel-slip limit cycles at high speed
         tq = env_cfg["wheel_max_torque"]
         self.car.set_dofs_force_range(
             torch.full((4,), -tq, device=self.device),
             torch.full((4,), tq, device=self.device),
-            self.wheel_dofs)
+            self.wheel_dofs,
+        )
 
         import trimesh
+
         wheel_mesh = trimesh.load(
-            f"{__file__.rsplit('/envs/', 1)[0]}/assets/meshes/deepracer/left_rear_wheel.STL")
+            f"{__file__.rsplit('/envs/', 1)[0]}/assets/meshes/deepracer/left_rear_wheel.STL"
+        )
         self.wheel_radius = float(wheel_mesh.extents[2]) / 2.0
 
         # ------------- camera mount -------------
         if self.cam is not None and not self.nyx_vision:
-            self.cam_offset_T = self._camera_offset_T(env_cfg.get("camera_pitch_deg", 0.0))
+            self.cam_offset_T = self._camera_offset_T(
+                env_cfg.get("camera_pitch_deg", 0.0)
+            )
             self.cam.attach(self.car.get_link("camera_link"), self.cam_offset_T)
 
         # ------------- buffers -------------
@@ -257,7 +299,9 @@ class DeepRacerEnv:
             self.obs_image_buf = self.image_buf
 
         self.reward_scales = dict(env_cfg["reward_scales"])
-        self.episode_sums = {k: torch.zeros(N, device=self.device) for k in self.reward_scales}
+        self.episode_sums = {
+            k: torch.zeros(N, device=self.device) for k in self.reward_scales
+        }
 
         self.reset_idx(torch.arange(N, device=self.device))
         self._post_physics()
@@ -265,17 +309,21 @@ class DeepRacerEnv:
     # ------------------------------------------------------------------
     def _camera_offset_T(self, pitch_deg):
         """camera_link frame -> Genesis camera frame (camera looks along -z)."""
-        base = np.array([
-            [0.0, 0.0, -1.0],
-            [-1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-        ])
+        base = np.array(
+            [
+                [0.0, 0.0, -1.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        )
         p = math.radians(pitch_deg)  # positive pitches the view down
-        rx = np.array([
-            [1.0, 0.0, 0.0],
-            [0.0, math.cos(p), -math.sin(p)],
-            [0.0, math.sin(p), math.cos(p)],
-        ])
+        rx = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, math.cos(p), -math.sin(p)],
+                [0.0, math.sin(p), math.cos(p)],
+            ]
+        )
         T = np.eye(4)
         T[:3, :3] = base @ rx
         return T
@@ -285,7 +333,8 @@ class DeepRacerEnv:
         self.actions = torch.clip(actions, -1.0, 1.0)
         steer = self.actions[:, 0:1] * math.radians(self.cfg["max_steering_deg"])
         speed = self.cfg["min_speed"] + (self.actions[:, 1:2] + 1) * 0.5 * (
-            self.cfg["max_speed"] - self.cfg["min_speed"])
+            self.cfg["max_speed"] - self.cfg["min_speed"]
+        )
         wheel_omega = (speed / self.wheel_radius).repeat(1, 4)
 
         self.car.control_dofs_position(steer.repeat(1, 2), self.steer_dofs)
@@ -333,14 +382,18 @@ class DeepRacerEnv:
         new_progress = loc["progress_m"]
         d = new_progress - self.progress_m
         L = self.track.total_len_env
-        self.d_progress = torch.where(d > 0.5 * L, d - L, torch.where(d < -0.5 * L, d + L, d))
+        self.d_progress = torch.where(
+            d > 0.5 * L, d - L, torch.where(d < -0.5 * L, d + L, d)
+        )
         if env_ids is not None and len(env_ids) > 0:
             self.d_progress[env_ids] = 0.0
         self.progress_m = new_progress
 
         # ---- state obs ----
-        la_idx = self.track.lookahead(self.wp_idx, self.lookahead_k, self.cfg["lookahead_stride"])
-        la_pts = self.track.lookahead_points(la_idx)             # (N, K, 2)
+        la_idx = self.track.lookahead(
+            self.wp_idx, self.lookahead_k, self.cfg["lookahead_stride"]
+        )
+        la_pts = self.track.lookahead_points(la_idx)  # (N, K, 2)
         rel = la_pts - pos[:, None, :2]
         rel_x = rel[..., 0] * cy[:, None] + rel[..., 1] * sy[:, None]
         rel_y = -rel[..., 0] * sy[:, None] + rel[..., 1] * cy[:, None]
@@ -365,20 +418,23 @@ class DeepRacerEnv:
         # ---- camera obs ----
         if self.vision:
             if self.nyx_vision:
-                rgb = self.nyx_cam.read().rgb[..., :3]           # (N, H, W, 3) uint8 cuda
+                rgb = self.nyx_cam.read().rgb[..., :3]  # (N, H, W, 3) uint8 cuda
             else:
                 self.cam.move_to_attach()
-                rgb = self.cam.render(rgb=True)[0]               # (N, H, W, 3) uint8 cuda
+                rgb = self.cam.render(rgb=True)[0]  # (N, H, W, 3) uint8 cuda
                 if self.rg_swap:
                     rgb = rgb[..., [1, 0, 2]]
             img = rgb.permute(0, 3, 1, 2).float() / 255.0
             if self.cfg.get("pixel_noise", 0.0) > 0:
-                img = (img + torch.randn_like(img) * self.cfg["pixel_noise"]).clamp(0, 1)
+                img = (img + torch.randn_like(img) * self.cfg["pixel_noise"]).clamp(
+                    0, 1
+                )
             self.image_buf = img
             if tuple(self.policy_res) != tuple(self.cfg["camera_res"]):
                 pw, ph = self.policy_res
                 self.obs_image_buf = torch.nn.functional.interpolate(
-                    img, size=(ph, pw), mode="area")
+                    img, size=(ph, pw), mode="area"
+                )
             else:
                 self.obs_image_buf = img
 
@@ -388,10 +444,14 @@ class DeepRacerEnv:
         terms = {
             "progress": self.d_progress,
             "speed": self.v_forward.clamp(0.0, self.cfg["max_speed"]) * self.dt,
-            "centered": torch.exp(-((self.lateral / self.half_width.clamp(min=0.1)) ** 2)) * self.dt,
+            "centered": torch.exp(
+                -((self.lateral / self.half_width.clamp(min=0.1)) ** 2)
+            )
+            * self.dt,
             "heading": -self.heading_err.abs() * self.dt,
             "steering": -self.actions[:, 0].abs() * self.dt,
-            "action_rate": -((self.actions - self.last_actions) ** 2).sum(dim=1) * self.dt,
+            "action_rate": -((self.actions - self.last_actions) ** 2).sum(dim=1)
+            * self.dt,
             "off_track": (~on_track).float() * self.dt,
         }
         self.rew_buf.zero_()
@@ -415,8 +475,11 @@ class DeepRacerEnv:
         if n == 0:
             return
         pos_xy, yaw = self.track.spawn_pose(
-            env_ids, self.cfg["random_start"],
-            lateral_noise=self.cfg["spawn_lateral_noise"], yaw_noise=self.cfg["spawn_yaw_noise"])
+            env_ids,
+            self.cfg["random_start"],
+            lateral_noise=self.cfg["spawn_lateral_noise"],
+            yaw_noise=self.cfg["spawn_yaw_noise"],
+        )
 
         qpos = torch.zeros(n, 13, device=self.device)
         qpos[:, 0:2] = pos_xy
@@ -425,8 +488,12 @@ class DeepRacerEnv:
         qpos[:, 6] = torch.sin(yaw / 2)
         self.car.set_qpos(qpos, envs_idx=env_ids)
         self.car.zero_all_dofs_velocity(envs_idx=env_ids)
-        self.car.control_dofs_position(torch.zeros(n, 2, device=self.device), self.steer_dofs, envs_idx=env_ids)
-        self.car.control_dofs_velocity(torch.zeros(n, 4, device=self.device), self.wheel_dofs, envs_idx=env_ids)
+        self.car.control_dofs_position(
+            torch.zeros(n, 2, device=self.device), self.steer_dofs, envs_idx=env_ids
+        )
+        self.car.control_dofs_velocity(
+            torch.zeros(n, 4, device=self.device), self.wheel_dofs, envs_idx=env_ids
+        )
 
         if self.cfg.get("randomize", False):
             randomize_physics(self, env_ids)
@@ -438,13 +505,17 @@ class DeepRacerEnv:
         for key, sums in self.episode_sums.items():
             self.extras["log"][f"Episode/rew_{key}"] = sums[env_ids].mean()
             sums[env_ids] = 0.0
-        self.extras["log"]["Episode/length"] = self.episode_length_buf[env_ids].float().mean()
+        self.extras["log"]["Episode/length"] = (
+            self.episode_length_buf[env_ids].float().mean()
+        )
 
         self.episode_length_buf[env_ids] = 0
         self.actions[env_ids] = 0.0
         self.last_actions[env_ids] = 0.0
         # progress buffer refreshed on next _post_physics via env_ids d_progress zeroing
-        self.progress_m[env_ids] = self.track.localize(pos_xy, envs_idx=env_ids)["progress_m"]
+        self.progress_m[env_ids] = self.track.localize(pos_xy, envs_idx=env_ids)[
+            "progress_m"
+        ]
 
     # ------------------------------------------------------------------
     def get_observations(self):
