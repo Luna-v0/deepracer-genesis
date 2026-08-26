@@ -113,6 +113,49 @@ class _RslActor:
         return td
 
 
+def _telemetry_path(run_dir: str, name: str) -> str:
+    """Path of one telemetry parquet inside a run directory.
+
+    Args:
+        run_dir: The run directory.
+        name: File name, e.g. ``final.parquet``.
+
+    Returns:
+        ``<run_dir>/telemetry/<name>``.
+    """
+    return os.path.join(run_dir, "telemetry", name)
+
+
+def _log_eval_figures(runner, parquet_path: str, frames: int,
+                      tag: str = "Eval/trajectories") -> None:
+    """Render an eval's telemetry into TensorBoard as trajectory figures.
+
+    Pushes one variant-grid figure (every track in the eval, lap lines
+    colored by speed) into the runner's writer at the eval's env-step, so
+    the Images tab shows driving behavior evolving over training. Fully
+    guarded: figure trouble (matplotlib missing, a wandb/neptune writer
+    without ``add_figure``, an unreadable parquet) never touches the run.
+
+    Args:
+        runner: The OnPolicyRunner whose ``writer`` receives the figure
+            (created lazily by ``learn()``; None before the first chunk).
+        parquet_path: Telemetry parquet written by the eval just finished.
+        frames: Env-step count used as the TensorBoard global step.
+        tag: Image tag in TensorBoard.
+    """
+    writer = getattr(runner, "writer", None)
+    if writer is None or not hasattr(writer, "add_figure"):
+        return
+    try:
+        from ..analysis.telemetry import load_telemetry
+        from ..analysis.trackplots import plot_variant_grid
+        fig = plot_variant_grid(load_telemetry(parquet_path),
+                                color_by="speed", cols=4)
+        writer.add_figure(tag, fig, global_step=frames)
+    except Exception as e:       # noqa: BLE001 - charts must never kill a run
+        print(f"[rsl] eval figures skipped ({type(e).__name__}: {e})")
+
+
 def _eval(sim, policy, telemetry=None):
     """Run the eval rollout under inference_mode (rsl-rl taints sim buffers).
 
@@ -129,6 +172,46 @@ def _eval(sim, policy, telemetry=None):
     # mutable buffers as inference tensors; eval must too, to update them in place.
     with torch.inference_mode():
         return evaluate_policy(sim, _RslActor(policy), telemetry=telemetry)
+
+
+def _holdout_eval(spec: "ExperimentSpec", policy, runner, run_dir: str,
+                  frames: int) -> dict:
+    """Per-track no-DR holdout eval after training (Part N.3, opt-in).
+
+    Builds one clean single-track sim per ``spec.eval.real_tracks`` entry,
+    rolls the trained policy on it, records telemetry, and logs each
+    track's trajectory figure to TensorBoard. Guarded so a finished run is
+    never lost if a scene can't rebuild in-process.
+
+    Args:
+        spec: The trained experiment spec.
+        policy: The rsl-rl inference policy.
+        runner: The runner whose TensorBoard writer receives the figures.
+        run_dir: The run directory (telemetry lands under it).
+        frames: Env-steps trained; the figures' global step.
+
+    Returns:
+        Per-track holdout metrics (empty when disabled or on failure).
+    """
+    if not spec.eval.real_tracks:
+        return {}
+    try:
+        from .evaluator import build_single_track_sim, evaluate_on_tracks
+        with torch.inference_mode():
+            view = "gui" if spec.eval.gui else "none"
+            holdout = evaluate_on_tracks(
+                _RslActor(policy), spec.eval.real_tracks,
+                sim_factory=lambda t: build_single_track_sim(
+                    spec, t, spec.eval.eval_num_envs, view=view),
+                telemetry_dir=os.path.join(run_dir, "telemetry"))
+        for track in spec.eval.real_tracks:
+            _log_eval_figures(
+                runner, _telemetry_path(run_dir, f"holdout_{track}.parquet"),
+                frames, tag=f"Holdout/{track}")
+        return holdout
+    except Exception as e:       # noqa: BLE001 - a lost holdout beats a lost run
+        print(f"[rsl] holdout eval skipped ({type(e).__name__}: {e})")
+        return {}
 
 
 def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRecord:
@@ -177,37 +260,26 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
         frames = done_iters * per_iter
         if eval_iters:
             policy = runner.get_inference_policy(device=device)
-            metrics = _eval(sim, policy, telemetry=os.path.join(
-                run_dir, "telemetry", f"eval_{frames:010d}.parquet"))
+            tel = _telemetry_path(run_dir, f"eval_{frames:010d}.parquet")
+            metrics = _eval(sim, policy, telemetry=tel)
+            _log_eval_figures(runner, tel, frames)
             eval_history.append({"frames": frames, **metrics})
             if on_eval is not None:
                 on_eval(frames, metrics)     # may raise to prune (HPO)
 
     wall = time.perf_counter() - t0
+    frames = done_iters * per_iter
     policy = runner.get_inference_policy(device=device)
-    metrics = _eval(sim, policy, telemetry=os.path.join(
-        run_dir, "telemetry", "final.parquet"))
+    tel = _telemetry_path(run_dir, "final.parquet")
+    metrics = _eval(sim, policy, telemetry=tel)
+    _log_eval_figures(runner, tel, frames)
     ckpt = os.path.join(run_dir, "model.pt")
     try:
         runner.save(ckpt)
     except Exception:            # noqa: BLE001 - never lose the run over a save
         ckpt = ""
 
-    # Part N.3: out-of-loop per-track holdout eval (opt-in: real_tracks set).
-    # Guarded so a finished run is never lost if a scene can't rebuild in-process.
-    holdout = {}
-    if spec.eval.real_tracks:
-        try:
-            from .evaluator import build_single_track_sim, evaluate_on_tracks
-            with torch.inference_mode():
-                view = "gui" if spec.eval.gui else "none"
-                holdout = evaluate_on_tracks(
-                    _RslActor(policy), spec.eval.real_tracks,
-                    sim_factory=lambda t: build_single_track_sim(
-                        spec, t, spec.eval.eval_num_envs, view=view),
-                    telemetry_dir=os.path.join(run_dir, "telemetry"))
-        except Exception as e:   # noqa: BLE001
-            print(f"[rsl] holdout eval skipped ({type(e).__name__}: {e})")
+    holdout = _holdout_eval(spec, policy, runner, run_dir, frames)
 
     record = EvalRecord(
         spec_id=spec.id(), spec=spec.to_dict(), seed=spec.seed,

@@ -16,7 +16,6 @@ world coordinates are meaningless across zoo tiles.
 from __future__ import annotations
 
 import os
-from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -25,6 +24,18 @@ import torch
 COLUMNS = ("step", "env", "episode", "track", "x", "y", "yaw", "steer",
            "throttle", "speed", "reward", "progress_delta", "progress_m",
            "lateral", "half_width", "off_track", "done", "track_len", "dt")
+
+
+def _np(t: torch.Tensor) -> np.ndarray:
+    """One captured tensor's GPU→CPU hop.
+
+    Args:
+        t: Any per-env tensor read off the live env.
+
+    Returns:
+        The detached numpy copy.
+    """
+    return t.detach().cpu().numpy()
 
 
 class TelemetryRecorder:
@@ -72,26 +83,57 @@ class TelemetryRecorder:
                 (already lap-wrap-corrected by the env).
         """
         env = self.env
-        pos = (env.base_pos[:, :2] - self._offset)
+        pos = _np(env.base_pos[:, :2] - self._offset)
+        done_np = _np(done).astype(bool)
         self._frames.append({
             "env": np.arange(env.num_envs),
             "episode": self._episode.copy(),
-            "x": pos[:, 0].detach().cpu().numpy(),
-            "y": pos[:, 1].detach().cpu().numpy(),
-            "yaw": env.yaw.detach().cpu().numpy(),
-            "steer": env.actions[:, 0].detach().cpu().numpy(),
-            "throttle": env.actions[:, 1].detach().cpu().numpy(),
-            "speed": env.signals["v_forward"].detach().cpu().numpy(),
-            "reward": reward.detach().cpu().numpy(),
-            "progress_delta": progress_delta.detach().cpu().numpy(),
-            "progress_m": env.progress_m.detach().cpu().numpy(),
-            "lateral": env.lateral.detach().cpu().numpy(),
-            "half_width": env.half_width.detach().cpu().numpy(),
-            "off_track": off_track.detach().cpu().numpy().astype(bool),
-            "done": done.detach().cpu().numpy().astype(bool),
+            "x": pos[:, 0],
+            "y": pos[:, 1],
+            "yaw": _np(env.yaw),
+            "steer": _np(env.actions[:, 0]),
+            "throttle": _np(env.actions[:, 1]),
+            "speed": _np(env.signals["v_forward"]),
+            "reward": _np(reward),
+            "progress_delta": _np(progress_delta),
+            "progress_m": _np(env.progress_m),
+            "lateral": _np(env.lateral),
+            "half_width": _np(env.half_width),
+            "off_track": _np(off_track).astype(bool),
+            "done": done_np,
         })
-        self._episode += self._frames[-1]["done"].astype(np.int64)
+        self._episode += done_np.astype(np.int64)
         self.rows += 1
+
+    def _static_columns(self) -> dict:
+        """Columns known without capturing: step index and per-env facts.
+
+        Returns:
+            ``step``/``track``/``track_len``/``dt`` flat arrays, each of
+            length ``rows * num_envs`` (env-major within each step).
+        """
+        n, t = self.env.num_envs, self.rows
+        return {
+            "step": np.repeat(np.arange(t), n),
+            "track": np.tile(self._names, t),
+            "track_len": np.tile(self._track_len, t).astype(np.float32),
+            "dt": np.full(t * n, self._dt, dtype=np.float32),
+        }
+
+    def _captured_columns(self) -> dict:
+        """Per-step captures stacked into flat columns.
+
+        Returns:
+            One flat array per captured key, float64 narrowed to float32
+            (parquet size — nothing here needs double precision).
+        """
+        cols = {}
+        for key in self._frames[0]:
+            stacked = np.concatenate([f[key] for f in self._frames])
+            if stacked.dtype == np.float64:
+                stacked = stacked.astype(np.float32)
+            cols[key] = stacked
+        return cols
 
     def flush(self, path: str) -> str:
         """Write everything captured so far as one parquet file.
@@ -105,19 +147,7 @@ class TelemetryRecorder:
         import pyarrow as pa
         import pyarrow.parquet as pq
 
-        n = self.env.num_envs
-        t = self.rows
-        cols: dict = {
-            "step": np.repeat(np.arange(t), n),
-            "track": np.tile(self._names, t),
-            "track_len": np.tile(self._track_len, t).astype(np.float32),
-            "dt": np.full(t * n, self._dt, dtype=np.float32),
-        }
-        for key in self._frames[0]:
-            stacked = np.concatenate([f[key] for f in self._frames])
-            if stacked.dtype == np.float64:
-                stacked = stacked.astype(np.float32)
-            cols[key] = stacked
+        cols = {**self._static_columns(), **self._captured_columns()}
         table = pa.table({c: cols[c] for c in COLUMNS})
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         pq.write_table(table, path, compression="zstd")

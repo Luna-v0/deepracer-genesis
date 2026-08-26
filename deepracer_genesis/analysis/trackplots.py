@@ -13,7 +13,6 @@ TensorBoard via ``SummaryWriter.add_figure``.
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 import numpy as np
@@ -51,6 +50,92 @@ def _route(track: str) -> np.ndarray:
     from .. import tracks
 
     return np.load(tracks.info(track).route_path)
+
+
+def _resolve_track(df, track: Optional[str]) -> str:
+    """Pick the single track a plot should draw.
+
+    Args:
+        df: Telemetry DataFrame.
+        track: Explicit track name, or None to infer from the data.
+
+    Returns:
+        The track name.
+
+    Raises:
+        ValueError: If the DataFrame spans several tracks and none is named.
+    """
+    if track is not None:
+        return track
+    present = df["track"].unique()
+    if len(present) != 1:
+        raise ValueError(f"df spans {len(present)} tracks — pass "
+                         f"track=... (one of {sorted(present)})")
+    return present[0]
+
+
+def _fig_ax(ax, figsize=(7, 6)):
+    """Reuse the caller's axes or open a fresh single-axes figure.
+
+    Args:
+        ax: Existing axes (e.g. one panel of a grid), or None.
+        figsize: Figure size used when a new figure is created.
+
+    Returns:
+        The ``(figure, axes)`` pair.
+    """
+    plt = _require_mpl()
+    if ax is not None:
+        return ax.figure, ax
+    return plt.subplots(figsize=figsize)
+
+
+def _episode_segments(d, color_by: str, max_episodes: Optional[int]):
+    """Split single-track telemetry into drawable line segments per episode.
+
+    A done row's pose is already the RESPAWN pose (the env auto-resets
+    inside ``step()``), so drawing it would put a teleport line across the
+    track — such rows are dropped here (aggregates still count them).
+
+    Args:
+        d: Telemetry DataFrame filtered to one track.
+        color_by: Column supplying one color value per segment.
+        max_episodes: Cap on episodes yielded (all when None).
+
+    Yields:
+        Per episode: ``(segments, values)`` — the ``(S, 2, 2)`` polyline
+        segments and their ``(S,)`` color values.
+    """
+    episodes = d.groupby(["env", "episode"], observed=True)
+    for i, (_, g) in enumerate(episodes):
+        if max_episodes is not None and i >= max_episodes:
+            return
+        g = g[~g["done"]]
+        if len(g) < 2:
+            continue
+        pts = g[["x", "y"]].to_numpy().reshape(-1, 1, 2)
+        segments = np.concatenate([pts[:-1], pts[1:]], axis=1)
+        yield segments, g[color_by].to_numpy()[:-1]
+
+
+def _nearest_waypoints(xy: np.ndarray, center: np.ndarray) -> np.ndarray:
+    """Index of the closest centerline waypoint for every telemetry row.
+
+    Chunked so the (rows × waypoints) distance matrix stays small.
+
+    Args:
+        xy: ``(R, 2)`` row positions.
+        center: ``(W, 2)`` centerline waypoints.
+
+    Returns:
+        ``(R,)`` waypoint indices.
+    """
+    out = np.empty(len(xy), dtype=np.int64)
+    for lo in range(0, len(xy), 65536):
+        chunk = xy[lo:lo + 65536]
+        d2 = ((chunk[:, None, :] - center[None]) ** 2).sum(-1)
+        out[lo:lo + 65536] = d2.argmin(1)
+    return out
 
 
 def _outline(ax, route: np.ndarray) -> None:
@@ -92,36 +177,18 @@ def plot_trajectories(df, track: Optional[str] = None, *,
     Raises:
         ValueError: If the DataFrame spans several tracks and none is named.
     """
-    from matplotlib.collections import LineCollection
-
-    plt = _require_mpl()
-    tracks_present = df["track"].unique()
-    if track is None:
-        if len(tracks_present) != 1:
-            raise ValueError(f"df spans {len(tracks_present)} tracks — pass "
-                             f"track=... (one of {sorted(tracks_present)})")
-        track = tracks_present[0]
+    track = _resolve_track(df, track)
     d = df[df["track"] == track]
-    fig = ax.figure if ax is not None else plt.subplots(figsize=(7, 6))[0]
-    ax = ax if ax is not None else fig.axes[0]
+    fig, ax = _fig_ax(ax)
     _outline(ax, _route(track))
+
+    from matplotlib.collections import LineCollection
 
     vmin, vmax = float(d[color_by].min()), float(d[color_by].max())
     lc = None
-    episodes = d.groupby(["env", "episode"], observed=True)
-    for i, (_, g) in enumerate(episodes):
-        if max_episodes is not None and i >= max_episodes:
-            break
-        # a done row's pose is already the RESPAWN pose (the env auto-resets
-        # inside step()), so drawing it puts a teleport line across the
-        # track — drop it from the drawn line (aggregates still use it)
-        g = g[~g["done"]]
-        if len(g) < 2:
-            continue
-        pts = g[["x", "y"]].to_numpy().reshape(-1, 1, 2)
-        segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
-        lc = LineCollection(segs, cmap=cmap, zorder=3, linewidths=1.4)
-        lc.set_array(g[color_by].to_numpy()[:-1])
+    for segments, values in _episode_segments(d, color_by, max_episodes):
+        lc = LineCollection(segments, cmap=cmap, zorder=3, linewidths=1.4)
+        lc.set_array(values)
         lc.set_clim(vmin, vmax)
         ax.add_collection(lc)
     ax.autoscale()
@@ -179,24 +246,16 @@ def plot_waypoint_heat(df, track: Optional[str] = None, *,
     Returns:
         The matplotlib figure.
     """
-    plt = _require_mpl()
-    if track is None:
-        (track,) = df["track"].unique()
+    track = _resolve_track(df, track)
     d = df[df["track"] == track]
     route = _route(track)
     center = route[:, 0:2]
-    # nearest centerline waypoint per row (numpy, chunked for memory)
-    xy = d[["x", "y"]].to_numpy()
-    wp = np.empty(len(xy), dtype=np.int64)
-    for lo in range(0, len(xy), 65536):
-        chunk = xy[lo:lo + 65536]
-        d2 = ((chunk[:, None, :] - center[None]) ** 2).sum(-1)
-        wp[lo:lo + 65536] = d2.argmin(1)
+    wp = _nearest_waypoints(d[["x", "y"]].to_numpy(), center)
     series = d.assign(_wp=wp).groupby("_wp")[value].agg(agg)
     values = np.full(len(center), np.nan)
     values[series.index.to_numpy()] = series.to_numpy()
 
-    fig, ax = plt.subplots(figsize=(7, 6))
+    fig, ax = _fig_ax(None)
     _outline(ax, route)
     sc = ax.scatter(center[:, 0], center[:, 1], c=values, cmap=cmap, s=14,
                     zorder=3)
@@ -217,11 +276,9 @@ def plot_offtrack_hotspots(df, track: Optional[str] = None):
         The matplotlib figure (off-track points as red crosses, count in
         the title).
     """
-    plt = _require_mpl()
-    if track is None:
-        (track,) = df["track"].unique()
+    track = _resolve_track(df, track)
     d = df[(df["track"] == track) & df["off_track"]]
-    fig, ax = plt.subplots(figsize=(7, 6))
+    fig, ax = _fig_ax(None)
     _outline(ax, _route(track))
     ax.plot(d["x"], d["y"], "x", color="crimson", ms=5, mew=1.4, zorder=3)
     ax.set_title(f"{track} — {len(d)} off-track points")
