@@ -31,6 +31,9 @@ vision = ["gs-madrona>=0.0.10"]
 nyx = ["gs-nyx>=0.1.4", "gs-nyx-plugin>=0.1.5"]
 tracking = ["mlflow"]
 hpo = ["optuna"]
+# telemetry DataFrames + trajectory plots (analysis/ package; not needed on
+# the car or for training itself)
+analysis = ["pandas", "matplotlib"]
 # ONNX export/verification (workstation-only; the car runtime needs neither).
 # Run exports in a genesis-free process: genesis and onnxruntime bundle
 # clashing LLVM symbols (see deploy/onnx.py).
@@ -68,6 +71,8 @@ dev = [
     "lckr-jupyterlab-variableinspector>=3.2.4",
     "pycrdt>=0.13.1",
     "python-lsp-server[all]>=1.14.0",
+    # telemetry analysis (mirrors the [analysis] extra for local work)
+    "pandas>=2.0",
 ]
 # GPU renderers, synced by default for local `uv run` (camera/Nyx experiments)
 # so `uv run experiments/foo.py` "just works". These mirror the [vision]/[nyx]

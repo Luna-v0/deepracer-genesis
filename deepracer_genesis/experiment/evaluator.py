@@ -75,7 +75,8 @@ class EvalRecord:
 
 def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
                     obs_transform: Callable | None = None,
-                    cost_budget: Optional[float] = None) -> dict:
+                    cost_budget: Optional[float] = None,
+                    telemetry: Optional[str] = None) -> dict:
     """Run a deterministic eval rollout on the raw sim, reading exact
     terminal stats from sim.step_info (no collector/autoreset).
 
@@ -89,6 +90,10 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
             derived keys.
         cost_budget: Per-episode cost budget; enables the cost metrics when
             the sim exposes a cost_buf.
+        telemetry: Optional ``.parquet`` path — records per-step trajectory
+            telemetry for the whole rollout (``analysis.telemetry``) and
+            flushes it there; recording failures are printed, never raised
+            (an eval must not die over its bookkeeping).
 
     Returns:
         Scalar metrics dict from aggregate_episodes().
@@ -98,6 +103,14 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
     device = sim.device
     sim.reset_idx(torch.arange(n, device=device))
     sim._post_physics(torch.arange(n, device=device))
+
+    recorder = None
+    if telemetry is not None:
+        try:
+            from ..analysis.telemetry import TelemetryRecorder
+            recorder = TelemetryRecorder(sim)
+        except Exception as e:                    # noqa: BLE001
+            print(f"[telemetry] recorder unavailable ({e}); eval continues")
 
     use_cost = cost_budget is not None and hasattr(sim, "cost_buf")
     streams = {k: [] for k in ("reward", "done", "progress_delta", "offtrack")}
@@ -115,8 +128,16 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
             streams["done"].append(dones.clone())
             streams["progress_delta"].append(info["progress_delta"])
             streams["offtrack"].append(info["offtrack"] | info["flipped"])
+            if recorder is not None:
+                recorder.step(rew, dones, info["offtrack"] | info["flipped"],
+                              info["progress_delta"])
             if use_cost:
                 costs.append(sim.cost_buf.clone())
+    if recorder is not None:
+        try:
+            print(f"[telemetry] {recorder.flush(telemetry)}")
+        except Exception as e:                    # noqa: BLE001
+            print(f"[telemetry] flush failed ({e}); eval metrics unaffected")
 
     stacked = {k: torch.stack(v) for k, v in streams.items()}
     return aggregate_episodes(
@@ -270,7 +291,7 @@ def build_single_track_sim(spec, track: str, num_envs: int, view: str = "none"):
 
 
 def evaluate_on_tracks(actor, tracks, *, sim_factory, obs_transform=None,
-                       cost_budget=None) -> dict:
+                       cost_budget=None, telemetry_dir=None) -> dict:
     """Evaluate ``actor`` on each track INDEPENDENTLY; return {track: metrics}.
 
     Args:
@@ -282,6 +303,8 @@ def evaluate_on_tracks(actor, tracks, *, sim_factory, obs_transform=None,
             a fresh scene.
         obs_transform: Optional obs transform applied before the policy.
         cost_budget: Per-episode cost budget (enables cost metrics).
+        telemetry_dir: Optional directory — records per-step trajectory
+            telemetry per track as ``holdout_<track>.parquet``.
 
     Returns:
         ``{track: metrics}`` — per-track metrics from :func:`evaluate_policy`,
@@ -290,6 +313,8 @@ def evaluate_on_tracks(actor, tracks, *, sim_factory, obs_transform=None,
     out = {}
     for track in tracks:
         sim = sim_factory(track)
+        path = (os.path.join(telemetry_dir, f"holdout_{track}.parquet")
+                if telemetry_dir else None)
         out[track] = evaluate_policy(sim, actor, obs_transform=obs_transform,
-                                     cost_budget=cost_budget)
+                                     cost_budget=cost_budget, telemetry=path)
     return out

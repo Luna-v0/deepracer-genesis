@@ -113,12 +113,14 @@ class _RslActor:
         return td
 
 
-def _eval(sim, policy):
+def _eval(sim, policy, telemetry=None):
     """Run the eval rollout under inference_mode (rsl-rl taints sim buffers).
 
     Args:
         sim: The DeepRacer sim to roll out.
         policy: The rsl-rl inference policy.
+        telemetry: Optional parquet path for per-step trajectory telemetry
+            (see ``analysis.telemetry``).
 
     Returns:
         The aggregated eval metrics.
@@ -126,7 +128,7 @@ def _eval(sim, policy):
     # rsl-rl collection runs under torch.inference_mode(), marking the sim's
     # mutable buffers as inference tensors; eval must too, to update them in place.
     with torch.inference_mode():
-        return evaluate_policy(sim, _RslActor(policy))
+        return evaluate_policy(sim, _RslActor(policy), telemetry=telemetry)
 
 
 def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRecord:
@@ -175,14 +177,16 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
         frames = done_iters * per_iter
         if eval_iters:
             policy = runner.get_inference_policy(device=device)
-            metrics = _eval(sim, policy)
+            metrics = _eval(sim, policy, telemetry=os.path.join(
+                run_dir, "telemetry", f"eval_{frames:010d}.parquet"))
             eval_history.append({"frames": frames, **metrics})
             if on_eval is not None:
                 on_eval(frames, metrics)     # may raise to prune (HPO)
 
     wall = time.perf_counter() - t0
     policy = runner.get_inference_policy(device=device)
-    metrics = _eval(sim, policy)
+    metrics = _eval(sim, policy, telemetry=os.path.join(
+        run_dir, "telemetry", "final.parquet"))
     ckpt = os.path.join(run_dir, "model.pt")
     try:
         runner.save(ckpt)
@@ -200,7 +204,8 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
                 holdout = evaluate_on_tracks(
                     _RslActor(policy), spec.eval.real_tracks,
                     sim_factory=lambda t: build_single_track_sim(
-                        spec, t, spec.eval.eval_num_envs, view=view))
+                        spec, t, spec.eval.eval_num_envs, view=view),
+                    telemetry_dir=os.path.join(run_dir, "telemetry"))
         except Exception as e:   # noqa: BLE001
             print(f"[rsl] holdout eval skipped ({type(e).__name__}: {e})")
 
