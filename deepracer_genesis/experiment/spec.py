@@ -20,6 +20,95 @@ def _json_default(o):
     return getattr(o, "__qualname__", None) or getattr(o, "__name__", None) or repr(o)
 
 
+# Per-key values that leave the physics/geometry/mount DR inert: the builder
+# seeds cfg["rand"] from this and knob-compat validation uses it to tell "the
+# stage's neutral default" apart from "an actually-activated knob" (the physics
+# stage always emits every key, neutral or not).
+NEUTRAL_PHYSICS = {
+    "friction_range": (1.0, 1.0),
+    "mass_shift_kg": 0.0,
+    "com_shift_m": 0.0,
+    "steer_kp_scale": (1.0, 1.0),
+    "wheel_kv_scale": (1.0, 1.0),
+    "armature_range": (0.0, 0.0),
+    "track_width_scale": (1.0, 1.0),
+}
+
+
+def _is_neutral(leaf: str, value) -> bool:
+    """True when ``value`` for a ``rand.*`` leaf equals its inert default.
+
+    Args:
+        leaf: The ``cfg["rand"]`` key (e.g. ``"friction_range"``).
+        value: The value the spec carries for it (tuple/list/scalar).
+
+    Returns:
+        Whether applying this value is a no-op (so compat checks skip it).
+    """
+    neutral = NEUTRAL_PHYSICS.get(leaf)
+    if neutral is None:
+        return False
+    v = tuple(value) if isinstance(value, (list, tuple)) else value
+    return v == neutral
+
+
+def _active_knobs(spec: "ExperimentSpec") -> list[tuple]:
+    """Resolve every DR knob this spec activates to its catalog entry.
+
+    The spec's DR containers are stringly-keyed dicts; this is the single
+    place mapping them onto ``randomization.catalog`` entries, so a typo
+    fails loudly here instead of silently sampling nothing at runtime.
+
+    Args:
+        spec: The experiment spec being validated.
+
+    Returns:
+        ``(knob, value)`` pairs for every activated catalog knob. Falsy values
+        and physics values equal to their :data:`NEUTRAL_PHYSICS` default are
+        not activations (the physics stage always emits every key).
+
+    Raises:
+        SpecError: If a DR dict carries a key no catalog knob claims.
+    """
+    from ..randomization.catalog import BY_NAME, CATALOG
+
+    image = {k.cfg_key.rsplit(".", 1)[1]: k for k in CATALOG
+             if k.cfg_key.startswith("obs_dr.image_aug.")}
+    physics = {k.cfg_key.rsplit(".", 1)[1]: k for k in CATALOG
+               if k.cfg_key.startswith("rand.")
+               and k.layer in ("physics", "geometry")}
+    action = {k.cfg_key.rsplit(".", 1)[1]: k for k in CATALOG
+              if k.cfg_key.startswith("action_dr.")}
+    active: list[tuple] = []
+
+    def resolve(dct: dict, table: dict, what: str) -> None:
+        unknown = sorted(set(dct) - set(table))
+        if unknown:
+            raise SpecError(
+                "%s has unknown key(s) %s (they would be silently ignored at "
+                "runtime); known keys: %s" % (what, unknown, sorted(table)))
+        active.extend((table[k], v) for k, v in dct.items()
+                      if v and not _is_neutral(table[k].cfg_key.rsplit(".", 1)[1], v))
+
+    resolve(spec.obs_dr.image_aug, image, "obs_dr.image_aug")
+    resolve(spec.obs_dr.physics, physics, "obs_dr.physics")
+    resolve(spec.obs_dr.camera_jitter,
+            {"pitch_deg": BY_NAME["camera_pitch_jitter"],
+             "pos_m": BY_NAME["camera_pos_jitter"]}, "obs_dr.camera_jitter")
+    resolve(spec.obs_dr.appearance,
+            {"world_color": BY_NAME["world_color"]}, "obs_dr.appearance")
+    resolve(spec.obs_dr.env_map,
+            {"tint": BY_NAME["env_map_tint"],
+             "multiplier": BY_NAME["env_map_multiplier"]}, "obs_dr.env_map")
+    if spec.obs_dr.pixel_noise:
+        active.append((BY_NAME["pixel_noise"], spec.obs_dr.pixel_noise))
+    for leaf in ("steer_noise", "speed_noise", "delay_steps"):
+        value = getattr(spec.action_dr, leaf)
+        if value:
+            active.append((action[leaf], value))
+    return active
+
+
 class SpecError(ValueError):
     """A structurally or semantically invalid experiment declaration."""
 
@@ -96,6 +185,26 @@ class EnvSpec:
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None
+
+    @property
+    def effective_renderer(self) -> Optional[str]:
+        """The renderer that will actually back this env's camera, or None.
+
+        The single source of truth for renderer resolution, mirrored by
+        ``Builder.sim_cfg``: feature envs render nothing; camera envs on the
+        CPU backend always fall to the per-env rasterizer (cpu wins over an
+        explicit ``render='nyx'``, matching the builder's branch order);
+        otherwise ``render`` picks Nyx or Madrona.
+
+        Returns:
+            ``"madrona"``, ``"nyx"``, or ``"rasterizer"`` for camera envs;
+            ``None`` for feature envs.
+        """
+        if self.modality != "camera":
+            return None
+        if self.backend == "cpu":
+            return "rasterizer"
+        return "nyx" if self.render == "nyx" else "madrona"
 
 
 @dataclass(frozen=True)
@@ -326,6 +435,7 @@ class ExperimentSpec:
         self._validate_encoder()
         self._validate_obs_dr()
         self._validate_action_dr()
+        self._validate_knob_compat()
         self._validate_algorithm()
         self._validate_learnability()
         return self
@@ -334,8 +444,8 @@ class ExperimentSpec:
         """Check env modality/render coherence and the cost signal.
 
         Raises:
-            SpecError: On a modality/render mismatch, nyx multi-track, or a
-                bad cost_fn/cost_budget.
+            SpecError: On a modality/render mismatch or a bad
+                cost_fn/cost_budget.
         """
         env = self.env
         from ..tracks import exists, names
@@ -347,10 +457,11 @@ class ExperimentSpec:
                 raise SpecError("feature envs do not render; got render=%r" % env.render)
             case "camera" if env.render not in ("madrona", "nyx"):
                 raise SpecError("camera envs need render='madrona'|'nyx'; got %r" % env.render)
-        if env.render == "nyx" and len(env.tracks) > 1:
-            raise SpecError(
-                "heterogeneous tracks are Madrona-only (repo constraint); "
-                "render='nyx' with tracks=%r" % (env.tracks,))
+        # multi-track camera envs use Part O spatial tiling on Madrona AND Nyx
+        # (verified by scripts/verify_nyx_tiling.py: tiled variants are plain
+        # meshes on separate world tiles — no per-env visibility needed); the
+        # old blanket nyx refusal only ever applied to the heterogeneous
+        # (superimposed) path, which envs/scene.py still rejects.
         # Part M Tier 2: Madrona/Nyx are GPU-only; camera obs on the CPU backend
         # renders per-env through the (unbatched, slow) RasterizerObsRenderer,
         # which the builder selects by setting vision_renderer='rasterizer'. It
@@ -499,7 +610,8 @@ class ExperimentSpec:
         if obs_dr.env_map and env.modality != "camera":
             raise SpecError("env_map DR randomizes the rendered sky; "
                             "it needs a camera env")
-        if env.modality == "camera" and len(env.tracks) > 1 and env.render == "madrona":
+        if env.modality == "camera" and len(env.tracks) > 1 \
+                and env.render in ("madrona", "nyx"):
             # Part O: sound via spatial tiling (each variant on its own world
             # tile), NOT the broken heterogeneous-morph path. It costs K× track
             # geometry per env (render + memory ~linear in K) — run the Part O
@@ -523,6 +635,35 @@ class ExperimentSpec:
             raise SpecError("delay_steps must be >= 0")
         if self.action_dr.steer_noise < 0 or self.action_dr.speed_noise < 0:
             raise SpecError("action noise magnitudes must be >= 0")
+
+    def _validate_knob_compat(self) -> None:
+        """Check every activated DR knob acts under this modality/renderer.
+
+        The compatibility matrix lives on the catalog knobs themselves
+        (``Knob.modalities`` / ``Knob.renderers``); this loop only enforces
+        it, so a renderer limitation is a one-line catalog edit, not a code
+        branch. Principle: a knob either acts or refuses to build — never a
+        silent no-op (e.g. ``track_width`` under camera, camera-mount jitter
+        under Nyx, ``env_map`` under Madrona).
+
+        Raises:
+            SpecError: If an activated knob has no effect in this env's
+                modality, is inert under the renderer that will actually run,
+                or a DR dict carries a key no catalog knob claims.
+        """
+        env = self.env
+        renderer = env.effective_renderer
+        for knob, _value in _active_knobs(self):
+            hint = " (%s)" % knob.note if knob.note else ""
+            if env.modality not in knob.modalities:
+                raise SpecError(
+                    "DR knob '%s' has no effect in %s mode%s"
+                    % (knob.name, env.modality, hint))
+            if renderer is not None and renderer not in knob.renderers:
+                raise SpecError(
+                    "DR knob '%s' is inert under render=%r; supported "
+                    "renderer(s): %s%s"
+                    % (knob.name, renderer, sorted(knob.renderers), hint))
 
     def _validate_algorithm(self) -> None:
         """Check the algorithm matches the env's cost signal and budget.

@@ -200,9 +200,13 @@ class Renderer:
         """
 
     def randomize_mount(self, env: "DeepRacerEnv", env_ids: torch.Tensor) -> None:
-        """Jitter the camera mount per episode for the given envs.
+        """Jitter the per-env camera mounts (applied ONCE per run, at build).
 
-        No-op except on the Madrona strategy, which owns an attached camera.
+        Overridden by the Madrona and rasterizer strategies, which own
+        attached cameras; a no-op here and on Nyx (one batched sensor with a
+        single shared offset — no per-env mount exists to jitter, which is why
+        the ``camera_pitch_jitter``/``camera_pos_jitter`` knobs declare
+        ``renderers={"madrona", "rasterizer"}`` in the catalog).
 
         Args:
             env: The env owning the camera being jittered.
@@ -399,7 +403,11 @@ class MadronaRenderer(_CameraRenderer):
                 centers.append(c)
                 heights.append(extent * 1.2)
             ev = env.track.variant_idx
-            self._top_center = torch.stack(centers)[ev]          # (N, 2)
+            # Part O tiling: each variant's mesh lives on its own world tile,
+            # so the bird's-eye centers must follow the tile offsets (zero when
+            # tiling is off).
+            self._top_center = (torch.stack(centers)
+                                + env.track.variant_offset)[ev]  # (N, 2)
             self._top_height = torch.stack(heights)[ev]          # (N,)
             c0 = centers[0].cpu().numpy()
             self.top_cam = env.scene.add_camera(
@@ -500,9 +508,11 @@ class RasterizerObsRenderer(_CameraRenderer):
     remap, pixel noise, policy downscale) verbatim; only the frame source swaps.
 
     Note:
-        ``randomize_mount`` (``camera_jitter`` DR) is a no-op on this path — the
-        per-env mount jitter is Madrona-only for now; image-space DR (distortion,
-        crop, photometric) still applies, since it is renderer-agnostic.
+        ``randomize_mount`` (``camera_jitter`` DR) IS supported on this path:
+        each env owns its own camera, so per-env mounts need no batching —
+        every camera's attach offset is rewritten individually (Nyx remains
+        the one renderer without per-env mounts: a single batched sensor with
+        one shared offset).
 
     Attributes:
         merge_fixed_links: Whether the scene may merge fixed links.
@@ -537,10 +547,11 @@ class RasterizerObsRenderer(_CameraRenderer):
         self.top_cams = None
         if vision_cfg.get("topdown_camera", False):
             self.top_cams = []
-            for i, t in enumerate([env.track.tracks[int(v)]
-                                   for v in env.track.variant_idx]):
-                c, extent = _track_extent(t)
-                c = c.cpu().numpy()
+            for i, v in enumerate(env.track.variant_idx.tolist()):
+                c, extent = _track_extent(env.track.tracks[int(v)])
+                # Part O tiling: follow the variant's world tile (zero offset
+                # when tiling is off)
+                c = (c + env.track.variant_offset[int(v)]).cpu().numpy()
                 self.top_cams.append(env.scene.add_camera(
                     res=res, pos=(float(c[0]), float(c[1]), float(extent) * 1.2),
                     lookat=(float(c[0]), float(c[1]), 0.0),
@@ -560,6 +571,32 @@ class RasterizerObsRenderer(_CameraRenderer):
         link = env.car.get_link("camera_link")
         for cam in self.cams:
             cam.attach(link, self.cam_offset_T)
+
+    def randomize_mount(self, env: "DeepRacerEnv", env_ids: torch.Tensor) -> None:
+        """Re-randomize each per-env camera's mount pitch/position offset.
+
+        This path holds one camera per env, so per-env mount jitter needs no
+        batching support: each camera's attach offset is rewritten from
+        :func:`~deepracer_genesis.randomization.visual.sample_mount_transforms`
+        individually (same sampler and cfg keys as the Madrona path).
+
+        Args:
+            env: The env owning the cameras; ``cfg['rand']`` supplies
+                ``camera_pitch_jitter_deg`` and ``camera_pos_jitter_m``.
+            env_ids: Indices of the envs whose camera mounts are re-randomized.
+        """
+        cfg = env.cfg["rand"]
+        jitter_deg = cfg.get("camera_pitch_jitter_deg", 0.0)
+        jitter_pos = cfg.get("camera_pos_jitter_m", 0.0)
+        if jitter_deg <= 0 and jitter_pos <= 0:
+            return
+        T = sample_mount_transforms(self.cam_offset_T, jitter_deg, jitter_pos,
+                                    len(env_ids), env.device)
+        for row, i in enumerate(env_ids.tolist()):
+            cam = self.cams[i]
+            cam._attached_offset_T = T[row].to(
+                dtype=cam._attached_offset_T.dtype,
+                device=cam._attached_offset_T.device)
 
     def _acquire_rgb(self, env: "DeepRacerEnv") -> torch.Tensor:
         """Render each per-env camera in turn and stack the frames.

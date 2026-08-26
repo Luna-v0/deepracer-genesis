@@ -58,6 +58,8 @@ nav:
   - Guides:
       - Custom algorithms: guides/custom-algorithms.md
       - Dataset collection: guides/datasets.md
+      - DR editor: guides/dr-editor.md
+      - Track zoo: guides/track-zoo.md
       - HPO: guides/hpo.md
       - Deployment (ONNX): guides/deployment.md
   - API:

@@ -109,8 +109,10 @@ Because the gains didn't port, they are re-authored in two places:
 
 So the URDF gives the *mechanism*; the *controller feel* (kp/kv, torque cap) is
 authored in this repo and tuned by comment-documented trial. Under domain
-randomization these gains are re-scaled per-env each episode
-(`randomization/domain_rand.py:41-56`).
+randomization these gains are re-scaled per-env **once per run**, from the env's
+`__init__` (`randomization/physics.py:61-66`; `domain_rand.py` is a back-compat
+shim) — not each episode: per-reset genesis setters sporadically crash even on
+genesis 1.2.3 (`base_env.py:326-337`), so DR bodies stay fixed for the run.
 
 ### 2.2 Wheels and steering are driven separately (and simplified)
 
@@ -187,9 +189,14 @@ Two things to internalize:
   "off track" is a *geometric* computation off the waypoints (§5), not a
   collision.
 - A *list* of morphs makes the entity heterogeneous (one variant per env). But
-  heterogeneous **camera** training is blocked (`deepracer_env.py:147-154`):
-  Genesis 1.2.1 does not feed `active_envs_mask` to Madrona, so all variants
-  render superimposed. Multi-track only works in feature (non-vision) mode.
+  heterogeneous **camera** training is blocked (`envs/scene.py:113-118`):
+  Genesis 1.2.1 did not feed `active_envs_mask` to Madrona, so all variants
+  render superimposed. Genesis 1.3.2 (installed) now passes it upstream as
+  `geom_env_mask` (`genesis/vis/batch_renderer.py:112-116`), but the repo still
+  routes camera multi-track through Part O **spatial tiling** (each variant on
+  its own world tile, `base_env.py:149-154`) — relaxing the heterogeneous-morph
+  guard is a separate follow-up. Feature (non-vision) multi-track uses the
+  heterogeneous morphs directly.
 
 ---
 

@@ -71,6 +71,7 @@ python -m deepracer_genesis.train -B 4096 --max_iterations 500 --exp_name teache
 ```bash
 python -m deepracer_genesis.eval --checkpoint runs/.../best.pt --num_envs 24 --res 1280x960
 python -m deepracer_genesis.validation.camera_check --num_envs 4
+python -m deepracer_genesis.validation.dr_check --knobs world_color,brightness   # see the DR editor guide
 tensorboard --logdir runs/
 ```
 

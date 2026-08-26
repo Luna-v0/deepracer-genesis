@@ -60,3 +60,39 @@ The `notebooks/track_designer.ipynb` notebook builds a route from waypoints,
 `install_track(name, route)` registers it, and you drive it with a scripted
 controller to sanity-check before training. Reference the track by name in an
 environment stage: `FeatureEnvironment(tracks=("my_track",))`.
+
+## Width variants (camera-mode track-width DR)
+
+The `track_width_scale` DR knob is **feature-only**: it scales the rulebook,
+which a baked mesh cannot follow, so a camera env would see a road that
+contradicts the rules. Under camera the width itself must vary —
+`tools/track_builder.py` bakes it:
+
+- **`scale_route_width(route, scale)`** scales a `(W, 6)` route's border
+  columns about the centerline (the centerline is untouched), so waypoint
+  count, arclength, and spawn poses are identical across variants.
+- **`width_variants(track, scales)`** installs one generated track per scale
+  (named `<track>_wNNN`, e.g. `tight_oval_w090`; a scale of 1.0 reuses the
+  source track) and returns the names, skipping already-baked variants unless
+  `force=True`.
+
+Pass the returned names straight to an environment stage:
+
+```python
+CameraEnvironment(tracks=width_variants("tight_oval", (0.9, 1.0, 1.15)), ...)
+```
+
+Each env is assigned one variant via the existing multi-track tiling, so the
+schedule is **per env, fixed for the run**. Because `Track.half_width` derives
+from the same route borders the mesh is built from, the rulebook follows the
+mesh **by construction** — no desync possible. Variant meshes use the
+procedural generated-track look (road ribbon + border lines + dashed
+centerline), also when the source track is an official DAE mesh.
+Tiled variants work under **Madrona and Nyx** alike (tiles are plain meshes on
+separate world tiles — no per-env visibility needed; camera-on-CPU remains
+single-track). `scripts/verify_width_variants.py` proves the pipeline end to
+end on Madrona, `scripts/verify_nyx_tiling.py` on Nyx.
+
+Width variants are the one-axis special case of the
+[track zoo](../guides/track-zoo.md), which adds palette and field axes on the
+same bake machinery plus a compile → see → plumb workflow.

@@ -61,8 +61,11 @@ def main():
     frame_diffs, results = [], {}
     onboard_frames, topdown_frames = [], []
     max_std = torch.zeros(N, device=env.device)
-    # Nyx accumulates frames temporally; give renders extra steps to converge
-    settle_steps = 3 if getattr(env, "nyx_vision", False) else 1
+    # Nyx accumulates frames temporally; give renders extra steps to converge.
+    # (The old gate read env.nyx_vision, which nothing ever set — the Nyx
+    # branch was dead code and settle was silently always 1.)
+    settle_steps = (6 if env.cfg["vision"].get("vision_renderer") == "nyx"
+                    else 1)
 
     obs = env.get_observations()
     for t in range(args.steps):

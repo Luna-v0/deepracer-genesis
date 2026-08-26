@@ -51,26 +51,6 @@ def rsl_supported(spec: "ExperimentSpec") -> bool:
     )
 
 
-def _dr_extra_cfg(spec: "ExperimentSpec") -> dict:
-    """Env-side action/image DR pulled from the spec into the sim cfg.
-
-    Args:
-        spec: The validated experiment spec.
-
-    Returns:
-        A cfg fragment with ``action_dr`` and/or ``image_aug`` (empty if none).
-    """
-    extra: dict = {}
-    ad = spec.action_dr
-    if ad.delay_steps or ad.steer_noise or ad.speed_noise:
-        extra["action_dr"] = {"steer_noise": ad.steer_noise,
-                              "speed_noise": ad.speed_noise,
-                              "delay_steps": ad.delay_steps}
-    if spec.obs_dr.image_aug:
-        extra["image_aug"] = dict(spec.obs_dr.image_aug)
-    return extra
-
-
 def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
     """Translate an ExperimentSpec into an rsl-rl OnPolicyRunner train cfg.
 
@@ -168,8 +148,8 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
     from .builder import Builder
 
     assert spec.env is not None and spec.algorithm is not None
-    # reuse all sim_cfg logic (incl. physics DR); inject env-side action/image DR
-    sim = Builder(spec).sim(extra_cfg=_dr_extra_cfg(spec) or None)
+    # sim_cfg carries the FULL DR stack (physics + env-side action/image)
+    sim = Builder(spec).sim()
     device = str(sim.device)
     run_dir = spec.run_dir(root)
     os.makedirs(run_dir, exist_ok=True)

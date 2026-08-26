@@ -7,17 +7,7 @@ from __future__ import annotations
 
 from ..configs.cfgs import get_env_cfg
 from ..envs import DeepRacerEnv
-from .spec import ExperimentSpec
-
-_NEUTRAL_PHYSICS = {
-    "friction_range": (1.0, 1.0),
-    "mass_shift_kg": 0.0,
-    "com_shift_m": 0.0,
-    "steer_kp_scale": (1.0, 1.0),
-    "wheel_kv_scale": (1.0, 1.0),
-    "armature_range": (0.0, 0.0),
-    "track_width_scale": (1.0, 1.0),
-}
+from .spec import NEUTRAL_PHYSICS, ExperimentSpec
 
 
 def _ensure_genesis(backend: str = "gpu"):
@@ -63,15 +53,14 @@ class Builder:
         cfg["sim"]["realtime_factor"] = env.realtime_factor
         cfg["reward"]["reward"] = env.reward   # a callable (or None -> deepracer default)
         cfg["reward"]["reward_scale_overrides"] = dict(env.reward_scales)
-        if env.render == "nyx":
-            cfg["vision"]["vision_renderer"] = "nyx"
-        # Part M.2: Madrona/Nyx are GPU-only, so camera obs on the CPU backend
-        # must use the per-env rasterizer. Set AFTER the nyx branch so cpu wins
-        # (a camera+cpu spec that also said render='nyx' falls to the rasterizer).
-        if env.modality == "camera" and env.backend == "cpu":
-            cfg["vision"]["vision_renderer"] = "rasterizer"
+        # Renderer resolution has ONE source of truth (EnvSpec.effective_renderer;
+        # Part M.2 rule folded in: cpu wins over nyx). "madrona" keeps the cfg
+        # default vision_renderer='batch'.
+        renderer = env.effective_renderer
+        if renderer in ("nyx", "rasterizer"):
+            cfg["vision"]["vision_renderer"] = renderer
         if randomize:
-            rand = dict(_NEUTRAL_PHYSICS)
+            rand = dict(NEUTRAL_PHYSICS)
             rand.update(obs_dr.physics)
             rand["camera_pitch_jitter_deg"] = obs_dr.camera_jitter.get("pitch_deg", 0.0)
             rand["camera_pos_jitter_m"] = obs_dr.camera_jitter.get("pos_m", 0.0)
@@ -88,7 +77,19 @@ class Builder:
         if env.emits_cost:
             cfg["reward"]["emit_cost"] = True
             cfg["reward"]["cost_fn"] = env.cost_fn
-        return cfg
+        # Env-side action/image DR ride the spec path as the TOP-LEVEL keys the
+        # env reads via env_cfg.get(...). Formerly injected only by the rsl
+        # backend's extra_cfg, which silently dropped them on every other build
+        # path (eval, preview, datasets, plain Builder.sim()).
+        extra_dr: dict = {}
+        ad = self.spec.action_dr
+        if ad.delay_steps or ad.steer_noise or ad.speed_noise:
+            extra_dr["action_dr"] = {"steer_noise": ad.steer_noise,
+                                     "speed_noise": ad.speed_noise,
+                                     "delay_steps": ad.delay_steps}
+        if obs_dr.image_aug:
+            extra_dr["image_aug"] = dict(obs_dr.image_aug)
+        return {**cfg, **extra_dr}
 
     def sim(self, extra_cfg: dict | None = None) -> DeepRacerEnv:
         """Build (once) and return the Genesis sim.

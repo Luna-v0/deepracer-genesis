@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import urllib.request
 
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -140,6 +140,36 @@ def route_from_waypoints(waypoints_xy, width: float,
     inner = pts + normal * (width / 2)
     outer = pts - normal * (width / 2)
     return np.concatenate([pts, inner, outer], axis=1)
+
+
+def scale_route_width(route: np.ndarray, scale: float) -> np.ndarray:
+    """Scale a route's width about its centerline; the centerline is untouched.
+
+    Only the border columns move, so waypoint count, arclength, spawn poses,
+    and localization geometry are identical across width variants — and the
+    rulebook width (``Track.half_width`` is derived from these same borders)
+    tracks the rendered mesh by construction. Per-waypoint width variation in
+    the source route is preserved (each border offset scales individually).
+
+    Args:
+        route: (W, 6) route array ([center, inner, outer] per waypoint).
+        scale: Width multiplier (> 0); 1.0 returns an unchanged copy.
+
+    Returns:
+        A new (W, 6) route with both borders scaled by ``scale``.
+
+    Raises:
+        ValueError: If the route is not (W, 6) or ``scale`` is not positive.
+    """
+    r = np.asarray(route, dtype=np.float64).copy()
+    if r.ndim != 2 or r.shape[1] != 6:
+        raise ValueError(f"route must be (W, 6) [center,inner,outer]; got {r.shape}")
+    if not scale > 0:
+        raise ValueError(f"width scale must be > 0; got {scale}")
+    center = r[:, 0:2]
+    r[:, 2:4] = center + (r[:, 2:4] - center) * scale
+    r[:, 4:6] = center + (r[:, 4:6] - center) * scale
+    return r
 
 
 def track_metrics(route: np.ndarray) -> dict:
@@ -429,9 +459,54 @@ def _write_strip(f, left, right, z, vert_offset, flip):
     return vert_offset + 2 * w
 
 
+def _wall_ring_quads(x0: float, y0: float, x1: float, y1: float,
+                     t: float, h: float) -> list:
+    """Quads of a rectangular perimeter wall band (single-sided faces).
+
+    Each of the four sides gets an inner vertical face (normal toward the
+    ring center), an outer vertical face (normal away), and an up-facing top
+    strip; the south/north spans extend by the thickness so the corners
+    close. Vertex order per quad is counter-clockwise as seen from the
+    visible side (right-hand-rule normals).
+
+    Args:
+        x0: Inner-rectangle min x.
+        y0: Inner-rectangle min y.
+        x1: Inner-rectangle max x.
+        y1: Inner-rectangle max y.
+        t: Wall thickness (band grows outward).
+        h: Wall height.
+
+    Returns:
+        Twelve 4-tuples of ``(x, y, z)`` vertices.
+    """
+    xs0, xs1 = x0 - t, x1 + t
+    return [
+        # south (inner +y / outer -y / top up)
+        ((xs1, y0, 0), (xs0, y0, 0), (xs0, y0, h), (xs1, y0, h)),
+        ((xs0, y0 - t, 0), (xs1, y0 - t, 0), (xs1, y0 - t, h), (xs0, y0 - t, h)),
+        ((xs0, y0 - t, h), (xs1, y0 - t, h), (xs1, y0, h), (xs0, y0, h)),
+        # north
+        ((xs0, y1, 0), (xs1, y1, 0), (xs1, y1, h), (xs0, y1, h)),
+        ((xs1, y1 + t, 0), (xs0, y1 + t, 0), (xs0, y1 + t, h), (xs1, y1 + t, h)),
+        ((xs0, y1, h), (xs1, y1, h), (xs1, y1 + t, h), (xs0, y1 + t, h)),
+        # west (inner +x / outer -x / top up)
+        ((x0, y0, 0), (x0, y1, 0), (x0, y1, h), (x0, y0, h)),
+        ((x0 - t, y1, 0), (x0 - t, y0, 0), (x0 - t, y0, h), (x0 - t, y1, h)),
+        ((x0 - t, y0, h), (x0, y0, h), (x0, y1, h), (x0 - t, y1, h)),
+        # east
+        ((x1, y1, 0), (x1, y0, 0), (x1, y0, h), (x1, y1, h)),
+        ((x1 + t, y0, 0), (x1 + t, y1, 0), (x1 + t, y1, h), (x1 + t, y0, h)),
+        ((x1, y0, h), (x1 + t, y0, h), (x1 + t, y1, h), (x1, y1, h)),
+    ]
+
+
 def build_track_mesh(route: np.ndarray, out_obj: str, *,
                      line_width: float = 0.04, dash_len: float = 0.30,
-                     dash_gap: float = 0.35) -> str:
+                     dash_gap: float = 0.35, palette: "dict | None" = None,
+                     field: "tuple | None" = None,
+                     wall: "tuple | None" = None,
+                     wall_height: float = 0.3) -> str:
     """Write a road-ribbon OBJ (road, border lines, dashed centerline) plus its
     .mtl and solid-color 4x4 PNG textures next to it.
 
@@ -441,11 +516,39 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
         line_width: Border-line width in meters.
         dash_len: Centerline dash length in meters.
         dash_gap: Gap between centerline dashes in meters.
+        palette: Optional 0-255 RGB overrides for any of ``road``/``border``/
+            ``centerline`` (merged over the default palette).
+        field: Optional 0-255 RGB — bakes a per-track ground quad (track
+            bounding box + margin, just above the global plane) INTO the
+            mesh, so a variant's field colour travels with its asset and
+            tiles automatically under every renderer.
+        wall: Optional 0-255 RGB — bakes a perimeter wall band around the
+            track footprint (at the field-quad edge) into the mesh: the
+            visual barrier a real DeepRacer venue has. Visual-only — the
+            track entity is added without collision; the rulebook/termination
+            is the actual fence.
+        wall_height: Wall height in metres.
 
     Returns:
         The written .obj path.
     """
+    pal = {**_PALETTE, **(palette or {})}
+    # MESH-ONLY winding normalization: a clockwise route (official *_cw
+    # variants) must not change driving direction — the route file stays
+    # untouched — but the legacy flip branch baked downward-facing
+    # (invisible) roads for CW input, so the baker reverses its LOCAL copy
+    # of the geometry instead (a mesh is direction-agnostic).
+    x, y = route[:, 0], route[:, 1]
+    if 0.5 * np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y) < 0:
+        route = route[::-1]
     center, inner, outer = route[:, 0:2], route[:, 2:4], route[:, 4:6]
+    # border columns may be stored travel-relative (official files) or
+    # geometry-fixed; the strip writer is only verified for "inner = left of
+    # travel", so decide by GEOMETRY, not labels
+    t = np.roll(center, -1, axis=0) - center
+    left = np.stack([-t[:, 1], t[:, 0]], axis=1)
+    if np.median(np.sum((inner - center) * left, axis=1)) < 0:
+        inner, outer = outer, inner
     normal = (inner - center)
     normal /= np.maximum(np.linalg.norm(normal, axis=1, keepdims=True), 1e-9)
     tangent = np.stack([normal[:, 1], -normal[:, 0]], axis=1)
@@ -459,8 +562,13 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
     out_dir = os.path.dirname(out_obj)
     mtl_name = os.path.basename(out_obj).replace(".obj", ".mtl")
     from PIL import Image
+    mats = dict(pal)
+    if field is not None:
+        mats["field"] = tuple(field)
+    if wall is not None:
+        mats["wall"] = tuple(wall)
     with open(os.path.join(out_dir, mtl_name), "w") as f:
-        for mat, rgb in _PALETTE.items():
+        for mat, rgb in mats.items():
             Image.new("RGB", (4, 4), rgb).save(os.path.join(out_dir, f"{mat}.png"))
             kd = " ".join(f"{c / 255:.4f}" for c in rgb)
             f.write(f"newmtl {mat}\nKd {kd}\nKa 0 0 0\nKs 0 0 0\n"
@@ -468,8 +576,33 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
 
     with open(out_obj, "w") as f:
         f.write(f"mtllib {mtl_name}\n")
+        # variant signature: keeps OBJ bytes unique per palette/field so
+        # genesis's mesh-preprocessing cache never dedups two palette variants
+        # of the same geometry onto one processed asset (the appearance.py trap)
+        sig = ",".join(f"{m}:{r}.{g}.{b}" for m, (r, g, b) in sorted(mats.items()))
+        f.write(f"# variant {sig}\n")
         f.write("vt 0.5 0.5\n")            # single UV; textures are solid
         v = 1
+        # field quad and wall ring share the footprint-proportional margin so
+        # the wall stands exactly at the field's edge (kept tight so tiles
+        # can pack close in the zoo views)
+        m = max(0.3, 0.18 * float(max(outer.max(0) - outer.min(0))))
+        (x0, y0), (x1, y1) = outer.min(0) - m, outer.max(0) + m
+        if field is not None:
+            # ground quad: above the global plane (z=-0.001), below the road
+            f.write("usemtl field\n")
+            for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+                f.write(f"v {px:.5f} {py:.5f} 0.0005\n")
+            _quad(f, v, False)
+            v += 4
+        if wall is not None:
+            f.write("usemtl wall\n")
+            for quad in _wall_ring_quads(x0, y0, x1, y1, 0.05, wall_height):
+                for px, py, pz in quad:
+                    f.write(f"v {px:.5f} {py:.5f} {pz:.5f}\n")
+                f.write(f"f {v}/1 {v + 1}/1 {v + 2}/1\n")
+                f.write(f"f {v}/1 {v + 2}/1 {v + 3}/1\n")
+                v += 4
         f.write("usemtl road\n")
         v = _write_strip(f, inner, outer, 0.001, v, flip)
         f.write("usemtl border\n")
@@ -497,13 +630,20 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
 
 
 # ------------------------------------------------------------ registration
-def install_track(name: str, route: np.ndarray) -> str:
+def install_track(name: str, route: np.ndarray, *,
+                  palette: "dict | None" = None,
+                  field: "tuple | None" = None,
+                  wall: "tuple | None" = None) -> str:
     """Persist a route and generated mesh under the assets tree and register it
     so the track is usable anywhere a track name is accepted.
 
     Args:
         name: Track name to register under.
         route: (W, 6) [center, inner, outer] route array.
+        palette: Optional 0-255 RGB overrides for road/border/centerline
+            (see :func:`build_track_mesh`).
+        field: Optional 0-255 RGB per-track ground quad baked into the mesh.
+        wall: Optional 0-255 RGB perimeter wall baked into the mesh.
 
     Returns:
         The track directory under the generated-assets tree.
@@ -520,11 +660,66 @@ def install_track(name: str, route: np.ndarray) -> str:
     track_dir = os.path.join(GENERATED_DIR, name)
     os.makedirs(track_dir, exist_ok=True)
     np.save(os.path.join(track_dir, "route.npy"), route)
-    build_track_mesh(route, os.path.join(track_dir, "track.obj"))
+    build_track_mesh(route, os.path.join(track_dir, "track.obj"),
+                     palette=palette, field=field, wall=wall)
 
     rel = os.path.relpath(track_dir, ASSETS_DIR)
     TRACKS[name] = (f"{rel}/track.obj", f"{rel}/route.npy", None)
     return track_dir
+
+
+def width_variants(track: str, scales: Sequence[float], *,
+                   force: bool = False) -> tuple[str, ...]:
+    """Bake and install width-scaled variants of ``track``; return their names.
+
+    The camera-mode answer to track-width DR: the ``track_width_scale`` knob
+    is feature-only (it scales the rulebook, which a baked mesh cannot
+    follow), so under camera the width itself must vary. Each variant here is
+    a first-class generated track — same centerline, borders scaled — so
+    passing the returned names as ``EnvSpec.tracks`` gives per-env *visible*
+    width via the existing multi-track tiling, with the rulebook following
+    each variant's own route automatically (``Track.half_width`` derives from
+    the route borders). Schedule: per env, fixed for the run.
+
+    Variant meshes use the procedural generated-track look (road ribbon +
+    border lines + dashed centerline), also for official DAE source tracks.
+
+    Args:
+        track: Source track name (any registered track with a route).
+        scales: Width multipliers, e.g. ``(0.9, 1.0, 1.15)``. A scale of 1.0
+            reuses the source track itself (no duplicate bake).
+        force: Rebake variants whose assets already exist on disk.
+
+    Returns:
+        One registered track name per scale, in the given order, e.g.
+        ``("tight_oval_w090", "tight_oval", "tight_oval_w115")``.
+
+    Raises:
+        KeyError: If ``track`` is not a registered track name.
+        ValueError: If a scale is not positive.
+    """
+    from ..envs.track import TRACKS
+
+    _mesh_rel, route_rel, _field = TRACKS[track]
+    route = np.load(os.path.join(ASSETS_DIR, route_rel))
+    names = []
+    for scale in scales:
+        if not scale > 0:
+            raise ValueError(f"width scale must be > 0; got {scale}")
+        if abs(scale - 1.0) < 1e-9:
+            names.append(track)
+            continue
+        name = f"{track}_w{round(scale * 100):03d}"
+        track_dir = os.path.join(GENERATED_DIR, name)
+        if force or not os.path.exists(os.path.join(track_dir, "route.npy")):
+            install_track(name, scale_route_width(route, scale))
+        elif name not in TRACKS:
+            # assets were baked before this process imported the registry
+            # (discovery runs at track-module import) — register them now
+            rel = os.path.relpath(track_dir, ASSETS_DIR)
+            TRACKS[name] = (f"{rel}/track.obj", f"{rel}/route.npy", None)
+        names.append(name)
+    return tuple(names)
 
 
 def fetch_official_track(name: str, *, force: bool = False) -> str:

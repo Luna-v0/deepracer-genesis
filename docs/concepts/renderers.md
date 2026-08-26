@@ -32,11 +32,16 @@ reset via `sample_world_color()` (in `randomization/visual.py`) — a hue rotati
 plus saturation/value scaling in YIQ chroma space. See
 [Domain randomization](domain-randomization.md).
 
-## Camera-mount jitter (Madrona)
+## Camera-mount jitter (Madrona + rasterizer)
 
-`MadronaRenderer.randomize_mount()` perturbs the camera's pitch and position per
-episode (`camera_pitch_jitter_deg`, `camera_pos_jitter_m`) via
-`sample_mount_transforms()`. Nyx does not jitter the mount.
+`randomize_mount()` perturbs each env's camera pitch and position
+(`camera_pitch_jitter_deg`, `camera_pos_jitter_m`) via
+`sample_mount_transforms()` — applied **once per run**, from the env's
+`__init__` alongside the physics DR, not per episode. It works on Madrona
+(batched attach offsets) and on the rasterizer path (`RasterizerObsRenderer`
+holds one camera per env, so each attach offset is rewritten individually).
+Nyx is excluded: a single batched sensor with one shared offset, so there are
+no per-env mounts to jitter.
 
 ## Debug views (independent of the obs renderer)
 

@@ -227,14 +227,21 @@ def aggregate_episodes(
 # Out-of-loop per-track holdout evaluation (Part N.3)
 
 def build_single_track_sim(spec, track: str, num_envs: int, view: str = "none"):
-    """Build a fresh single-track sim for ``track`` from ``spec``.
+    """Build a fresh single-track sim for ``track`` under NOMINAL conditions.
 
     A fresh sim per track sidesteps the one-scene-per-process / camera
     superimpose constraint and yields clean per-track metrics. Camera mode
     should call this in its own process (one per track).
 
+    Every DR slice is stripped before building: holdout eval measures the
+    policy under nominal conditions, not one randomization draw (matching
+    ``visualize.rollout_video``). Before this, eval incoherently kept physics
+    DR while dropping image/action DR — holdout numbers from runs predating
+    the change are not directly comparable.
+
     Args:
-        spec: The experiment spec (its sim_cfg is reused, track overridden).
+        spec: The experiment spec (its sim_cfg is reused, track overridden,
+            DR stripped).
         track: The single track name to evaluate on.
         num_envs: Parallel envs for the eval rollout.
         view: view renderer for this eval sim (``"none"`` default). ``"gui"``
@@ -245,10 +252,14 @@ def build_single_track_sim(spec, track: str, num_envs: int, view: str = "none"):
     Returns:
         A built DeepRacerEnv on the spec's backend for exactly ``track``.
     """
+    from dataclasses import replace
+
     from .._gs import ensure_init
     from ..envs import DeepRacerEnv
     from .builder import Builder
+    from .spec import ActionDRSpec, ObsDRSpec
 
+    spec = replace(spec, obs_dr=ObsDRSpec(), action_dr=ActionDRSpec())
     cfg = Builder(spec).sim_cfg()
     cfg["sim"]["track"] = track
     cfg["sim"]["view"] = view

@@ -43,12 +43,14 @@ def build_scene(env: "DeepRacerEnv", env_cfg: dict, show_viewer: bool) -> None:
         show_viewer: Whether to open an interactive Genesis viewer window.
 
     Raises:
-        NotImplementedError: If more than one track morph is requested with the
-            Nyx renderer (heterogeneous tracks are unsupported there), or with
-            any camera-capable renderer (genesis 1.2.1 never feeds
-            ``vgeom.active_envs_mask`` to the batch renderer, so every env would
-            render all track variants superimposed with z-fighting;
-            feature-mode multi-track without rendering is fine).
+        NotImplementedError: If multiple track variants are requested WITHOUT
+            spatial tiling: heterogeneous (superimposed) variants z-fight under
+            any camera renderer (Nyx has no per-env visibility masking; the
+            batch-renderer path predates genesis 1.3.2's ``geom_env_mask``).
+            Tiled multi-track (``track_grid_spacing > 0``, the default for
+            camera envs) is supported on Madrona, the rasterizer, AND Nyx —
+            tiles are plain meshes on separate world tiles. Feature-mode
+            multi-track without rendering is always fine.
     """
     env.renderer = make_renderer(env_cfg["vision"])
     randomize = bool(env_cfg["rand"]["randomize"])
@@ -92,8 +94,6 @@ def build_scene(env: "DeepRacerEnv", env_cfg: dict, show_viewer: bool) -> None:
     nyx = isinstance(env.renderer, NyxRenderer)
     mesh_paths = env.track.obj_paths if nyx else env.track.mesh_paths
     tiled = float(getattr(env.track, "grid_spacing", 0.0)) > 0.0
-    if nyx and len(mesh_paths) > 1:
-        raise NotImplementedError("heterogeneous tracks are not supported with the Nyx renderer")
 
     if tiled:
         # Part O spatial tiling: load ALL variant meshes into EVERY env as
@@ -109,6 +109,14 @@ def build_scene(env: "DeepRacerEnv", env_cfg: dict, show_viewer: bool) -> None:
                 fixed=True, collision=False))
             for k, p in enumerate(mesh_paths)]
     else:
+        if nyx and len(mesh_paths) > 1:
+            raise NotImplementedError(
+                "heterogeneous (superimposed) track variants are unsupported "
+                "under Nyx — it has no per-env visibility masking, so every env "
+                "would render all variants z-fighting. Use spatial tiling "
+                "(track_grid_spacing > 0): tiled variants are plain meshes on "
+                "separate world tiles, which Nyx renders like any other scene "
+                "content (verified by scripts/verify_nyx_tiling.py).")
         if env.renderer.has_camera and len(mesh_paths) > 1:
             raise NotImplementedError(
                 "heterogeneous multi-track CAMERA training is unsound under the "
