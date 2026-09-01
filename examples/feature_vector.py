@@ -37,7 +37,7 @@ class FeatureCpu(Experiment):
 
     total_env_steps = 2_000_000
     eval_every_steps = 500_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "feature_cpu"
 
     def pipeline(self):
@@ -58,7 +58,7 @@ class FeatureGpuDr(Experiment):
 
     total_env_steps = 5_000_000
     eval_every_steps = 1_000_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "feature_gpu_dr"
 
     def pipeline(self):

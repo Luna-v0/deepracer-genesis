@@ -127,7 +127,7 @@ def test_id_stable_and_config_sensitive():
 
 
 def test_to_dict_json_serializable_and_run_dir():
-    spec = env2_pipeline().build(seed=3, ablation_group="safety", variant="tight")
+    spec = env2_pipeline().build(seed=3, group="safety", variant="tight")
     json.dumps(spec.to_dict())                      # must not raise
     assert spec.run_dir() == f"runs/safety/tight-3-{spec.id()}"
 
@@ -260,8 +260,8 @@ def test_id_ignores_bookkeeping_tags_and_is_cross_process_stable():
     import subprocess
     import sys
 
-    a = env1_pipeline().build(seed=0, ablation_group="g1", variant="v1")
-    b = env1_pipeline().build(seed=0, ablation_group="g2", variant="v2")
+    a = env1_pipeline().build(seed=0, group="g1", variant="v1")
+    b = env1_pipeline().build(seed=0, group="g2", variant="v2")
     assert a.id() == b.id()                     # tags are not configuration
     assert a.run_dir() != b.run_dir()           # but runs land separately
 

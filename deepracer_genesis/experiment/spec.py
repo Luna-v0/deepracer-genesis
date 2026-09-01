@@ -363,7 +363,7 @@ class ExperimentSpec:
         total_env_steps: total environment steps to train for.
         eval_every_steps: eval interval in env-steps (0 = final eval only).
         seed: random seed.
-        ablation_group: bookkeeping tag grouping related runs.
+        group: run-grouping tag — names the runs/<group>/ folder.
         variant: bookkeeping tag naming this run within its group.
     """
 
@@ -377,7 +377,7 @@ class ExperimentSpec:
     total_env_steps: int = 5_000_000
     eval_every_steps: int = 0        # 0 = final eval only; N = also every N env-steps
     seed: int = 0
-    ablation_group: Optional[str] = None
+    group: Optional[str] = None
     variant: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -388,16 +388,16 @@ class ExperimentSpec:
 
     def id(self) -> str:
         """Content-hash identity (sha1 of the config JSON, excluding the
-        ablation_group/variant tags) so equal configs share a run dir."""
+        group/variant tags) so equal configs share a run dir."""
         # sha1, NOT built-in hash(): identity must be stable across processes.
-        # ablation_group/variant are bookkeeping tags, not configuration —
+        # group/variant are bookkeeping tags, not configuration —
         # the same training config keeps one id however it is tagged.
         payload = {k: v for k, v in self.to_dict().items()
-                   if k not in ("ablation_group", "variant")}
+                   if k not in ("group", "variant")}
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
     def run_dir(self, root: str = "runs") -> str:
-        group = self.ablation_group or "default"
+        group = self.group or "default"
         variant = self.variant or "run"
         return f"{root}/{group}/{variant}-{self.seed}-{self.id()}"
 
@@ -432,6 +432,7 @@ class ExperimentSpec:
         self._validate_environment()
         self._validate_obs_routing()
         self._validate_key_routing()
+        self._validate_policy_arch()
         self._validate_encoder()
         self._validate_obs_dr()
         self._validate_action_dr()
@@ -532,6 +533,26 @@ class ExperimentSpec:
             raise SpecError(
                 "obs_routing critic must see >= the actor's blocks (privileged "
                 "critic); actor-only blocks %s" % sorted(actor_only))
+
+    def _validate_policy_arch(self) -> None:
+        """Check the policy's mlp dict (recurrence support, rnn shape).
+
+        Raises:
+            SpecError: If a camera (CNN) policy requests recurrence —
+                rsl-rl's ``RNNModel`` has no CNN trunk — or the rnn config
+                names an unsupported cell type.
+        """
+        rnn = (self.policy.mlp or {}).get("rnn")
+        if rnn is None:
+            return
+        if self.policy.cnn is not None:
+            raise SpecError(
+                "mlp={'rnn': ...} needs a vector policy: rsl-rl's RNNModel "
+                "has no CNN trunk, so camera policies cannot be recurrent "
+                "(drop the rnn config or switch to a feature environment)")
+        cell = rnn.get("type", "lstm")
+        if cell not in ("lstm", "gru"):
+            raise SpecError(f"rnn type must be 'lstm' or 'gru', got {cell!r}")
 
     def _validate_key_routing(self) -> None:
         """Check actor/critic obs keys, discrete actions, and camera routing.
@@ -700,7 +721,7 @@ class ExperimentSpec:
                     and algo.lagrangian.get("budget") not in (None, env.cost_budget)):
                 raise SpecError(
                     "conflicting budgets: env.cost_budget=%r vs algorithm.lagrangian"
-                    "['budget']=%r — sweep 'env.cost_budget' (ablation.override keeps "
+                    "['budget']=%r — sweep 'env.cost_budget' (overrides.override keeps "
                     "them in sync)" % (env.cost_budget, algo.lagrangian.get("budget")))
         elif env.emits_cost:
             warnings.warn(

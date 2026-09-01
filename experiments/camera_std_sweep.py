@@ -21,7 +21,7 @@ from deepracer_genesis.experiment import PPO  # noqa: E402
 class _ShortCamera(CameraMadronaDr):
     total_env_steps = 2_500_000
     eval_every_steps = 1_250_000
-    ablation_group = "camera_std_sweep"
+    group = "camera_std_sweep"
 
 
 class SweepEntropyZero(_ShortCamera):

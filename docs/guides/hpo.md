@@ -41,7 +41,7 @@ def objective(trial):
         >> PPO(lr=p["lr"], entropy_coef=p["entropy_coef"],
                epochs=p["epochs"], clip=p["clip"])
     ).build(seed=0, total_env_steps=STEPS, eval_every_steps=EVAL_EVERY,
-            ablation_group="hpo")
+            group="hpo")
 
     def report(frames, metrics):
         trial.report(metrics[METRIC], frames)
@@ -83,3 +83,49 @@ HPO_STEPS=5_000_000 HPO_EVAL_EVERY=500_000 HPO_TRIALS=20 \
 The SQLite storage makes the study resumable and inspectable with Optuna's
 dashboard. `notebooks/hpo_cnn.ipynb` shows the same pattern searching CNN
 architecture for a camera policy.
+
+## Searching architectures and topologies
+
+Network shape is spec data, so it goes into a study like any hyperparameter.
+The policy stages accept an `mlp` dict with three knobs:
+
+- `hidden` — tuple of layer widths (depth **and** width),
+- `activation` — rsl-rl activation name (`"elu"`, `"relu"`, `"tanh"`, ...),
+- `rnn` — `{"type": "lstm"|"gru", "hidden": int, "layers": int}` switches
+  the actor and critic to rsl-rl's recurrent `RNNModel` (an LSTM/GRU trunk
+  in front of the MLP head). **Vector policies only** — upstream `RNNModel`
+  has no CNN trunk, and `spec.validate()` refuses the camera + rnn combo.
+
+An Optuna objective that searches topology, activation, and MLP-vs-recurrent
+in one space (conditional parameters — recurrent knobs are only suggested
+when the recurrent arm is drawn):
+
+```python
+def objective(trial: optuna.Trial) -> float:
+    depth = trial.suggest_int("depth", 2, 4)
+    width = trial.suggest_categorical("width", [128, 256, 512])
+    mlp = {
+        # funnel: each layer half the previous, e.g. 512-256-128
+        "hidden": tuple(max(width // 2**i, 32) for i in range(depth)),
+        "activation": trial.suggest_categorical("activation",
+                                                ["elu", "relu", "tanh"]),
+    }
+    arch = trial.suggest_categorical("arch", ["mlp", "lstm", "gru"])
+    if arch != "mlp":
+        mlp["rnn"] = {"type": arch,
+                      "hidden": trial.suggest_categorical("rnn_hidden",
+                                                          [128, 256]),
+                      "layers": 1}
+
+    spec = (FeatureEnvironment(num_envs=1024)
+            >> VectorPolicy(mlp=mlp)).build(
+        seed=0, total_env_steps=STEPS, eval_every_steps=EVAL_EVERY,
+        group="arch_search", variant=f"t{trial.number:03d}")
+    return run(spec, root="runs/arch_search").metrics["completion_rate"]
+```
+
+For camera policies the searchable shape lives in the `cnn` dict
+(`channels`/`kernels`/`strides`/`activation`) plus the same `mlp` head
+knobs — see `AsymmetricCameraPolicy`. Everything a trial sets is part of
+the spec's content hash, so each architecture gets its own run dir and the
+study table doubles as an architecture leaderboard.

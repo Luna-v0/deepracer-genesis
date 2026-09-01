@@ -60,10 +60,37 @@ It maps the env to named `(N,)` per-step terms; the env weights them by
 | `heading` | `−|heading_err|·dt` | align with track tangent |
 | `steering` | `−|steer_action|·dt` | discourage needless steering |
 | `action_rate` | `−‖aₜ − aₜ₋₁‖²·dt` | smooth control |
-| `off_track` | `(lateral outside half_width − wheel_margin)·dt` | penalize leaving the road |
+| `off_track` | `−(lateral outside half_width − wheel_margin)·dt` | penalize edge-riding |
 
 All terms scale by control `dt`, so weights are timestep-independent. Per-term sums
-are tracked for logging.
+are tracked for logging. The full term/scale table with defaults lives in the
+[reward parameters reference](../reference/reward-parameters.md).
+
+!!! note "Signs live in the terms"
+    Penalty terms are negative and `reward_scales` stay positive. This is
+    load-bearing: until 2026-08 the `off_track` term was accidentally
+    positive, so the default reward *paid* +2·dt per step for riding the
+    track edge — 4× the centering bonus — and camera policies dutifully
+    learned to crash. `tests/test_rewards.py` pins every term's sign.
+
+### What the reward taught us (a short story)
+
+Three generations of camera policy, same network, same PPO settings:
+
+1. **Progress + "faster is better" speed bonus** — fast, crash-prone
+   driving: ~1.0 off-track rate, under 40% lap completion even on training
+   tracks.
+2. **Progress gated on-track, no speed term** — reward-hacked itself: with
+   nothing paying for motion, standing still on the centerline farms the
+   `centered` bonus forever. The cars parked.
+3. **Target-pace speed term** (`−|v − 1.6 m/s|·dt`) — the winner of a
+   reward-design search scored on ground-truth lap completion. Roughly
+   doubled completion everywhere, including 78% on a track the policy had
+   never seen.
+
+Moral: the reward is the strongest lever in this repo, it is searchable
+(functions are parameters), and it must be *evaluated* on a metric it
+cannot inflate.
 
 ### Custom rewards
 
@@ -80,6 +107,6 @@ def my_reward(env):
 The env fields available to a reward (`v_forward`, `lateral`, `half_width`,
 `heading_err`, `d_progress`, `actions`, `last_actions`, ...) are the same ones the
 feature vector reads — see [Feature vectors](features.md) for the full palette, and
-`REFACTOR_PLAN.md` Part K for the planned shared **signal bus** that unifies
+`envs/signals.py` for the shared **signal bus** that unifies
 features, reward, and cost over one vocabulary (e.g. `off_track` as a reward term in
 plain RL and a cost term under safe RL).

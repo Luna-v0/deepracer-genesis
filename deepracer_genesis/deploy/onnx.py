@@ -333,19 +333,118 @@ def _load_metrics(run_dir: str) -> dict:
     return {}
 
 
+def _spec_from_record(payload: dict) -> ExperimentSpec:
+    """Reconstruct an exportable spec from a saved eval_record spec dump.
+
+    The record's spec dict is a one-way display dump: callables are stored
+    by qualname. For the camera-only export path none of them matter — the
+    actor rebuild reads only plain data (resolution, frame_stack, policy
+    cnn/mlp/distribution, actor keys) — so string-valued callable fields
+    are dropped and sequences are re-tupled.
+
+    Args:
+        payload: The parsed ``eval_record.json``.
+
+    Returns:
+        A validated ExperimentSpec equivalent to the trained one for
+        export purposes.
+    """
+    import dataclasses
+
+    from ..experiment import spec as spec_mod
+
+    def rebuild(cls, data):
+        fields = {f.name: f for f in dataclasses.fields(cls)}
+        kwargs = {}
+        for name, value in data.items():
+            if name not in fields:
+                continue                      # forward-compat: ignore unknowns
+            if isinstance(value, list):
+                value = tuple(value)
+            kwargs[name] = value
+        return cls(**kwargs)
+
+    env = dict(payload["spec"]["env"])
+    for callable_field in ("reward", "feature_set"):
+        if isinstance(env.get(callable_field), str):
+            env[callable_field] = None
+    algo = dict(payload["spec"]["algorithm"])
+    if isinstance(algo.get("cls"), str):
+        algo["cls"] = None
+
+    return ExperimentSpec(
+        env=rebuild(spec_mod.EnvSpec, env),
+        policy=rebuild(spec_mod.PolicySpec, payload["spec"]["policy"]),
+        algorithm=rebuild(spec_mod.AlgorithmSpec, algo),
+        encoder=rebuild(spec_mod.EncoderSpec, payload["spec"]["encoder"]),
+        obs_dr=rebuild(spec_mod.ObsDRSpec, payload["spec"]["obs_dr"]),
+        action_dr=rebuild(spec_mod.ActionDRSpec, payload["spec"]["action_dr"]),
+        eval=rebuild(spec_mod.EvalConfig, payload["spec"]["eval"]),
+        seed=payload["seed"], group=payload.get("group"),
+        variant=payload.get("variant"),
+        **{k: payload["spec"][k] for k in ("total_env_steps",
+                                           "eval_every_steps")
+           if k in payload["spec"]},
+    ).validate()
+
+
+def export_from_run_dir(run_dir: str, *, out: Optional[str] = None,
+                        opset: int = 11,
+                        bundle_name: Optional[str] = None) -> str:
+    """Export a finished run's actor using only its run directory.
+
+    Reads ``eval_record.json`` for the spec and ``model.pt`` for the
+    weights — no experiment code needed, which makes this the natural
+    genesis-free export entry point for notebook-defined experiments:
+
+        python -m deepracer_genesis.deploy.onnx runs/<group>/<run-dir>
+
+    Args:
+        run_dir: A run directory containing ``eval_record.json`` and
+            ``model.pt``.
+        out: Output directory; defaults to ``<run_dir>/export``.
+        opset: ONNX opset (default 11 — the car's OpenVINO 2021.1 limit).
+        bundle_name: Car-bundle name; defaults to the record's variant.
+
+    Returns:
+        The export directory.
+    """
+    import json as _json
+
+    with open(os.path.join(run_dir, "eval_record.json")) as f:
+        payload = _json.load(f)
+    spec = _spec_from_record(payload)
+    return export_policy(spec, ckpt=os.path.join(run_dir, "model.pt"),
+                         out=out or os.path.join(run_dir, "export"),
+                         opset=opset,
+                         bundle_name=bundle_name or payload.get("variant"))
+
+
 def main(argv=None) -> None:
-    """CLI: ``python -m deepracer_genesis.deploy.onnx <target> [options]``."""
+    """CLI: ``python -m deepracer_genesis.deploy.onnx <target> [options]``.
+
+    ``target`` is either an experiment as ``module:ClassName`` or a **run
+    directory** (a folder holding ``eval_record.json`` + ``model.pt``) —
+    the run-dir form needs no importable experiment code, so it exports
+    notebook-defined experiments too.
+    """
     import argparse
     import sys
 
     parser = argparse.ArgumentParser(description=export_policy.__doc__)
-    parser.add_argument("target", help="experiment as module:ClassName")
+    parser.add_argument("target",
+                        help="experiment as module:ClassName, or a run dir")
     parser.add_argument("--root", default="runs")
     parser.add_argument("--ckpt", default=None)
     parser.add_argument("--out", default=None)
     parser.add_argument("--opset", type=int, default=11)
     parser.add_argument("--bundle-name", default=None)
     args = parser.parse_args(argv)
+
+    if os.path.isdir(args.target):
+        export_from_run_dir(args.target, out=args.out, opset=args.opset,
+                            bundle_name=args.bundle_name)
+        return
 
     # build() takes classes, not names — resolve the CLI's module:ClassName.
     # Targets like examples.camera live under the project root (= cwd).

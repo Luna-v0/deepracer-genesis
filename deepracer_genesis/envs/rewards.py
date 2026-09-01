@@ -99,5 +99,8 @@ def deepracer(env: "DeepRacerEnv") -> dict[str, torch.Tensor]:
         "heading": -env.heading_err.abs() * env.dt,
         "steering": -env.actions[:, 0].abs() * env.dt,
         "action_rate": -((env.actions - env.last_actions) ** 2).sum(dim=1) * env.dt,
-        "off_track": (~on_track).float() * env.dt,
+        # negative like heading/steering: signs live in the TERM, scales stay
+        # positive. (This was +1*dt until 2026-08: a positive scale *rewarded*
+        # edge-riding at 4x the centered bonus — pinned by test_rewards.)
+        "off_track": -(~on_track).float() * env.dt,
     }

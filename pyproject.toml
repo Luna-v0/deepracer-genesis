@@ -15,6 +15,7 @@ dependencies = [
     "numpy",
     "pyarrow",
     "imageio[ffmpeg]",
+    "seaborn>=0.13.2",
 ]
 
 [project.urls]
@@ -73,6 +74,8 @@ dev = [
     "python-lsp-server[all]>=1.14.0",
     # telemetry analysis (mirrors the [analysis] extra for local work)
     "pandas>=2.0",
+    "optuna>=4.9.0",
+    "papermill>=2.7.0",
 ]
 # GPU renderers, synced by default for local `uv run` (camera/Nyx experiments)
 # so `uv run experiments/foo.py` "just works". These mirror the [vision]/[nyx]

@@ -247,7 +247,9 @@ def plot_waypoint_heat(df, track: Optional[str] = None, *,
         The matplotlib figure.
     """
     track = _resolve_track(df, track)
-    d = df[df["track"] == track]
+    # done rows carry the post-respawn pose (see _crash_positions) — they
+    # would smear each episode's final sample onto the spawn waypoint
+    d = df[(df["track"] == track) & ~df["done"]]
     route = _route(track)
     center = route[:, 0:2]
     wp = _nearest_waypoints(d[["x", "y"]].to_numpy(), center)
@@ -265,6 +267,27 @@ def plot_waypoint_heat(df, track: Optional[str] = None, *,
     return fig
 
 
+def _crash_positions(d):
+    """The last on-track pose before each off-track exit.
+
+    An off-track row's own ``x``/``y`` is already the RESPAWN pose (the env
+    auto-resets inside ``step()``), which is why naive plotting puts every
+    "crash" back inside the corridor. The closest recorded pose to the real
+    exit point is the same car's previous step, so each off-track row takes
+    the pose one row earlier within its (env, episode); a crash on an
+    episode's very first recorded step has no prior pose and is dropped.
+
+    Args:
+        d: Telemetry DataFrame filtered to one track.
+
+    Returns:
+        ``(K, 2)`` array of crash positions.
+    """
+    d = d.sort_values(["env", "episode", "step"])
+    prev = d.groupby(["env", "episode"], observed=True)[["x", "y"]].shift(1)
+    return prev[d["off_track"].to_numpy()].dropna().to_numpy()
+
+
 def plot_offtrack_hotspots(df, track: Optional[str] = None):
     """Where cars leave the track — the actionable sim2real view.
 
@@ -273,14 +296,16 @@ def plot_offtrack_hotspots(df, track: Optional[str] = None):
         track: Track name to plot.
 
     Returns:
-        The matplotlib figure (off-track points as red crosses, count in
-        the title).
+        The matplotlib figure (off-track exit points as red crosses, count
+        in the title).
     """
     track = _resolve_track(df, track)
-    d = df[(df["track"] == track) & df["off_track"]]
+    pts = _crash_positions(df[df["track"] == track])
     fig, ax = _fig_ax(None)
     _outline(ax, _route(track))
-    ax.plot(d["x"], d["y"], "x", color="crimson", ms=5, mew=1.4, zorder=3)
-    ax.set_title(f"{track} — {len(d)} off-track points")
+    if len(pts):
+        ax.plot(pts[:, 0], pts[:, 1], "x", color="crimson", ms=5, mew=1.4,
+                zorder=3)
+    ax.set_title(f"{track} — {len(pts)} off-track exits")
     fig.tight_layout()
     return fig

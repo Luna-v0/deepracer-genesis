@@ -1,0 +1,219 @@
+{
+  "policy": {
+    "file": "policy.onnx",
+    "sha256": "447dfd9ec452ffd9ecc07a2a5df59acd7e1b388ad971fb5543806e10595e0c41",
+    "opset": 11,
+    "batch": 1,
+    "verified_against_torch": false
+  },
+  "action_space": {
+    "type": "continuous",
+    "output": "action (1, 2) = [steer, speed], raw Gaussian mean, UNBOUNDED \u2014 clip to [-1, 1] before use (training env clips before mapping)",
+    "normalized_to_physical": {
+      "steering": {
+        "low": -30.0,
+        "high": 30.0,
+        "unit": "deg"
+      },
+      "speed": {
+        "low": 0.1,
+        "high": 4.0,
+        "unit": "m/s"
+      }
+    }
+  },
+  "observations": {
+    "FRONT_FACING_CAMERA": {
+      "shape": [
+        1,
+        3,
+        120,
+        160
+      ],
+      "dtype": "float32",
+      "range": "[0, 1] (= uint8 RGB / 255, no mean/std)",
+      "layout": "NCHW, RGB",
+      "frame_stack": 1,
+      "stack_order": "oldest_first (newest frame = last 3 channels)",
+      "stack_priming": "repeat_first_frame (never zeros)",
+      "fov_deg": 90.0,
+      "camera": "front RGB, native 160x120 in sim (no train-time resize)"
+    }
+  },
+  "training": {
+    "spec": {
+      "env": {
+        "modality": "camera",
+        "render": "madrona",
+        "backend": "gpu",
+        "view": "none",
+        "realtime_factor": 1.0,
+        "resolution": [
+          160,
+          120
+        ],
+        "fov": 90.0,
+        "frame_stack": 1,
+        "lookahead_k": 10,
+        "feature_set": null,
+        "feature_params": {},
+        "obs_routing": null,
+        "tracks": [
+          "reinvent_base_asphalt_light_fsand_bwhite",
+          "reinvent_base_dusk_bdark",
+          "reinvent_base_w090_bwhite",
+          "reinvent_base_w115"
+        ],
+        "num_envs": 128,
+        "random_start": true,
+        "random_direction": true,
+        "reward": null,
+        "reward_scales": {},
+        "emits_cost": false,
+        "cost_fn": null,
+        "cost_budget": null
+      },
+      "obs_dr": {
+        "image_aug": {
+          "brightness": [
+            0.7,
+            1.3
+          ],
+          "hue": 0.05,
+          "blur": 0.3
+        },
+        "camera_jitter": {
+          "pitch_deg": 2.0,
+          "pos_m": 0.005
+        },
+        "physics": {
+          "friction_range": [
+            0.6,
+            1.4
+          ],
+          "mass_shift_kg": 0.2,
+          "com_shift_m": 0.01,
+          "steer_kp_scale": [
+            0.8,
+            1.2
+          ],
+          "wheel_kv_scale": [
+            0.8,
+            1.2
+          ],
+          "armature_range": [
+            0.0,
+            0.01
+          ],
+          "track_width_scale": [
+            1.0,
+            1.0
+          ]
+        },
+        "appearance": {
+          "world_color": 0.6
+        },
+        "pixel_noise": 0.0,
+        "env_map": {}
+      },
+      "encoder": {
+        "kind": "none",
+        "checkpoint": null,
+        "output_dim": null,
+        "layer": null,
+        "out_key": "encoded"
+      },
+      "policy": {
+        "actor_keys": [
+          "camera"
+        ],
+        "critic_keys": [
+          "camera",
+          "state"
+        ],
+        "cnn": {
+          "channels": [
+            16,
+            32,
+            64
+          ],
+          "kernels": [
+            8,
+            4,
+            3
+          ],
+          "strides": [
+            4,
+            2,
+            1
+          ],
+          "activation": "relu"
+        },
+        "mlp": {
+          "hidden": [
+            256,
+            128,
+            64
+          ],
+          "activation": "elu"
+        },
+        "actions": null,
+        "distribution": {
+          "std_range": [
+            0.1,
+            1.0
+          ]
+        }
+      },
+      "action_dr": {
+        "steer_noise": 0.02,
+        "speed_noise": 0.05,
+        "delay_steps": 1
+      },
+      "algorithm": {
+        "cls": null,
+        "ppo": {
+          "clip": 0.2,
+          "epochs": 5,
+          "minibatches": 4,
+          "gamma": 0.995,
+          "gae_lambda": 0.95,
+          "lr": 0.00015529021289627495,
+          "entropy_coef": 0.00368356162276608,
+          "max_grad_norm": 1.0,
+          "horizon": 24
+        },
+        "lagrangian": {},
+        "params": {}
+      },
+      "eval": {
+        "real_tracks": [
+          "reinvent_base_w115_faded_fconcrete",
+          "reinvent_base"
+        ],
+        "eval_num_envs": 64,
+        "eval_episodes": null,
+        "charts": true,
+        "gui": false
+      },
+      "total_env_steps": 30000000,
+      "eval_every_steps": 5000000,
+      "seed": 0,
+      "group": null,
+      "variant": "final"
+    },
+    "spec_id": "fc7ff6377a6c",
+    "checkpoint": "/home/lunav0/.SecretProjects/deepracer-genesis/runs/best_camera/best_camera/final-0-fc7ff6377a6c/model.pt",
+    "metrics": {
+      "episodes": 422,
+      "mean_return": 152.8780517578125,
+      "mean_progress_m": 15.209519386291504,
+      "mean_episode_s": 8.314881324768066,
+      "completion_rate": 0.2630331814289093,
+      "mean_laps": 0.8588504195213318,
+      "offtrack_rate": 0.921800971031189,
+      "lap_time_s": 9.318201065063477,
+      "mean_speed_mps": 1.7115823030471802
+    }
+  }
+}

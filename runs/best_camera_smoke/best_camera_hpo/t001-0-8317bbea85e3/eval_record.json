@@ -1,0 +1,184 @@
+{
+  "spec_id": "8317bbea85e3",
+  "spec": {
+    "env": {
+      "modality": "camera",
+      "render": "madrona",
+      "backend": "gpu",
+      "view": "none",
+      "realtime_factor": 1.0,
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "frame_stack": 1,
+      "lookahead_k": 10,
+      "feature_set": null,
+      "feature_params": {},
+      "obs_routing": null,
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 128,
+      "random_start": true,
+      "random_direction": false,
+      "reward": null,
+      "reward_scales": {},
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {},
+      "appearance": {},
+      "pixel_noise": 0.0,
+      "env_map": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "camera"
+      ],
+      "critic_keys": [
+        "camera",
+        "state"
+      ],
+      "cnn": {
+        "channels": [
+          16,
+          32,
+          64
+        ],
+        "kernels": [
+          8,
+          4,
+          3
+        ],
+        "strides": [
+          4,
+          2,
+          1
+        ],
+        "activation": "relu"
+      },
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      },
+      "actions": null,
+      "distribution": {
+        "std_range": [
+          0.1,
+          1.0
+        ]
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "cls": null,
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.995,
+        "gae_lambda": 0.95,
+        "lr": 0.00015529021289627495,
+        "entropy_coef": 0.00368356162276608,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "eval": {
+      "real_tracks": [],
+      "eval_num_envs": 64,
+      "eval_episodes": null,
+      "charts": true,
+      "gui": false
+    },
+    "total_env_steps": 40000,
+    "eval_every_steps": 20000,
+    "seed": 0,
+    "ablation_group": "best_camera_hpo",
+    "variant": "t001"
+  },
+  "seed": 0,
+  "ablation_group": "best_camera_hpo",
+  "variant": "t001",
+  "metrics": {
+    "episodes": 1884,
+    "mean_return": 11.106914520263672,
+    "mean_progress_m": 1.8920003175735474,
+    "mean_episode_s": 2.358205795288086,
+    "completion_rate": 0.0,
+    "mean_laps": 0.10683738440275192,
+    "offtrack_rate": 1.0,
+    "lap_time_s": NaN,
+    "mean_speed_mps": 0.740582287311554
+  },
+  "train": {
+    "wall_clock_s": 60.9,
+    "total_env_steps": 39936,
+    "steps_per_s": 655.3,
+    "checkpoint": "runs/best_camera_smoke/best_camera_hpo/t001-0-8317bbea85e3/model.pt",
+    "backend": "rsl_rl"
+  },
+  "eval_history": [
+    {
+      "frames": 18432,
+      "episodes": 2134,
+      "mean_return": 5.514448165893555,
+      "mean_progress_m": 1.369326114654541,
+      "mean_episode_s": 2.093271017074585,
+      "completion_rate": 0.0,
+      "mean_laps": 0.07732303440570831,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.6107339859008789
+    },
+    {
+      "frames": 36864,
+      "episodes": 1893,
+      "mean_return": 10.540009498596191,
+      "mean_progress_m": 1.8348314762115479,
+      "mean_episode_s": 2.349719762802124,
+      "completion_rate": 0.0,
+      "mean_laps": 0.10360918194055557,
+      "offtrack_rate": 0.9999999403953552,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.7298184037208557
+    },
+    {
+      "frames": 39936,
+      "episodes": 1859,
+      "mean_return": 11.62862777709961,
+      "mean_progress_m": 1.940364956855774,
+      "mean_episode_s": 2.3826894760131836,
+      "completion_rate": 0.0,
+      "mean_laps": 0.10956843197345734,
+      "offtrack_rate": 0.9999999403953552,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.7483717799186707
+    }
+  ],
+  "holdout": {},
+  "created_at": "2026-08-26T21:26:02"
+}

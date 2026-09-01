@@ -9,8 +9,7 @@ feature-vector parts — see `notebooks/deepracer_genesis_colab.ipynb`).
 ```bash
 git clone https://github.com/Luna-v0/deepracer-genesis && cd deepracer-genesis
 uv venv --python 3.12 .venv && source .venv/bin/activate
-uv sync            # or: uv pip install -e . torchrl tensordict
-# CUDA 13 system toolkit only: bash scripts/fix_madrona_cuda13.sh
+uv sync            # base deps + the GPU renderers (default groups)
 ```
 
 ## 2. Train your first policy (2 minutes)

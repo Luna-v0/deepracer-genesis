@@ -106,6 +106,23 @@ def test_trackplots_render_all_views(tmp_path, _route_registry):
                for n in ("traj.png", "grid.png", "heat.png", "hot.png"))
 
 
+def test_crash_positions_use_pre_respawn_pose():
+    """Off-track rows carry the RESPAWN pose; crashes must plot the pose
+    one step earlier in the same (env, episode)."""
+    from deepracer_genesis.analysis.trackplots import _crash_positions
+
+    df = _synthetic()
+    crash = df[df["off_track"]]
+    assert len(crash) == 1
+    pts = _crash_positions(df)
+    assert len(pts) == 1
+    c = crash.iloc[0]
+    prev = df[(df["env"] == c["env"]) & (df["episode"] == c["episode"])
+              & (df["step"] == c["step"] - 1)].iloc[0]
+    assert pts[0] == pytest.approx([prev["x"], prev["y"]])
+    assert list(pts[0]) != pytest.approx([c["x"], c["y"]])
+
+
 def test_plot_trajectories_requires_track_when_ambiguous(_route_registry):
     """A multi-track DataFrame without track= is refused, not guessed."""
     from deepracer_genesis.analysis import trackplots as tp

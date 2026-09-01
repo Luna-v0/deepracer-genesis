@@ -7,7 +7,7 @@ Author each experiment as an ``Experiment`` subclass (copy one from
 
     class MyRun(Experiment):
         total_env_steps = 5_000_000
-        ablation_group = "my_study"
+        group = "my_study"
 
         def pipeline(self):
             return FeatureEnvironment(num_envs=1024) >> VectorPolicy(keys=("state",))

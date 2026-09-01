@@ -23,8 +23,8 @@ class EvalRecord:
         spec_id: Identifier of the experiment spec that produced this run.
         spec: One-way dump of the ExperimentSpec.
         seed: Random seed used for the run.
-        ablation_group: Ablation group label, if part of an ablation study.
-        variant: Variant name within the ablation group, if any.
+        group: Run-grouping tag (the runs/<group>/ folder), if set.
+        variant: Variant name within the group, if any.
         metrics: Final scalar evaluation metrics.
         train: Training-side stats (steps_per_s, wall_clock_s, ...).
         eval_history: Periodic evals as [{frames, **metrics}] entries.
@@ -34,7 +34,7 @@ class EvalRecord:
     spec_id: str
     spec: dict                      # one-way dump of the ExperimentSpec
     seed: int
-    ablation_group: Optional[str]
+    group: Optional[str]
     variant: Optional[str]
     metrics: dict = field(default_factory=dict)
     train: dict = field(default_factory=dict)   # steps_per_s, wall_clock_s, ...
@@ -64,13 +64,17 @@ class EvalRecord:
         """Load a record previously written by save().
 
         Args:
-            path: Path to an eval_record.json file.
+            path: Path to an eval_record.json file (records written before
+                the ``ablation_group`` → ``group`` rename load fine).
 
         Returns:
             The reconstructed EvalRecord.
         """
         with open(path) as f:
-            return EvalRecord(**json.load(f))
+            payload = json.load(f)
+        if "ablation_group" in payload:              # pre-rename records
+            payload["group"] = payload.pop("ablation_group")
+        return EvalRecord(**payload)
 
 
 def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,

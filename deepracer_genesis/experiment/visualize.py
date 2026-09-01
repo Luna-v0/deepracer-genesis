@@ -11,7 +11,7 @@ from typing import Optional
 
 import torch
 
-from .ablation import override
+from .overrides import override
 from ..agents import CenterlineFollower
 from .run import build
 from .spec import ActionDRSpec, ExperimentSpec, ObsDRSpec
@@ -189,3 +189,116 @@ def dr_preview_video(target="cam_baseline", *, steps: int = 300,
                     np.stack(spectator), fps=50)
     print(f"[visualize] DR preview written to {out}/")
     return onboard_path
+
+
+def view_zoo(target, *, root: str = "runs", num_envs: Optional[int] = None,
+             steps: int = 40, upscale: int = 1, save: Optional[str] = None,
+             **overrides) -> list:
+    """Capture each car's onboard camera view across the experiment's tracks.
+
+    Builds the experiment's sim, drives a short seeded warmup with the
+    centerline follower so every car sits somewhere sensible on its track,
+    and grabs the newest RGB frame of each env's camera observation — at
+    the exact resolution the policy (and the physical car) sees. With a
+    zoo/multi-track spec this is the fastest way to eyeball what the cars
+    see on every variant. (For the bird's-eye view of the tiled zoo itself,
+    use ``tools.zoo.view_zoo`` — this is the onboard counterpart.)
+
+    Args:
+        target: Any experiment handle accepted by ``run.build`` (an
+            Experiment class, a pipeline, a spec, ...). Must be a camera
+            modality.
+        root: Runs directory (only used to resolve the spec, not written).
+        num_envs: Override the number of cars (default: one per track when
+            the spec has several tracks, else the spec's own count capped
+            at 8).
+        steps: Seeded warmup control steps before the snapshot.
+        upscale: Integer nearest-neighbour upscale of the returned images
+            (1 = the camera's native resolution).
+        save: Optional path for a track-labelled contact-sheet PNG of all
+            views.
+        **overrides: Keyword overrides forwarded to ``build(target)``.
+
+    Returns:
+        One ``PIL.Image`` per env, in env order (track order for the
+        one-car-per-track default). PIL images render inline in Jupyter.
+
+    Raises:
+        SpecError: If the target is not a camera-modality experiment.
+    """
+    import numpy as np
+    from PIL import Image
+
+    from .builder import Builder
+    from .spec import SpecError
+
+    spec = build(target, **overrides)
+    if spec.env.modality != "camera":
+        raise SpecError("view_zoo needs a camera-modality experiment "
+                        f"(got {spec.env.modality!r})")
+    if num_envs is None:
+        num_envs = (len(spec.env.tracks) if len(spec.env.tracks) > 1
+                    else min(spec.env.num_envs, 8))
+    spec = replace(spec, env=replace(spec.env, num_envs=num_envs))
+
+    sim = Builder(spec).sim()
+    with torch.inference_mode():
+        for _ in range(steps):
+            sim.step(_CONTROLLER.act(sim))
+        cam = sim.get_observations()["camera"].float().cpu().numpy()
+
+    rgb = np.clip(cam[:, -3:].transpose(0, 2, 3, 1) * 255, 0, 255).astype("uint8")
+    images = [Image.fromarray(frame) for frame in rgb]
+    if upscale > 1:
+        images = [im.resize((im.width * upscale, im.height * upscale),
+                            Image.NEAREST) for im in images]
+    if save:
+        _save_contact_sheet(images, _env_track_names(sim), save)
+    return images
+
+
+def _env_track_names(sim) -> list:
+    """Per-env track names, or empty strings when the sim has no variants.
+
+    Args:
+        sim: The built DeepRacerEnv.
+
+    Returns:
+        One name per env.
+    """
+    try:
+        idx = sim.track.variant_idx.tolist()
+        return [sim.track.names[i] for i in idx]
+    except AttributeError:
+        return [""] * sim.num_envs
+
+
+def _save_contact_sheet(images: list, labels: list, path: str) -> None:
+    """Write a labelled grid PNG of the onboard views.
+
+    Args:
+        images: The per-env PIL images.
+        labels: One caption per image (track names).
+        path: Destination PNG path (parents are created).
+    """
+    import math
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    cols = min(4, len(images))
+    rows = math.ceil(len(images) / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(3.4 * cols, 2.9 * rows),
+                             squeeze=False)
+    for ax in axes.flat[len(images):]:
+        ax.axis("off")
+    for image, label, ax in zip(images, labels, axes.flat):
+        ax.imshow(image)
+        ax.set_title(label, fontsize=8)
+        ax.axis("off")
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fig.savefig(path, dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[visualize] onboard contact sheet written to {path}")

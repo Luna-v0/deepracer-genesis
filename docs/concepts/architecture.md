@@ -12,29 +12,21 @@ actually live. Every claim here is anchored to a `file:line` you can open.
 
 ---
 
-## 1. The two training front-ends over one simulator
+## 1. One training front-end over one simulator
 
-The port is a single batched Genesis environment wrapped for two different
-training stacks:
+The port is a single batched Genesis environment driven by rsl-rl:
 
 ```
-rsl-rl PPO ─┐
-            ├─▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.step()
-TorchRL   ──┘        envs/deepracer_env.py:58
+rsl-rl PPO ──▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.step()
+                     envs/deepracer_env.py
 ```
 
-- `DeepRacerEnv` (`envs/deepracer_env.py:58`) speaks the **rsl-rl-lib 5.x
-  VecEnv contract** natively: there is no external `reset()` — done envs
-  respawn *inside* `step()` (`deepracer_env.py:417-420`).
-- `TorchRLDeepRacerEnv` (`envs/torchrl_env.py:21`) is a thin `EnvBase` adapter
-  over the *same* sim object. It sets `_torchrl_native_autoreset = True`
-  (`torchrl_env.py:55`) precisely because the sim already auto-resets.
-
-So TorchRL and rsl-rl are two faces on one simulator, not two simulators.
-Everything the sim exposes is `(N, …)` GPU tensors — N parallel cars stepping
-together. That batching is the essence of the port: Gazebo ran one car in a ROS
-process; here N cars are tensors and the ROS control + domain logic are
-reimplemented in torch.
+- `DeepRacerEnv` speaks the **rsl-rl-lib 5.x VecEnv contract** natively:
+  there is no external `reset()` — done envs respawn *inside* `step()`.
+- Everything the sim exposes is `(N, …)` GPU tensors — N parallel cars
+  stepping together. That batching is the essence of the port: Gazebo ran
+  one car in a ROS process; here N cars are tensors and the ROS control +
+  domain logic are reimplemented in torch.
 
 A single control step (`deepracer_env.py:374-431`):
 
@@ -44,31 +36,17 @@ A single control step (`deepracer_env.py:374-431`):
 4. `_post_physics` — refresh kinematics + localize on the track.
 5. `_compute_reward` → `_check_termination` → respawn done envs.
 
-### 1.1 The wrapper handshake (why you don't "see" them working together)
+### 1.1 The pre-reset snapshot (`step_info`)
 
-`TorchRLDeepRacerEnv` does not run *alongside* `DeepRacerEnv` — it **wraps** it,
-and only one front-end is live per run:
-
-- **rsl-rl** (`train.py`): `OnPolicyRunner` calls `DeepRacerEnv.step()` directly;
-  the wrapper is never imported.
-- **TorchRL** (`experiment/trainer.py`): the collector drives
-  `TorchRLDeepRacerEnv._step()`, which on `torchrl_env.py:65` calls
-  `self.sim.step()` — and `self.sim` **is** the `DeepRacerEnv` (injected in
-  `builder.py:151`). That one line is the entire coupling.
-
-Division of labour: `DeepRacerEnv.step` is the *real simulator* (controls →
-physics → reward → termination → **auto-reset of done envs**), returning the
-rsl-rl VecEnv tuple. `TorchRLDeepRacerEnv._step` is a *translation adapter*: it
-calls `sim.step`, then repackages the result into TorchRL's TensorDict.
-
-The subtle part is the **pre-reset snapshot**. Because `step` auto-resets done
-envs *inside itself* (overwriting their state), it first stashes `self.step_info`
-(`deepracer_env.py:406-413`) — `offtrack`/`flipped`/`time_out`/`terminal_state`
-for the step that just happened. The adapter reads `sim.step_info`
-(`torchrl_env.py:66-69`) to split `terminated` (crash/off-track → value
-bootstrap killed) from `truncated` (timeout → bootstrap kept), and
-`_torchrl_native_autoreset = True` (`torchrl_env.py:55`) tells TorchRL not to
-issue its own reset. **`step_info` is the whole contract between the two files.**
+Because `step` auto-resets done envs *inside itself* (overwriting their
+state), it first stashes `step_info` — `offtrack`/`flipped`/`time_out`/
+`terminal_state` for the step that just happened. Consumers that need the
+*pre-reset* truth (the evaluator's episode accounting, telemetry recording,
+terminated-vs-truncated bootstrapping) read that snapshot rather than the
+post-step buffers. This matters in practice: a done row's *pose* is already
+the respawn pose, which is why the analysis plots take an off-track exit's
+position from the step **before** the done flag (see
+`analysis/trackplots.py`).
 
 ---
 
@@ -277,7 +255,7 @@ The default `deepracer` reward (`rewards.py:58-70`) returns:
 | `heading`     | `-|heading_err|·dt`                     | 0.5 |
 | `steering`    | `-|steer|·dt`                           | 0.3 |
 | `action_rate` | `-Δaction²·dt`                          | 0.05 |
-| `off_track`   | `(wheel off road)·dt`                   | 2.0 |
+| `off_track`   | `-(wheel off road)·dt`                  | 2.0 |
 
 Every term is a batched `(N,)` tensor summed with its scale
 (`deepracer_env.py:559-566`) and accumulated per-episode for logging

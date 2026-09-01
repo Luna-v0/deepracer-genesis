@@ -51,6 +51,39 @@ def rsl_supported(spec: "ExperimentSpec") -> bool:
     )
 
 
+def _apply_mlp_cfg(cfg: dict, mlp: dict) -> None:
+    """Translate the spec's ``mlp`` dict onto the actor and critic configs.
+
+    Recognized keys (all optional — absent keys keep the cfg defaults, so
+    historical spec hashes are unaffected):
+
+    - ``hidden``: tuple of layer widths → ``hidden_dims`` (depth and width
+      of the MLP trunk/head).
+    - ``activation``: rsl-rl activation name (``"elu"``, ``"relu"``,
+      ``"tanh"``, ...) for both nets' MLP layers.
+    - ``rnn``: ``{"type": "lstm"|"gru", "hidden": int, "layers": int}`` —
+      switches both nets to rsl-rl's ``RNNModel`` (a recurrent trunk in
+      front of the MLP head). Feature/vector policies only: upstream
+      ``RNNModel`` has no CNN trunk, so ``spec.validate()`` refuses the
+      combination with a camera policy.
+
+    Args:
+        cfg: The rsl-rl train config being assembled (mutated in place).
+        mlp: ``spec.policy.mlp``.
+    """
+    for net in ("actor", "critic"):
+        if mlp.get("hidden"):
+            cfg[net]["hidden_dims"] = list(mlp["hidden"])
+        if mlp.get("activation"):
+            cfg[net]["activation"] = mlp["activation"]
+        rnn = mlp.get("rnn")
+        if rnn is not None:                 # {} means "LSTM with defaults"
+            cfg[net]["class_name"] = "RNNModel"
+            cfg[net]["rnn_type"] = rnn.get("type", "lstm")
+            cfg[net]["rnn_hidden_dim"] = rnn.get("hidden", 256)
+            cfg[net]["rnn_num_layers"] = rnn.get("layers", 1)
+
+
 def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
     """Translate an ExperimentSpec into an rsl-rl OnPolicyRunner train cfg.
 
@@ -66,10 +99,7 @@ def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
     cfg = get_train_cfg(vision=vision)
     cfg["obs_groups"] = {"actor": list(spec.policy.actor_keys),
                          "critic": list(spec.policy.critic_keys)}
-    hidden = spec.policy.mlp.get("hidden")
-    if hidden:
-        cfg["actor"]["hidden_dims"] = list(hidden)
-        cfg["critic"]["hidden_dims"] = list(hidden)
+    _apply_mlp_cfg(cfg, spec.policy.mlp or {})
     if vision and spec.policy.cnn:                    # map the spec's CNN trunk
         c = spec.policy.cnn
         cnn_cfg = {"output_channels": list(c["channels"]),
@@ -283,7 +313,7 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
 
     record = EvalRecord(
         spec_id=spec.id(), spec=spec.to_dict(), seed=spec.seed,
-        ablation_group=spec.ablation_group, variant=spec.variant,
+        group=spec.group, variant=spec.variant,
         metrics=metrics, eval_history=eval_history, holdout=holdout,
         train={"wall_clock_s": round(wall, 1),
                "total_env_steps": done_iters * per_iter,

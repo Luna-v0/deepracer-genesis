@@ -5,8 +5,17 @@ physical DeepRacer or any ONNX runtime. The exporter is
 `deepracer_genesis/deploy/onnx.py`.
 
 > Mental model in one sentence: `export_policy` rebuilds the actor on CPU from a
-> checkpoint, traces it to ONNX with the exact observation keys as named inputs, and
-> records the normalized→physical action mapping in a model card.
+> checkpoint, traces it to ONNX with the exact observation keys as named inputs
+> (`FRONT_FACING_CAMERA` for camera actors — the name the car's inference
+> stack expects), and writes the car bundle: `policy.onnx` +
+> `model_metadata.json` + `model_card.json` + a `<name>.tar.gz` to upload.
+
+!!! warning "Run the export in a genesis-free process"
+    genesis and onnxruntime bundle clashing LLVM symbols and crash the
+    process when both are loaded. `export_policy` refuses to run if genesis
+    was already imported — call it from a fresh process (its own script or
+    subprocess), never from a session that built a sim. The `best_camera`
+    notebooks show the subprocess pattern.
 
 ---
 
@@ -15,19 +24,23 @@ physical DeepRacer or any ONNX runtime. The exporter is
 ```python
 from deepracer_genesis.deploy.onnx import export_policy
 
-# pass your Experiment subclass (uses run_dir/best.pt):
+# pass your Experiment subclass (uses the run dir's model.pt):
 export_policy(FeatureBaseline)
 
 # or an explicit chain + checkpoint:
 export_policy(
     FeatureEnvironment(num_envs=64) >> VectorPolicy() >> PPO(),
-    ckpt="runs/feature_ppo_abc123/best.pt",
-    out="export/my_model", opset=17)
+    ckpt="runs/feature_ppo_abc123/model.pt",
+    out="export/my_model")
 ```
+
+The default `opset=11` is deliberate: it is the newest opset the physical
+car's OpenVINO 2021.1 ONNX importer is known to accept. Raise it only for
+non-car runtimes.
 
 `export_policy(target, *, root, ckpt, out, opset, **overrides)`:
 
-1. builds the spec, loads `best.pt` (or an explicit `ckpt`),
+1. builds the spec, loads the run dir's `model.pt` (or an explicit `ckpt`),
 2. rebuilds the actor on CPU mirroring `Builder.actor()` (CNN + MLP) with the loaded
    weights,
 3. creates dummy inputs from `spec.policy.actor_keys`,

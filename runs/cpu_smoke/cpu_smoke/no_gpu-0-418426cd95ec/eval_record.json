@@ -1,0 +1,124 @@
+{
+  "spec_id": "418426cd95ec",
+  "spec": {
+    "env": {
+      "modality": "feature",
+      "render": "none",
+      "backend": "cpu",
+      "view": "none",
+      "realtime_factor": 1.0,
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "frame_stack": 4,
+      "lookahead_k": 10,
+      "feature_set": null,
+      "feature_params": {},
+      "obs_routing": null,
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 32,
+      "random_start": true,
+      "random_direction": false,
+      "reward": null,
+      "reward_scales": {},
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {},
+      "appearance": {},
+      "pixel_noise": 0.0,
+      "env_map": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "state"
+      ],
+      "critic_keys": [
+        "state"
+      ],
+      "cnn": null,
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      },
+      "actions": null,
+      "distribution": null
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "cls": null,
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 0.0003,
+        "entropy_coef": 0.01,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "eval": {
+      "real_tracks": [],
+      "eval_num_envs": 64,
+      "eval_episodes": null,
+      "charts": true,
+      "gui": false
+    },
+    "total_env_steps": 30000,
+    "eval_every_steps": 0,
+    "seed": 0,
+    "ablation_group": "cpu_smoke",
+    "variant": "no_gpu"
+  },
+  "seed": 0,
+  "ablation_group": "cpu_smoke",
+  "variant": "no_gpu",
+  "metrics": {
+    "episodes": 177,
+    "mean_return": 112.1802749633789,
+    "mean_progress_m": 11.62518310546875,
+    "mean_episode_s": 6.031864643096924,
+    "completion_rate": 0.028248587623238564,
+    "mean_laps": 0.6564503312110901,
+    "offtrack_rate": 1.0,
+    "lap_time_s": 7.493405818939209,
+    "mean_speed_mps": 1.8988933563232422
+  },
+  "train": {
+    "wall_clock_s": 6.1,
+    "total_env_steps": 29952,
+    "steps_per_s": 4942.3,
+    "checkpoint": "runs/cpu_smoke/cpu_smoke/no_gpu-0-418426cd95ec/model.pt",
+    "backend": "rsl_rl"
+  },
+  "eval_history": [],
+  "holdout": {},
+  "created_at": "2026-08-29T10:41:14"
+}

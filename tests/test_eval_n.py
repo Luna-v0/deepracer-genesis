@@ -50,7 +50,7 @@ def test_evaluate_on_tracks_returns_per_track(monkeypatch):
 
 
 def test_eval_record_has_holdout_field():
-    r = EvalRecord(spec_id="x", spec={}, seed=0, ablation_group=None, variant=None,
+    r = EvalRecord(spec_id="x", spec={}, seed=0, group=None, variant=None,
                    holdout={"reinvent_base": {"completion_rate": 0.5}})
     assert r.holdout["reinvent_base"]["completion_rate"] == 0.5
 
@@ -58,7 +58,7 @@ def test_eval_record_has_holdout_field():
 # --------------------------------------------------------------- N.4 charts
 def test_render_charts_writes_pngs(tmp_path):
     record = EvalRecord(
-        spec_id="x", spec={}, seed=0, ablation_group=None, variant=None,
+        spec_id="x", spec={}, seed=0, group=None, variant=None,
         eval_history=[{"frames": 1000, "completion_rate": 0.1, "lap_time_s": 20.0},
                       {"frames": 2000, "completion_rate": 0.4, "lap_time_s": 18.0}],
         holdout={"reinvent_base": {"completion_rate": 0.5, "offtrack_rate": 0.2},
@@ -73,5 +73,5 @@ def test_render_charts_writes_pngs(tmp_path):
 
 
 def test_charts_empty_record_writes_nothing(tmp_path):
-    record = EvalRecord(spec_id="x", spec={}, seed=0, ablation_group=None, variant=None)
+    record = EvalRecord(spec_id="x", spec={}, seed=0, group=None, variant=None)
     assert render_charts(record, str(tmp_path)) == []

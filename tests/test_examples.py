@@ -36,5 +36,8 @@ def test_examples_blend_the_axes():
     assert {"cpu", "gpu"} <= backends
     assert {"feature", "camera"} <= modalities
     assert {"madrona", "nyx"} <= renders
-    assert {"PPO", "PPOLagrangian"} <= algos
+    # PPOLagrangian left the set with the safe_rl examples (their TorchRL
+    # backend was removed); the reference set is plain PPO until the
+    # rsl-rl Lagrangian lands
+    assert {"PPO"} <= algos
     assert "gui" in views

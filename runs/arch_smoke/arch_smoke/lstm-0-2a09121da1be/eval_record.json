@@ -1,0 +1,127 @@
+{
+  "spec_id": "2a09121da1be",
+  "spec": {
+    "env": {
+      "modality": "feature",
+      "render": "none",
+      "backend": "gpu",
+      "view": "none",
+      "realtime_factor": 1.0,
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "frame_stack": 4,
+      "lookahead_k": 10,
+      "feature_set": null,
+      "feature_params": {},
+      "obs_routing": null,
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 256,
+      "random_start": true,
+      "random_direction": false,
+      "reward": null,
+      "reward_scales": {},
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {},
+      "appearance": {},
+      "pixel_noise": 0.0,
+      "env_map": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "state"
+      ],
+      "critic_keys": [
+        "state"
+      ],
+      "cnn": null,
+      "mlp": {
+        "hidden": [
+          128,
+          64
+        ],
+        "activation": "relu",
+        "rnn": {
+          "type": "lstm",
+          "hidden": 128
+        }
+      },
+      "actions": null,
+      "distribution": null
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "cls": null,
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 0.0003,
+        "entropy_coef": 0.01,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "eval": {
+      "real_tracks": [],
+      "eval_num_envs": 64,
+      "eval_episodes": null,
+      "charts": true,
+      "gui": false
+    },
+    "total_env_steps": 150000,
+    "eval_every_steps": 0,
+    "seed": 0,
+    "ablation_group": "arch_smoke",
+    "variant": "lstm"
+  },
+  "seed": 0,
+  "ablation_group": "arch_smoke",
+  "variant": "lstm",
+  "metrics": {
+    "episodes": 793,
+    "mean_return": 163.1077117919922,
+    "mean_progress_m": 16.66237449645996,
+    "mean_episode_s": 9.672408103942871,
+    "completion_rate": 0.4073140025138855,
+    "mean_laps": 0.9408902525901794,
+    "offtrack_rate": 1.0,
+    "lap_time_s": 9.73437786102295,
+    "mean_speed_mps": 1.6651625633239746
+  },
+  "train": {
+    "wall_clock_s": 8.2,
+    "total_env_steps": 147456,
+    "steps_per_s": 18072.8,
+    "checkpoint": "runs/arch_smoke/arch_smoke/lstm-0-2a09121da1be/model.pt",
+    "backend": "rsl_rl"
+  },
+  "eval_history": [],
+  "holdout": {},
+  "created_at": "2026-08-29T10:38:20"
+}

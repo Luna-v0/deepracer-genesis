@@ -28,5 +28,5 @@ stages  ──>>──▶  Pipeline.build()  ──▶  ExperimentSpec  ──�
 | [trainer](trainer.md) | `Trainer.fit()` — the training loop. |
 | [evaluator](evaluator.md) | `EvalRecord`, `evaluate_policy`, `aggregate_episodes`. |
 | [ablation](ablation.md) | `override()` for building spec variants. |
-| [report](report.md) | Aggregate runs into delta tables (`load_records`, `spec_axes`, `grouped_rows`, `delta_rows`, `build_report`). |
+| [report](report.md) | Aggregate runs into comparison tables (`load_records`, `spec_axes`, `grouped_rows`, `build_report`). |
 | [visualize](visualize.md) | `rollout_video`, `dr_preview_video`. |

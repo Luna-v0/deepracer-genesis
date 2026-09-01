@@ -47,11 +47,21 @@ plugins:
 
 nav:
   - Home: index.md
+  - Quick start: quickstart.md
   - Tutorial: tutorial.md
+  - Setup:
+      - Local install: usage/local.md
+      - Google Colab (CLI): usage/google_colab_cli.md
+      - Google Colab (UI): usage/google_colab_ui.md
+  - Reference:
+      - Reward parameters: reference/reward-parameters.md
+      - DR catalog: reference/dr-catalog.md
   - Concepts:
       - Architecture (how it's wired): concepts/architecture.md
       - Experiments & the >> DSL: concepts/experiments.md
+      - Feature vector vs camera: concepts/feature-vs-camera.md
       - Domain randomization: concepts/domain-randomization.md
+      - Feature vectors: concepts/features.md
       - Renderers: concepts/renderers.md
       - Tracks: concepts/tracks.md
       - Rewards & actions: concepts/rewards-actions.md
@@ -71,7 +81,7 @@ nav:
           - run: api/experiment/run.md
           - training backend (rsl-rl): api/experiment/trainer.md
           - evaluator: api/experiment/evaluator.md
-          - ablation: api/experiment/ablation.md
+          - overrides: api/experiment/overrides.md
           - report: api/experiment/report.md
           - visualize: api/experiment/visualize.md
       - algorithms: api/algorithms.md

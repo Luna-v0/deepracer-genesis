@@ -1,38 +1,53 @@
 # Local install & run
 
-DeepRacer-Genesis runs on **Linux x86-64 with an NVIDIA GPU**. Python 3.10–3.12
+DeepRacer-Genesis runs on **Linux x86-64**. Everything trains CPU-only via
+`backend="cpu"` (feature-vector at useful speeds; camera through the CPU
+rasterizer at ~90 env-steps/s — debugging territory). An NVIDIA GPU makes
+camera training practical: Madrona is ~30× faster. Python 3.10–3.12
 (3.12 recommended).
 
-> Mental model in one sentence: `uv sync` installs Genesis + rsl-rl + TorchRL, then
-> you train by defining an `Experiment` subclass and running it (recommended), or via
-> the legacy flag-based `train.py` CLI.
+> Mental model in one sentence: `uv sync` installs Genesis + rsl-rl (plus the
+> GPU renderers), then you train by defining an `Experiment` subclass and
+> running it.
 
 ---
 
 ## Install
 
+### As a package (recommended)
+
+Install straight from git into your own project — track assets ship inside
+the package, so nothing else is needed:
+
+```bash
+uv add "deepracer-genesis[vision] @ git+https://github.com/Luna-v0/deepracer-genesis"
+```
+
+Extras: `[vision]` (Madrona batch renderer — needed for camera training),
+`[nyx]` (path tracer), `[analysis]` (telemetry DataFrames + trajectory
+plots), `[export]` (ONNX), `[hpo]` (optuna), `[tracking]` (mlflow).
+
+### From a clone (to work on the library)
+
 ```bash
 git clone https://github.com/Luna-v0/deepracer-genesis && cd deepracer-genesis
-uv venv --python 3.12 .venv && source .venv/bin/activate
-uv sync                       # base deps
+uv sync                       # base deps + GPU renderers (default groups)
 uv sync --extra tracking      # + mlflow (optional)
 uv sync --extra hpo           # + optuna (optional)
 ```
 
-Core dependencies (`pyproject.toml`): `genesis-world >= 1.2`, `rsl-rl-lib >= 5.4`,
-`torch >= 2.5`, `torchrl`, `tensordict`, plus `imageio[ffmpeg]`, `pillow`, `numpy`,
-`pyarrow`, `tensorboard`.
+Core dependencies (`pyproject.toml`): `genesis-world >= 1.2.3`, `rsl-rl-lib >= 5.4`,
+`torch >= 2.5`, `tensordict`, plus `imageio[ffmpeg]`, `pillow`, `numpy`,
+`pyarrow`, `tensorboard`. The GPU renderers (`gs-madrona`, `gs-nyx`) install
+via the default `renderers` group.
 
 ### CUDA 13 note (Madrona)
 
-The Madrona batch renderer links `libnvrtc.so.12`. On a CUDA-13 system, run:
-
-```bash
-bash scripts/fix_madrona_cuda13.sh
-```
-
-which installs `nvidia-cuda-nvrtc-cu12`, symlinks the `.so.12` into `gs_madrona/`,
-and patches the dlopen name. Feature-vector (no-camera) training does not need this.
+Historical: `gs-madrona >= 0.0.10` (what the default `renderers` group
+installs) pulls its own `nvidia-cuda-nvrtc-cu12 >= 12.8` and links the
+megakernel natively, so no fix is needed on CUDA-13 systems anymore.
+`scripts/fix_madrona_cuda13.sh` remains only for pinned older
+`gs-madrona 0.0.8` installs.
 
 ## Train
 

@@ -23,6 +23,36 @@ from deepracer_genesis.experiment import (
 )
 
 
+class CameraCpu(Experiment):
+    """End-to-end vision with NO GPU at all — the CPU rasterizer (Part M).
+
+    Blends: backend="cpu" + camera obs + the asymmetric camera policy. The
+    whole camera pipeline (per-env rasterizer obs → CNN → PPO) runs on pure
+    CPU, measured at ~90 env-steps/s with 4 envs — about 30× slower than
+    Madrona training on a GPU. Use it to debug the camera pipeline, run CI,
+    or poke at observations on a laptop; use Madrona for real runs. A tiny
+    step budget keeps this a minutes-scale smoke, not a training run.
+
+    Rasterizer quirk: unlike Madrona/Nyx (per-env worlds), the raster
+    cameras see ALL envs' cars — with several envs on one track the obs
+    contain ghost cars that physics ignores. Harmless for smoke-testing;
+    one more reason real training belongs on Madrona.
+    """
+
+    total_env_steps = 20_000
+    eval_every_steps = 0
+    group = "examples"
+    variant = "camera_cpu"
+
+    def pipeline(self):
+        return (
+            CameraEnvironment(backend="cpu", resolution=(160, 120),
+                              num_envs=4, frame_stack=1)
+            >> AsymmetricCameraPolicy(actor_keys=("camera",),
+                                      critic_keys=("camera", "state"))
+        )
+
+
 class CameraMadronaDr(Experiment):
     """End-to-end vision on the Madrona batch renderer with the FULL DR stack.
 
@@ -32,7 +62,7 @@ class CameraMadronaDr(Experiment):
 
     total_env_steps = 10_000_000
     eval_every_steps = 2_000_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "camera_madrona_dr"
 
     def pipeline(self):
@@ -64,7 +94,7 @@ class CameraNyx(Experiment):
 
     total_env_steps = 5_000_000
     eval_every_steps = 1_000_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "camera_nyx"
 
     def pipeline(self):
@@ -93,7 +123,7 @@ class CameraZoo(Experiment):
 
     total_env_steps = 10_000_000
     eval_every_steps = 2_000_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "camera_zoo"
 
     def pipeline(self):
@@ -139,7 +169,7 @@ class CameraMaxDr(Experiment):
 
     total_env_steps = 10_000_000
     eval_every_steps = 2_000_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "camera_max_dr"
 
     def pipeline(self):

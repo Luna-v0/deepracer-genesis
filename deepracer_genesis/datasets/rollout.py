@@ -78,7 +78,7 @@ def collect_rollout_dataset(
     if spec.env.modality != "camera":
         raise SpecError("rollout collection records the camera; use a camera env stage")
     if num_envs:
-        from ..experiment.ablation import override
+        from ..experiment.overrides import override
         spec = override(spec, "env.num_envs", num_envs)
 
     torch.manual_seed(seed)
