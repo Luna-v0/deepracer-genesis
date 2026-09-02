@@ -3,7 +3,7 @@
 The two ends of ablation.py on their own, when only the headline number is
 wanted.
 
-    caffeinate -i .venv/bin/python -m perception.evaluation.compare_noise
+    uv run python -m experiments.perception.evaluation.compare_noise
 """
 
 import warnings
@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore")
 
 from deepracer_genesis.experiment import run
 
-from perception.train_policy_with_noise import NoisyPerceptionPolicy
+from experiments.perception.train_policy_with_noise import NoisyPerceptionPolicy
 
 
 def main():

@@ -1,10 +1,7 @@
-"""Policy trained through the real perception CNN.
+"""Policy fine-tuned through the frozen perception CNN.
 
-    caffeinate -i .venv/bin/python -m perception.train_policy_with_cnn
-
-The env renders the camera, the frozen CNN turns it into the 7 channels, and PPO
-fine-tunes a policy that already knows how to drive on the exact values. Nothing
-else changes, so whatever the run costs is the cost of the learned perception.
+Only the source of the seven camera-recoverable channels changes, so whatever
+this run costs is the cost of learned perception.
 """
 
 import warnings
@@ -21,9 +18,10 @@ from deepracer_genesis.experiment import (
     run,
 )
 
-from perception.cnn_features import CNNPerceptionFeatures
+from deepracer_genesis.perception.features import CNNPerceptionFeatures
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CHECKPOINTS = REPO_ROOT / "runs" / "cnn"
 
 
 class CNNPerceptionPolicy(Experiment):
@@ -32,7 +30,7 @@ class CNNPerceptionPolicy(Experiment):
     # CNN's error costs 0-1% on tracks the policy can already drive, so there is
     # little for this run to absorb: it demonstrates that a policy survives being
     # driven by the camera, it does not make it better.
-    resume = str(REPO_ROOT / "perception" / "reference_policy.pt")
+    resume = str(CHECKPOINTS / "reference_policy.pt")
     total_env_steps = 3_000_000
     eval_every_steps = 300_000
     ablation_group = "cnn"
@@ -46,9 +44,8 @@ class CNNPerceptionPolicy(Experiment):
               "hamption_pro",          #       0.25  hard
               "thunder_hill_pro",      #       0.27  very hard
               "Tokyo_Training_track")  #       0.42  extreme
-    # mac: 883 steps/s measured at 16 envs. The loop fits in one core out of ten
-    # and 1.4 GB out of 16, so raising the env count costs no wall time and takes
-    # the PPO batch from 384 to 1536 samples per update. Raise it on a bigger box.
+    # sized for a 10-core laptop; raise it on a bigger box, the loop fits in
+    # one core and 1.4 GB
     num_envs = 64
     max_speed = 2.0
     lr = 3e-5          # we are refining a policy that already drives
@@ -57,7 +54,9 @@ class CNNPerceptionPolicy(Experiment):
     # destroys the resumed policy. Pin it.
     schedule = "fixed"
     feature_set = CNNPerceptionFeatures   # PerceptionFeatures = perfect perception
-    feature_params = None                 # e.g. {"cnn_device": "cpu"}
+    # the checkpoint is explicit on purpose: a missing or stale one would
+    # silently turn this into a perfect-perception run
+    feature_params = {"checkpoint": str(CHECKPOINTS / "perception_jittered.pt")}
 
     def pipeline(self):
         return (
@@ -68,7 +67,7 @@ class CNNPerceptionPolicy(Experiment):
                 frame_stack=4,
                 tracks=self.tracks,
                 num_envs=self.num_envs,
-                backend="cpu",          # mac: no Madrona; "gpu" on CUDA
+                backend="cpu",          # "gpu" where Madrona is available
                 max_speed=self.max_speed,
             )
             >> VectorPolicy(keys=("state",))

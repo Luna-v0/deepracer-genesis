@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import ASSETS_DIR
+from deepracer_genesis import ASSETS_DIR
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class TrackInfo:
 
 def names() -> list[str]:
     """Return the sorted names of every available track."""
-    from .envs.track import TRACKS
+    from deepracer_genesis.envs.track import TRACKS
     return sorted(TRACKS)
 
 
@@ -51,7 +51,7 @@ def exists(name: str) -> bool:
     Returns:
         True if the track is registered.
     """
-    from .envs.track import TRACKS
+    from deepracer_genesis.envs.track import TRACKS
     return name in TRACKS
 
 
@@ -89,14 +89,13 @@ def info(name: str) -> TrackInfo:
     Raises:
         KeyError: If ``name`` is not a registered track.
     """
-    from .envs.track import TRACKS
+    from deepracer_genesis.envs.track import TRACKS, load_route
     require(name)
     mesh_rel, route_rel, _field = TRACKS[name]
     route_path = os.path.join(ASSETS_DIR, route_rel)
 
-    wps = np.load(route_path).astype(np.float32)
-    if np.allclose(wps[0, :2], wps[-1, :2], atol=1e-6):   # AWS routes repeat wp 0
-        wps = wps[:-1]
+    # Same loader Track uses, so the catalog counts the waypoints the env drives.
+    wps = load_route(route_path)
     center = wps[:, 0:2]
     seg = np.linalg.norm(np.roll(center, -1, axis=0) - center, axis=1)
     width = np.linalg.norm(wps[:, 4:6] - wps[:, 2:4], axis=1)  # outer - inner
@@ -110,13 +109,13 @@ def info(name: str) -> TrackInfo:
 
 def base() -> list[str]:
     """Return the sorted names of the shipped (non-generated) tracks."""
-    from .envs.track import TRACKS
+    from deepracer_genesis.envs.track import TRACKS
     return sorted(n for n, (_m, r, _f) in TRACKS.items() if _source(r) == "base")
 
 
 def generated() -> list[str]:
     """Return the sorted names of the procedurally-generated tracks."""
-    from .envs.track import TRACKS
+    from deepracer_genesis.envs.track import TRACKS
     return sorted(n for n, (_m, r, _f) in TRACKS.items() if _source(r) == "generated")
 
 

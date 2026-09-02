@@ -3,10 +3,11 @@
 Where the summary table gives one number per track, this shows where on the lap
 the two sources diverge, and marks every point a car left the track.
 
-    python -m perception.visualization.plot_policy_paths <path/model.pt> <track>
+    uv run python -m experiments.perception.visualization.plot_policy_paths <path/model.pt> <track>
 """
 
 import sys
+from pathlib import Path
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -24,9 +25,11 @@ from deepracer_genesis.experiment import run
 from deepracer_genesis.experiment.evaluator import build_single_track_sim
 from deepracer_genesis.experiment.visualize import _rsl_actor
 
-from perception.cnn_features import CNNPerceptionFeatures
-from perception.dataset import REPO_ROOT
-from perception.train_policy_with_cnn import CNNPerceptionPolicy
+from deepracer_genesis.perception.features import CNNPerceptionFeatures
+
+from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SOURCES = (("exact perception", PerceptionFeatures),
            ("through the CNN", CNNPerceptionFeatures))

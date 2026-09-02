@@ -1,6 +1,6 @@
 """Collect one track's worth of camera frames and their ground-truth targets.
 
-    python -m perception.data_generation <track>
+    uv run python -m experiments.perception.data_generation <track>
 
 Writes ``data/<track>_v2/rollout_*.parquet``, one row per frame: the JPEG image,
 the full feature vector it is paired with, and the env/episode ids the dataset
@@ -18,7 +18,7 @@ from deepracer_genesis.experiment.stages import DomainRandomizationTrackAppearan
 
 warnings.filterwarnings("ignore")
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 STEPS = 1500        # one full episode (30 s)
 
 

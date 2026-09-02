@@ -7,20 +7,23 @@ track, including ones the policy never trained on.
 Genesis will not rebuild a camera scene inside one process, so each track runs
 in its own subprocess.
 
-    python -m perception.evaluation.sweep_tracks <path/model.pt> [track count]
+    uv run python -m experiments.perception.evaluation.sweep_tracks <path/model.pt> [track count]
 """
 
 import json
 import math
 import subprocess
 import sys
+from pathlib import Path
 import warnings
 
 warnings.filterwarnings("ignore")
 
 import numpy as np
 
-from perception.dataset import DATASET_TRACKS, REPO_ROOT
+from deepracer_genesis.perception.dataset import DATASET_TRACKS
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 NUM_ENVS = 16
 MODULE = "perception.evaluation.sweep_tracks"
@@ -32,8 +35,8 @@ def evaluate(ckpt, track):
                                                         evaluate_on_tracks)
     from deepracer_genesis.experiment.visualize import _rsl_actor
 
-    from perception.cnn_features import CNNPerceptionFeatures
-    from perception.train_policy_with_cnn import CNNPerceptionPolicy
+    from deepracer_genesis.perception.features import CNNPerceptionFeatures
+    from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
     spec = run(CNNPerceptionPolicy, build_only=True,
                feature_set=CNNPerceptionFeatures, tracks=(track,), num_envs=NUM_ENVS)
@@ -44,12 +47,12 @@ def evaluate(ckpt, track):
 
 def track_geometry(track):
     """Length, width, waypoint spacing and curvature spread of one track."""
-    from deepracer_genesis.envs.track import ASSETS_DIR, TRACKS
+    from deepracer_genesis.envs.track import ASSETS_DIR, TRACKS, load_route
 
-    w = np.load(f"{ASSETS_DIR}/{TRACKS[track][1]}").astype(np.float64)
+    # the shared loader, so k_std here is measured on the same waypoints the
+    # env drives: a degenerate segment poisons its predecessor's yaw
+    w = load_route(f"{ASSETS_DIR}/{TRACKS[track][1]}").astype(np.float64)
     c = w[:, :2]
-    if np.allclose(c[0], c[-1], atol=1e-6):
-        w, c = w[:-1], c[:-1]
     seg = np.linalg.norm(np.roll(c, -1, 0) - c, axis=1)
     yaw = np.arctan2(*(np.roll(c, -1, 0) - c).T[::-1])
     dyaw = (np.roll(yaw, -1) - yaw + math.pi) % (2 * math.pi) - math.pi
@@ -67,7 +70,7 @@ def main():
         print("RESULT " + json.dumps(evaluate(ckpt, track)))
         return
 
-    from perception.train_policy_with_noise import TRAIN_TRACKS as SEEN
+    from experiments.perception.train_policy_with_noise import TRAIN_TRACKS as SEEN
 
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 20
     all_tracks = [t[:-3] for t in DATASET_TRACKS]

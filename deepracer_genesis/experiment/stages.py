@@ -149,6 +149,8 @@ class FeatureEnvironment(Stage):
         num_envs: Parallel simulation instances.
         random_start: Whether episodes begin at a random track position.
         random_direction: Whether each episode randomizes CW/CCW travel.
+        max_speed: Top of the speed action range in m/s, or None for the
+            physics default.
         KIND: Stage category tag (environment).
     """
 
@@ -164,7 +166,7 @@ class FeatureEnvironment(Stage):
     view: str = "none"                 # "none" | "gui" | "spectator" | "topdown"
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
-    max_speed: Optional[float] = None   # plafond d'action en m/s
+    max_speed: float | None = None     # action-cap speed in m/s
 
     KIND = "environment"
 
@@ -186,7 +188,7 @@ class FeatureEnvironment(Stage):
 
 @dataclass(frozen=True)
 class CameraEnvironment(Stage):
-    """Front-RGB-camera env; >1 `tracks` trains heterogeneously (Madrona only).
+    """Front-RGB-camera env; >1 `tracks` trains heterogeneously (not on nyx).
 
     Attributes:
         render: Rendering backend used to produce the camera image.
@@ -199,6 +201,8 @@ class CameraEnvironment(Stage):
         num_envs: Parallel simulation instances.
         random_start: Whether episodes begin at a random track position.
         random_direction: Whether each episode randomizes CW/CCW travel.
+        max_speed: Top of the speed action range in m/s, or None for the
+            physics default.
         KIND: Stage category tag (environment).
     """
 
@@ -217,7 +221,7 @@ class CameraEnvironment(Stage):
     view: str = "none"                 # "none" | "gui" | "spectator" | "topdown"
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
-    max_speed: Optional[float] = None   # plafond d'action en m/s
+    max_speed: float | None = None     # action-cap speed in m/s
 
     KIND = "environment"
 

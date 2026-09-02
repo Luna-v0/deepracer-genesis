@@ -30,8 +30,8 @@ zero or more reward-shaping and DR stages.
 
 | Role | Stage | Key params |
 |------|-------|-----------|
-| Env | `FeatureEnvironment` | `feature_set`, `feature_params`, `lookahead_k`, `tracks`, `num_envs`, `random_start`, `random_direction` |
-| Env | `CameraEnvironment` | `render` (`"madrona"`/`"nyx"`), `resolution`, `fov`, `feature_set`, `tracks`, `num_envs` |
+| Env | `FeatureEnvironment` | `feature_set`, `feature_params`, `lookahead_k`, `tracks`, `num_envs`, `random_start`, `random_direction`, `max_speed` |
+| Env | `CameraEnvironment` | `render` (`"madrona"`/`"nyx"`), `resolution`, `fov`, `feature_set`, `tracks`, `num_envs`, `max_speed` |
 | Env (safe-RL) | `SafeRLFeatureEnvironment` / `SafeRLCameraEnvironment` | above + `cost`, `budget` (emits a cost stream → infers PPO-Lagrangian) |
 | Reward | `RewardShaping` | `fn` (custom `RewardFn` or None), `scales` (override dict) |
 | DR | `DomainRandomizationTrackAppearance` | `strength` |
@@ -41,11 +41,16 @@ zero or more reward-shaping and DR stages.
 | Encoder | `FrozenCNNToFeatureVector` | `checkpoint`, `output_dim`, `layer`, `out_key` |
 | Policy | `VectorPolicy` | `keys`, `mlp`, `actions` |
 | Policy | `AsymmetricVectorPolicy` / `AsymmetricCameraPolicy` | `actor_keys`, `critic_keys`, `mlp`/`cnn`, `actions` |
-| Algorithm | `PPO`, `PPOLagrangian`, `Algo(cls=...)` | see [Custom algorithms](../guides/custom-algorithms.md) |
+| Algorithm | `PPO`, `PPOLagrangian`, `Algo(cls=...)` | `lr`, `clip`, `epochs`, `minibatches`, `gamma`, `gae_lambda`, `entropy_coef`, `max_grad_norm`, `horizon`, `schedule`, `desired_kl`; `Algo(cls=...)` in [Custom algorithms](../guides/custom-algorithms.md) |
 
 Policies expose **`actor_keys` / `critic_keys`** — the asymmetric-critic hook: the
 critic can read richer observation keys than the actor (e.g. `critic_keys=("camera",
 "state")` with `actor_keys=("camera",)`).
+
+`max_speed` caps the top of the speed action range in m/s (`-1 → min_speed`,
+`+1 → max_speed`); leave it `None` to keep the physics default (4.0 m/s). PPO's
+`schedule` is `"adaptive"` (retune `lr` from the measured KL, steering toward
+`desired_kl`) or `"fixed"` (keep `lr`).
 
 ## Authoring an experiment
 
@@ -67,6 +72,9 @@ class FeatureBaseline(Experiment):
 
 class FeatureBaselineSmall(FeatureBaseline):     # a variant
     num_envs = 256
+
+class FeatureBaselineFineTune(FeatureBaseline):  # start from trained weights
+    resume = "runs/.../model_1500.pt"
 
 run(FeatureBaseline)
 ```

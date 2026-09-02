@@ -6,7 +6,7 @@ import os
 import numpy as np
 import torch
 
-from .. import ASSETS_DIR
+from deepracer_genesis import ASSETS_DIR
 
 # name -> (mesh, route npy, optional field-overlay mesh) relative to assets/.
 # The overlay replaces ground submeshes whose alpha-textured materials the
@@ -29,6 +29,30 @@ if os.path.isdir(_GENERATED):
         if os.path.exists(os.path.join(_d, "route.npy")) and _name not in TRACKS:
             _rel = os.path.relpath(_d, ASSETS_DIR)
             TRACKS[_name] = (f"{_rel}/track.obj", f"{_rel}/route.npy", None)
+
+# A segment shorter than this has no usable direction (see load_route).
+_MIN_SEG_M = 1e-3
+
+
+def load_route(path: str) -> np.ndarray:
+    """Load a route ``.npy``, dropping the closing repeat and degenerate waypoints.
+
+    A waypoint coincident with its successor has no direction to face.
+
+    Args:
+        path: Path to a route ``.npy`` of ``[cx, cy, ix, iy, ox, oy]`` rows.
+
+    Returns:
+        The ``(W, 6)`` float32 waypoint array after both drops.
+    """
+    wps = np.load(path).astype(np.float32)
+    # AWS routes commonly repeat the first waypoint at the end; drop it.
+    if np.allclose(wps[0, :2], wps[-1, :2], atol=1e-6):
+        wps = wps[:-1]
+    # 54 of the 62 shipped routes also repeat one mid-loop, and a zero-length
+    # segment has no direction: arctan2(0, 0) poisons yaw, then curvature.
+    step = np.roll(wps[:, :2], -1, axis=0) - wps[:, :2]
+    return wps[np.linalg.norm(step, axis=1) >= _MIN_SEG_M]
 
 
 class Track:
@@ -69,14 +93,7 @@ class Track:
             self.obj_path = os.path.join(os.path.dirname(self.mesh_path), "obj", base + ".obj")
         self.device = device
 
-        wps = np.load(os.path.join(ASSETS_DIR, route_rel)).astype(np.float32)
-        # AWS routes commonly repeat the first waypoint at the end; drop it.
-        if np.allclose(wps[0, :2], wps[-1, :2], atol=1e-6):
-            wps = wps[:-1]
-        # 54 of the 62 routes also repeat one mid-loop, and a zero-length
-        # segment has no direction: arctan2(0, 0) poisons yaw, then curvature.
-        step = np.roll(wps[:, :2], -1, axis=0) - wps[:, :2]
-        wps = wps[np.linalg.norm(step, axis=1) >= 1e-3]
+        wps = load_route(os.path.join(ASSETS_DIR, route_rel))
 
         center = torch.tensor(wps[:, 0:2], device=device)
         inner = torch.tensor(wps[:, 2:4], device=device)

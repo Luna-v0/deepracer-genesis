@@ -1,6 +1,6 @@
 """Rendered image of a whole track seen from above.
 
-    python -m perception.visualization.render_track_topdown <track>
+    uv run python -m experiments.perception.visualization.render_track_topdown <track>
 """
 
 import sys
@@ -17,7 +17,7 @@ import genesis as gs
 from deepracer_genesis.configs.cfgs import get_env_cfg
 from deepracer_genesis.envs.base_env import DeepRacerEnv
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def main():

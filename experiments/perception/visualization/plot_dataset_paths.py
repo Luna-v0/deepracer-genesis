@@ -2,7 +2,7 @@
 
 Shows how the collected episodes cover the track, and where they ended.
 
-    python -m perception.visualization.plot_dataset_paths <dataset folder>
+    uv run python -m experiments.perception.visualization.plot_dataset_paths <dataset folder>
 """
 
 import glob
@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyarrow.parquet as pq
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ASSETS = REPO_ROOT / "deepracer_genesis" / "assets"
 
 

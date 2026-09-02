@@ -3,7 +3,7 @@
 The point is to show what the learned perception costs. Same policy, same track,
 same camera -- only the source of the 7 values changes (exact simulator vs CNN).
 
-    caffeinate -di .venv/bin/python -m perception.visualization.showcase <path/model.pt>
+    uv run python -m experiments.perception.visualization.showcase <path/model.pt>
 
 Roughly 40 min:
   1. evaluate every track under both sources     (one subprocess per scene)
@@ -25,7 +25,7 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 OUT_DIR = REPO_ROOT / "runs" / "showcase"
 
 TRACKS = ("2022_march_open", "arctic_open", "jyllandsringen_open",
@@ -58,7 +58,7 @@ def banner(text, width, to):
 
 def evaluate(ckpt, track, source):
     p = subprocess.run([sys.executable, "-m",
-                        "perception.evaluation.compare_perception",
+                        "experiments.perception.evaluation.compare_perception",
                         ckpt, "--one", track, source],
                        cwd=REPO_ROOT, capture_output=True, text=True)
     line = next((x for x in p.stdout.splitlines() if x.startswith("RESULT ")), None)
@@ -70,7 +70,7 @@ def evaluate(ckpt, track, source):
 def record(ckpt, track, source):
     """Render the fleet video; returns its path, or None."""
     p = subprocess.run([sys.executable, "-m",
-                        "perception.visualization.fleet_video", ckpt, track, source],
+                        "experiments.perception.visualization.fleet_video", ckpt, track, source],
                        cwd=REPO_ROOT, capture_output=True, text=True)
     f = REPO_ROOT / "runs" / "videos" / source / f"fleet_{track}.mp4"
     if not f.exists():

@@ -18,10 +18,5 @@ runs/showcase/
 runs/figures/
 runs/sweep_tracks.json
 
-# parked, to be revisited: run drivers and their reports
-CNN/
-runs/nuit*
-runs/rapport_nuit*
-runs/verif.log
-runs/vitrine/
-runs/*.json
+# mkdocs build output
+site/

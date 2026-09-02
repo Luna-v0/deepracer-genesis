@@ -5,6 +5,7 @@ Preallocated rollout storage avoids the crash; see MIGRATION_TORCHRL_TO_RSLRL.md
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import TYPE_CHECKING
@@ -15,6 +16,8 @@ from .evaluator import EvalRecord, evaluate_policy
 
 if TYPE_CHECKING:
     from .spec import ExperimentSpec
+
+logger = logging.getLogger(__name__)
 
 # our PPO-stage hyperparameter names -> rsl-rl algorithm cfg names
 _PPO_KEY_MAP = {
@@ -193,9 +196,9 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
         runner.load(spec.resume, load_cfg={"actor": True, "critic": True,
                                            "optimizer": False, "iteration": False,
                                            "rnd": False})
-        lr = train_cfg["algorithm"]["learning_rate"]
-        print(f"[rsl] resumed weights from {spec.resume} (lr {lr:g}, "
-              f"schedule {train_cfg['algorithm']['schedule']})")
+        logger.info("resumed weights from %s (lr %g, schedule %s)", spec.resume,
+                    train_cfg["algorithm"]["learning_rate"],
+                    train_cfg["algorithm"]["schedule"])
 
     eval_history: list[dict] = []
     t0 = time.perf_counter()

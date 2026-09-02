@@ -5,8 +5,9 @@ the strategy owns every vision decision. Feature-vector training uses no rendere
 camera training uses a batched GPU renderer.
 
 > Mental model in one sentence: `make_renderer(vision_cfg)` picks `NullRenderer`
-> (no camera), `MadronaRenderer` (fast batched rasterizer), or `NyxRenderer` (path
-> tracer) — and the same strategy also owns the world-color DR and the debug views.
+> (no camera), `MadronaRenderer` (fast batched rasterizer), `NyxRenderer` (path
+> tracer), or `RasterizerObsRenderer` (the CPU fallback) — and the same strategy
+> also owns the world-color DR and the debug views.
 
 ---
 
@@ -20,6 +21,10 @@ camera training uses a batched GPU renderer.
   for camera training.
 - `vision=True`, `vision_renderer="nyx"` → **`NyxRenderer`** — Nyx path-tracer
   sensors, true texture colors, slower.
+- `vision=True`, `vision_renderer="rasterizer"` → **`RasterizerObsRenderer`** — the
+  CPU path (`backend="cpu"`), where Madrona and Nyx are unavailable. One camera
+  shared across envs, plus `env_separate_rigid` so each env renders only its own
+  car. A debug / small-`num_envs` path, not a throughput one.
 
 The camera is DeepRacer-native `(160, 120)` RGB by default, pitched down for a
 forward-looking view (`camera_offset_T`).
@@ -44,10 +49,16 @@ Two human-facing views work even in a `NullRenderer` (feature-only) env, because
 they use their own cameras:
 
 - **Spectator** (`render_spectator()`) — one high-resolution bird's-eye image of the
-  whole track with every car, from a single static camera.
+  whole track with every car, from a single static camera. `env_separate_rigid`
+  (see `RasterizerObsRenderer`) batches that camera too and draws one car per
+  frame, so the strategy recomposes the batch into one image: the median across
+  envs is the empty track, and each car is pasted back where its own frame
+  departs from it. Consumers always get a single `(H, W, 3)` fleet view.
 - **Top-down** (`render_topdown()`) — an optional per-env bird's-eye view for
   validation. Madrona poses it per track variant and returns `(N, H, W, 3)`; Nyx
   shares one pose across envs.
 
 `NyxRenderer` sets `merge_fixed_links = False` (the Nyx exporter rejects merged
-links); Madrona merges them.
+links); Madrona merges them. Every strategy also declares `env_separate_rigid`
+(default `False`), which `build_scene` reads straight off the port into
+`VisOptions`.

@@ -10,7 +10,7 @@ the live scene's context with it, and the next render fails on
 `glBindFramebuffer: invalid operation`. A single-process loop therefore cannot
 survive past one scene.
 
-    python -m perception.evaluation.compare_perception <path/model.pt> [track ...] \
+    uv run python -m experiments.perception.evaluation.compare_perception <path/model.pt> [track ...] \
         [--video] [--cnn <path/cnn.pt>]
 """
 
@@ -27,14 +27,14 @@ METRICS = ("episodes", "mean_return", "mean_progress_m", "mean_episode_s",
            "mean_speed_mps")
 SOURCES = ("sim", "cnn")
 NUM_ENVS = 16
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 MODULE = "perception.evaluation.compare_perception"
 
 
 def _feature_set(source):
     from deepracer_genesis.envs.features import PerceptionFeatures
 
-    from perception.cnn_features import CNNPerceptionFeatures
+    from deepracer_genesis.perception.features import CNNPerceptionFeatures
     return PerceptionFeatures if source == "sim" else CNNPerceptionFeatures
 
 
@@ -46,7 +46,7 @@ def evaluate_one(ckpt, track, source, cnn=None):
                                                         evaluate_on_tracks)
     from deepracer_genesis.experiment.visualize import _rsl_actor
 
-    from perception.train_policy_with_cnn import CNNPerceptionPolicy
+    from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
     spec = run(CNNPerceptionPolicy, build_only=True,
                feature_set=_feature_set(source), tracks=(track,), num_envs=NUM_ENVS,
@@ -60,7 +60,7 @@ def evaluate_one(ckpt, track, source, cnn=None):
 def record_one(ckpt, track, source, cnn=None):
     from deepracer_genesis.experiment.visualize import rollout_video
 
-    from perception.train_policy_with_cnn import CNNPerceptionPolicy
+    from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
     rollout_video(CNNPerceptionPolicy, root="runs", ckpt=ckpt, track=track,
                   steps=1500, num_envs=1, out=f"runs/videos/{source}",
@@ -125,7 +125,7 @@ def main():
     video = "--video" in args
     tracks = [a for a in args if not a.startswith("--")]
     if not tracks:
-        from perception.train_policy_with_cnn import CNNPerceptionPolicy
+        from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
         tracks = list(CNNPerceptionPolicy.tracks)
 
     summary = []

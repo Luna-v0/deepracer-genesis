@@ -3,7 +3,7 @@
 No training at all: this measures what the perception costs a policy that
 already knows how to drive.
 
-    python -m perception.evaluation.evaluate_with_cnn <path/model.pt>
+    uv run python -m experiments.perception.evaluation.evaluate_with_cnn <path/model.pt>
 """
 
 import sys
@@ -18,7 +18,7 @@ from deepracer_genesis.experiment.evaluator import (
 )
 from deepracer_genesis.experiment.visualize import _rsl_actor
 
-from perception.train_policy_with_cnn import CNNPerceptionPolicy
+from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
 NUM_ENVS = 8
 

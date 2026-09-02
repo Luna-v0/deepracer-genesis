@@ -156,3 +156,43 @@ def test_model_metadata_is_aws_continuous(report):
 
 def test_bundle_written(report):
     assert report["bundle_exists"]
+
+
+# --- the exported speed ceiling must follow the env's action cap -------------
+# PR #5 added EnvSpec.max_speed but left model_metadata on the physics constant,
+# so a policy trained at max_speed=2.0 exported metadata claiming 4.0 and the
+# stock navigation node would rescale [-1, 1] into twice the trained top speed.
+
+def _spec_with_max_speed(max_speed):
+    """Build a minimal camera spec with the given action cap."""
+    from deepracer_genesis.experiment import (AsymmetricCameraPolicy,
+                                              CameraEnvironment)
+
+    return (CameraEnvironment(render="madrona", resolution=(160, 120),
+                              max_speed=max_speed)
+            >> AsymmetricCameraPolicy(actor_keys=("camera",),
+                                      critic_keys=("camera", "state"))).build()
+
+
+def test_metadata_speed_ceiling_follows_the_env_action_cap():
+    from deepracer_genesis.deploy.onnx import model_metadata
+
+    meta = model_metadata(_spec_with_max_speed(2.0))
+    assert meta["action_space"]["speed"] == {"high": 2.0, "low": 0.1}
+
+
+def test_metadata_speed_ceiling_defaults_to_the_physics_limit():
+    from deepracer_genesis.deploy.onnx import model_metadata
+    from deepracer_genesis.physics.limits import MAX_SPEED
+
+    meta = model_metadata(_spec_with_max_speed(None))
+    assert meta["action_space"]["speed"]["high"] == MAX_SPEED
+
+
+def test_action_physical_tracks_the_same_cap():
+    """The model card's normalized->physical table must not disagree with it."""
+    from deepracer_genesis.deploy.onnx import action_physical, model_metadata
+
+    spec = _spec_with_max_speed(1.5)
+    assert (action_physical(spec)["speed"]["high"]
+            == model_metadata(spec)["action_space"]["speed"]["high"] == 1.5)

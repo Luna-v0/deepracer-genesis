@@ -1,8 +1,9 @@
 """Contact sheet of every track in the dataset, seen from above.
 
-    python -m perception.visualization.plot_track_catalog
+    uv run python -m experiments.perception.visualization.plot_track_catalog
 """
 
+from pathlib import Path
 import math
 
 import matplotlib
@@ -14,7 +15,9 @@ import matplotlib.pyplot as plt
 from deepracer_genesis.envs.track import ASSETS_DIR, TRACKS
 from deepracer_genesis.tools.track_builder import plot_track, track_metrics
 
-from perception.dataset import DATASET_TRACKS, HOLDOUT_TRACKS, REPO_ROOT
+from deepracer_genesis.perception.dataset import DATASET_TRACKS, HOLDOUT_TRACKS
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 COLUMNS = 6
 

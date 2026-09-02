@@ -1,6 +1,6 @@
 """Train a policy on the channels the CNN can predict, with its error simulated.
 
-    python -m perception.train_policy_with_noise
+    uv run python -m experiments.perception.train_policy_with_noise
 
 No renderer here: the CNN's measured per-channel error is added to the exact
 values instead. Cheap enough to sweep, which is what the ablation uses.
@@ -18,8 +18,8 @@ from deepracer_genesis.experiment import (
     run,
 )
 
-from perception.dataset import HOLDOUT_TRACKS, TRAINING_TRACKS, track_names
-from perception.noisy_features import NoisyPerceptionFeatures
+from deepracer_genesis.perception.dataset import HOLDOUT_TRACKS, TRAINING_TRACKS, track_names
+from deepracer_genesis.perception.features import NoisyPerceptionFeatures
 
 # every track the dataset covers, minus the shared holdout. Ten training tracks
 # left the policy unable to drive an unseen one: off-track rate tracked corner

@@ -73,6 +73,31 @@ def _track_extent(track):
     return c, extent
 
 
+# per-pixel channel-sum departure from the background that reads as a car
+_FLEET_CAR_THRESHOLD = 28
+
+
+def _compose_fleet(frames: np.ndarray) -> np.ndarray:
+    """Paste every env's car onto one shared empty-track background.
+
+    The median across envs IS the empty track, since each car sits elsewhere.
+
+    Args:
+        frames: An ``(N, H, W, 3)`` uint8 batch, one env drawn per frame.
+
+    Returns:
+        An ``(H, W, 3)`` uint8 image of the track carrying every env's car.
+    """
+    frames = np.ascontiguousarray(frames)
+    background = np.median(frames, axis=0).astype(np.uint8)
+    out = background.copy()
+    delta = np.abs(frames.astype(np.int16) - background).sum(-1)   # (N, H, W)
+    for i in range(len(frames)):
+        mask = delta[i] > _FLEET_CAR_THRESHOLD
+        out[mask] = frames[i][mask]
+    return out
+
+
 def make_renderer(vision_cfg: dict) -> "Renderer":
     """Select and instantiate the rendering strategy from the env config.
 
@@ -106,11 +131,14 @@ class Renderer:
     Attributes:
         has_camera: Whether this strategy produces camera observations.
         merge_fixed_links: Whether the scene may merge fixed links.
+        env_separate_rigid: Whether the scene draws each env's rigid bodies in
+            isolation, so a camera shared across envs renders one car per frame.
         spec_cam: The shared bird's-eye spectator debug camera, or None.
     """
 
     has_camera: bool = False
     merge_fixed_links: bool = True
+    env_separate_rigid: bool = False
     _scene_batch_renderer: bool = False
     _spectator_debug: bool = False
 
@@ -228,15 +256,14 @@ class Renderer:
     def spectator(self, env: "DeepRacerEnv") -> np.ndarray:
         """Render the single high-res spectator (bird's-eye) debug frame.
 
+        Batched (env-isolated) frames are recomposed into one fleet image.
+
         Args:
             env: The env to render (unused directly; the spectator camera is
                 already positioned over the track).
 
         Returns:
-            An ``(H, W, 3)`` RGB image of the whole track. Under a renderer that
-            sets ``env_separate_rigid`` every camera is batched and each env is
-            drawn in isolation, so the frame shows env 0's car alone rather than
-            the whole fleet.
+            An ``(H, W, 3)`` RGB image of the whole track with all cars.
 
         Raises:
             AssertionError: If the spectator camera was not enabled via
@@ -244,8 +271,8 @@ class Renderer:
         """
         assert self.spec_cam is not None, "spectator camera not enabled (cfg['spectator'])"
         rgb = np.asarray(self.spec_cam.render(rgb=True)[0])
-        if rgb.ndim == 4:                      # batched camera: keep env 0
-            rgb = rgb[0]
+        if rgb.ndim == 4:                      # batched camera: one car per frame
+            return _compose_fleet(rgb)
         return rgb.reshape(rgb.shape[-3:])
 
 
@@ -494,28 +521,24 @@ class MadronaRenderer(_CameraRenderer):
 
 
 class RasterizerObsRenderer(_CameraRenderer):
-    """Per-env CPU rasterizer camera obs — the backend=='cpu' vision path (M.2).
+    """CPU rasterizer camera obs — the backend=='cpu' vision path (M.2).
 
-    Madrona and Nyx are GPU-only, so on the CPU backend the policy camera is
-    rendered with the same ``gs.renderers.Rasterizer()`` that already backs the
-    spectator/top-down debug views. It holds ONE camera per env (``env_idx=i``)
-    and renders them in a Python loop, so it is unbatched and far slower than
-    Madrona — a debug / small-``num_envs`` / no-GPU path, not a throughput path.
-    Reuses ``_CameraRenderer``'s device-agnostic post-processing (world-color
-    remap, pixel noise, policy downscale) verbatim; only the frame source swaps.
-
-    Note:
-        ``randomize_mount`` (``camera_jitter`` DR) is a no-op on this path — the
-        per-env mount jitter is Madrona-only for now; image-space DR (distortion,
-        crop, photometric) still applies, since it is renderer-agnostic.
+    ONE batched ``Rasterizer`` camera; slower than Madrona, so a no-GPU path.
 
     Attributes:
         merge_fixed_links: Whether the scene may merge fixed links.
-        cams: One car-attached observation camera per env.
-        top_cams: One per-env top-down camera each, or None.
+        env_separate_rigid: Whether the scene draws each env's rigid bodies in
+            isolation, so a camera shared across envs renders one car per frame.
+        cam: The car-attached observation camera, batched across envs.
+        top_cam: The batched top-down camera, or None.
         cam_offset_T: The base mount transform from camera_link to the camera.
     """
 
+    # Madrona and Nyx are GPU-only, so the CPU backend renders the policy camera
+    # with the same Rasterizer that already backs the spectator/top-down debug
+    # views, reusing _CameraRenderer's device-agnostic post-processing verbatim.
+    # randomize_mount (camera_jitter DR) is a no-op here: per-env mount jitter is
+    # Madrona-only. Image-space DR still applies, being renderer-agnostic.
     merge_fixed_links = True
     _scene_batch_renderer = False    # plain Rasterizer, not a BatchRenderer
     _spectator_debug = False         # no batch pipeline, so no debug camera needed
@@ -525,18 +548,16 @@ class RasterizerObsRenderer(_CameraRenderer):
     env_separate_rigid = True
 
     def _build(self, env: "DeepRacerEnv", vision_cfg: dict) -> None:
-        """Add one rasterizer camera per env.
-
-        The plain ``Rasterizer`` scene renderer does not support ``add_light``
-        (that is BatchRenderer-only); it lights the scene from the ambient light
-        + background in ``gs.Scene``'s VisOptions, exactly like the spectator /
-        top-down rasterizer views already do — so no explicit light is added.
+        """Add the batched observation camera and the optional top-down camera.
 
         Args:
-            env: The env being built; its ``scene`` receives the per-env cameras.
+            env: The env being built; its ``scene`` receives the cameras.
             vision_cfg: Env config; reads ``camera_res`` (W, H), ``camera_fov``,
                 and ``topdown_camera``.
         """
+        # the plain Rasterizer does not support add_light (BatchRenderer-only);
+        # it lights the scene from the ambient light + background in gs.Scene's
+        # VisOptions, exactly like the spectator / top-down views already do.
         res = vision_cfg["camera_res"]  # (W, H)
         fov = vision_cfg["camera_fov"]
         # no env_idx: with env_separate_rigid the camera is batched, so one
@@ -566,7 +587,7 @@ class RasterizerObsRenderer(_CameraRenderer):
         self.cam.attach(env.car.get_link("camera_link"), self.cam_offset_T)
 
     def _acquire_rgb(self, env: "DeepRacerEnv") -> torch.Tensor:
-        """Render each per-env camera in turn and stack the frames.
+        """Move the batched camera into place and render every env's frame.
 
         Args:
             env: The env whose current frame is captured.
@@ -578,7 +599,7 @@ class RasterizerObsRenderer(_CameraRenderer):
         return self._as_batch(self.cam.render(rgb=True)[0], env)
 
     def topdown(self, env: "DeepRacerEnv") -> torch.Tensor:
-        """Render the per-env top-down view from each env's rasterizer camera.
+        """Render the per-env top-down view from the batched rasterizer camera.
 
         Args:
             env: The env to render from above.
@@ -587,19 +608,25 @@ class RasterizerObsRenderer(_CameraRenderer):
             An ``(N, H, W, 3)`` batch of top-down RGB frames.
 
         Raises:
-            AssertionError: If the top-down cameras were not enabled via
+            AssertionError: If the top-down camera was not enabled via
                 ``topdown_camera``.
         """
         assert self.top_cam is not None
         return self._as_batch(self.top_cam.render(rgb=True)[0], env)
 
     @staticmethod
-    def _as_batch(rgb, env: "DeepRacerEnv") -> torch.Tensor:
-        """Normalize a batched rasterizer frame to ``(N, H, W, 3)`` on the device.
+    def _as_batch(rgb: np.ndarray, env: "DeepRacerEnv") -> torch.Tensor:
+        """Normalize a rasterizer frame to an ``(N, H, W, 3)`` device tensor.
 
-        The rasterizer hands back a vertically-flipped view (negative stride),
-        which torch cannot wrap, so the array is made contiguous first.
+        Args:
+            rgb: The raw ``(H, W, 3)`` or ``(N, H, W, 3)`` frame off the camera.
+            env: The env supplying the target ``device``.
+
+        Returns:
+            An ``(N, H, W, 3)`` uint8 tensor of RGB pixels on ``env.device``.
         """
+        # the rasterizer hands back a vertically-flipped view (negative stride),
+        # which torch cannot wrap, so make the array contiguous first
         rgb = np.ascontiguousarray(np.asarray(rgb))
         if rgb.ndim == 3:                      # single env: add the batch axis
             rgb = rgb[None]

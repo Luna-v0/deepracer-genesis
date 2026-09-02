@@ -60,10 +60,11 @@ It maps the env to named `(N,)` per-step terms; the env weights them by
 | `heading` | `−|heading_err|·dt` | align with track tangent |
 | `steering` | `−|steer_action|·dt` | discourage needless steering |
 | `action_rate` | `−‖aₜ − aₜ₋₁‖²·dt` | smooth control |
-| `off_track` | `(lateral outside half_width − wheel_margin)·dt` | penalize leaving the road |
+| `off_track` | `−(lateral outside half_width − wheel_margin)·dt` | penalize leaving the road |
 
 All terms scale by control `dt`, so weights are timestep-independent. Per-term sums
-are tracked for logging.
+are tracked for logging. The `reward_scales` are positive magnitudes — each term
+carries its own sign, so every penalty row above is already negative-valued.
 
 ### Custom rewards
 

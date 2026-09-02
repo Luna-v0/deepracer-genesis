@@ -4,7 +4,7 @@ Each run keeps the exact simulator values but corrupts a different subset of the
 camera channels with the CNN's measured error, so the drop can be attributed to
 "where am I" (lateral, heading) or to "what is ahead" (the two curvatures).
 
-    caffeinate -i .venv/bin/python -m perception.evaluation.ablation
+    uv run python -m experiments.perception.evaluation.ablation
 """
 
 import warnings
@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore")
 
 from deepracer_genesis.experiment import run
 
-from perception.train_policy_with_noise import NoisyPerceptionPolicy
+from experiments.perception.train_policy_with_noise import NoisyPerceptionPolicy
 
 RUNS = (
     ("reference",        dict(noise=0.0)),

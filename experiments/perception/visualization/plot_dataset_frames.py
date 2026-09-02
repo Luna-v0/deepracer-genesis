@@ -1,6 +1,6 @@
 """Contact sheet of the camera frames collected for one track.
 
-    python -m perception.visualization.plot_dataset_frames <dataset folder>
+    uv run python -m experiments.perception.visualization.plot_dataset_frames <dataset folder>
 """
 
 import glob
@@ -11,7 +11,7 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from PIL import Image
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ROWS, COLUMNS = 3, 4
 
 

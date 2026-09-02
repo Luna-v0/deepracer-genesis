@@ -226,6 +226,17 @@ class DeepRacerEnv:
         """
         return self.renderer.spec_cam
 
+    @property
+    def camera_stack(self) -> "torch.Tensor | None":
+        """Return the stacked camera frames the policy observes, or ``None``.
+
+        Always ``None`` here; vision envs that stack frames override it.
+
+        Returns:
+            ``None`` on an env without stacked camera observations.
+        """
+        return None
+
     # ---------------------------------------------------------------- buffers
     def _init_buffers(self, env_cfg: dict) -> None:
         """Allocate per-env episode state and resolve the reward function.

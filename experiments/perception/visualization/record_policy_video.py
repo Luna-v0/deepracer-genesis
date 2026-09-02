@@ -1,7 +1,7 @@
 """Top-down videos of the policies trained with simulated CNN error.
 
-    python -m perception.visualization.record_policy_video           # both noise levels, test tracks
-    python -m perception.visualization.record_policy_video Monaco    # one track
+    uv run python -m experiments.perception.visualization.record_policy_video           # both noise levels, test tracks
+    uv run python -m experiments.perception.visualization.record_policy_video Monaco    # one track
 """
 
 import sys
@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 
 from deepracer_genesis.experiment.visualize import rollout_video
 
-from perception.train_policy_with_noise import TEST_TRACKS, NoisyPerceptionPolicy
+from experiments.perception.train_policy_with_noise import TEST_TRACKS, NoisyPerceptionPolicy
 
 NOISE_LEVELS = (0.0, 1.0)
 
