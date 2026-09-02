@@ -21,7 +21,8 @@ standards below. Never regress the project's goal or its public contracts.
 - **Universal standards** and the **Iteration loop** below ALWAYS apply.
 - Before planning, classify the task and read the matching playbook (**Task routing**).
 - If the task touches the RL study pipeline, also read `.claude/context/rl-study.md`.
-- Mutable working state lives in `PROJECT_MEMORY.md` and `BLOCKERS.md` — not here.
+- Mutable working state lives in `../PROJECT_MEMORY.md` and `../BLOCKERS.md`
+  (outside the repo, beside the other planning docs) — not here.
   Keep this file lean and stable.
 
 ## Universal standards (always)
@@ -53,12 +54,13 @@ standards below. Never regress the project's goal or its public contracts.
   Small single-purpose functions; no mutable globals.
 
 **Working memory (files on disk)**
-- `PROJECT_MEMORY.md` (repo root): restated goal, architecture summary, active plan
-  (tasks → subtasks with status), key decisions (linked to ADRs), constraints, open
-  questions, short changelog. Read at loop start; update at loop end and on any
-  significant decision. Keep concise; prune stale content.
+- `../PROJECT_MEMORY.md` (parent of the repo, un-versioned): restated goal,
+  architecture summary, active plan (tasks → subtasks with status), key decisions
+  (linked to ADRs), constraints, open questions, short changelog. Read at loop
+  start; update at loop end and on any significant decision. Keep it concise.
 - `docs/decisions/` — numbered ADRs (context, decision, alternatives, consequences).
-- `BLOCKERS.md` (repo root): stacked blockers (see **Blockers**).
+- `../BLOCKERS.md` (parent of the repo, un-versioned): stacked blockers
+  (see **Blockers**).
 
 **Long-running jobs (never block the session on compute)**
 - You SUPERVISE long jobs (training runs, HPO studies, soak tests); you do not BE
@@ -94,15 +96,15 @@ helps.
 
 ## Iteration loop (always)
 Operate autonomously; repeat until the task meets the Definition of Done:
-1. **RE-ANCHOR** — read `PROJECT_MEMORY.md` and `BLOCKERS.md`. (Claude Code re-injects
-   this file after `/compact`; your mutable state lives in those files, so re-read
-   them.)
+1. **RE-ANCHOR** — read `../PROJECT_MEMORY.md` and `../BLOCKERS.md`. (Claude Code
+   re-injects this file after `/compact`; your mutable state lives in those files,
+   so re-read them.)
 2. **CLASSIFY & LOAD** — determine the task type (develop / debug / refactor /
    analyze / …) and read `.claude/playbooks/<type>.md`. If it touches the RL study
    pipeline, also read `.claude/context/rl-study.md`.
 3. **PLAN FIRST** — before writing code, decompose into subtasks: order, dependencies,
    files/interfaces touched, how each is tested. For coupled changes, identify the
-   shared interface to LOCK first. Record the plan in `PROJECT_MEMORY.md`. Don't code
+   shared interface to LOCK first. Record the plan in `../PROJECT_MEMORY.md`. Don't code
    until the plan exists.
 4. **DELEGATE** — apply the Orchestration model: sequence coupled work, fan out
    independent leaves to subagents with self-contained briefs.
@@ -111,7 +113,7 @@ Operate autonomously; repeat until the task meets the Definition of Done:
 6. **VERIFY** — `uv run pytest` green; confirm it runs. Run long checks (soak / HPO)
    in the BACKGROUND per **Long-running jobs**, not blocking. For RL-pipeline
    pre-flight, run the smoke check (see rl-study.md).
-7. **DOCUMENT & RECORD** — update mkdocs/docstrings, `PROJECT_MEMORY.md` (plan status
+7. **DOCUMENT & RECORD** — update mkdocs/docstrings, `../PROJECT_MEMORY.md` (plan status
    + changelog), and ADRs for significant decisions.
 8. **LOOP** — next subtask/task. If something's blocked, log it and keep working on
    what isn't (see **Blockers**).
@@ -135,16 +137,16 @@ plan.
 - For RL-pipeline changes, the smoke pre-flight passes; for simulator stabilization,
   the soak run clears its health checkpoints (see debug.md).
 - Docs (mkdocs + docstrings) updated and consistent.
-- `PROJECT_MEMORY.md` updated; ADRs added for significant decisions; `uv` files in
+- `../PROJECT_MEMORY.md` updated; ADRs added for significant decisions; `uv` files in
   sync.
 - No regressions; the north-star goal still upheld.
 
 ## Blockers & when to ask
 Default to autonomy; don't interrupt one blocker at a time — stack them and ask in a
 single pass.
-- Log each blocker in `BLOCKERS.md`: id, date, blocked task/subtask, the blocker, what
-  you TRIED, options, your recommendation, the exact decision needed, status
-  (OPEN / ASKED / RESOLVED). Mark the subtask blocked in `PROJECT_MEMORY.md` and move
+- Log each blocker in `../BLOCKERS.md`: id, date, blocked task/subtask, the
+  blocker, what you TRIED, options, your recommendation, the exact decision, status
+  (OPEN / ASKED / RESOLVED). Mark the subtask blocked in `../PROJECT_MEMORY.md` and move
   on to non-blocked work.
 - A blocker = something you can't resolve from goal + memory + code; a conflict with
   the goal or a prior decision; missing access/resources; a repeatedly-failed subtask;
@@ -153,10 +155,10 @@ single pass.
 - Ask in ONE consolidated message once non-blocked work is exhausted (or at a
   checkpoint): all open blockers, numbered, each surgical. Only exception: a blocker
   halting ALL progress — raise it immediately.
-- After answers: record resolutions in `BLOCKERS.md`, update memory, resume.
+- After answers: record resolutions in `../BLOCKERS.md`, update memory, resume.
 
 ## Notes
 - These instructions are guidance, not hard enforcement. For steps that must always
   run (e.g. tests before commit), add a Claude Code hook.
-- Keep changing plans in `PROJECT_MEMORY.md` and deep detail in playbooks — this file
+- Keep changing plans in `../PROJECT_MEMORY.md` and deep detail in playbooks — this file
   stays lean.
