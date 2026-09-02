@@ -69,6 +69,9 @@ def build_scene(env: "DeepRacerEnv", env_cfg: dict, show_viewer: bool) -> None:
             shadow=False,
             ambient_light=(0.35, 0.35, 0.35),
             background_color=tuple(env_cfg["vision"].get("background_color", (0.55, 0.72, 0.9))),
+            # renderers that hold ONE batched camera need each env's rigid bodies
+            # rendered in isolation, so no foreign car enters frame.
+            env_separate_rigid=getattr(env.renderer, "env_separate_rigid", False),
         ),
         renderer=env.renderer.scene_renderer(),
         show_viewer=show_viewer,

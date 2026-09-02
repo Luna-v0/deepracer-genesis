@@ -63,7 +63,7 @@ def collect_rollout_dataset(
     from ..experiment.run import build
     from ..experiment.spec import SpecError
     from ..experiment.stages import Pipeline, Stage, VectorPolicy
-    from ..experiment.transforms import ImageAug
+    from ..randomization.image_aug import apply_image_aug
 
     agent = agent or NoisyExpert()
 
@@ -87,7 +87,7 @@ def collect_rollout_dataset(
     sim = b.sim()
     n = sim.num_envs
     dev = sim.device
-    aug = ImageAug(spec.obs_dr.image_aug) if spec.obs_dr.image_aug else None
+    aug = dict(spec.obs_dr.image_aug) if spec.obs_dr.image_aug else None
 
     os.makedirs(out, exist_ok=True)
     buf: dict[str, list] = {k: [] for k in ("image", "state", "action", "pose", "done")}
@@ -142,7 +142,7 @@ def collect_rollout_dataset(
 
             img = sim.obs_image_buf                                # post world-color
             if aug is not None:
-                img = aug._apply_transform(img)
+                img = apply_image_aug(img, aug)
             state = sim.state_buf.clone()
             pose = torch.stack([sim.base_pos[:, 0], sim.base_pos[:, 1],
                                 sim.yaw, sim.progress_m], dim=1)

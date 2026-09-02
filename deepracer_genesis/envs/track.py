@@ -73,6 +73,10 @@ class Track:
         # AWS routes commonly repeat the first waypoint at the end; drop it.
         if np.allclose(wps[0, :2], wps[-1, :2], atol=1e-6):
             wps = wps[:-1]
+        # 54 of the 62 routes also repeat one mid-loop, and a zero-length
+        # segment has no direction: arctan2(0, 0) poisons yaw, then curvature.
+        step = np.roll(wps[:, :2], -1, axis=0) - wps[:, :2]
+        wps = wps[np.linalg.norm(step, axis=1) >= 1e-3]
 
         center = torch.tensor(wps[:, 0:2], device=device)
         inner = torch.tensor(wps[:, 2:4], device=device)

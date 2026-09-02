@@ -41,6 +41,7 @@ class EnvSpec:
         feature_params: tuning knobs (horizons, history lengths) for the feature set.
         tracks: track names the env trains across.
         num_envs: parallel environment count.
+        max_speed: action-cap speed in m/s, or None for the physics default.
         random_start: randomize spawn waypoint and lateral/yaw offset per episode.
         random_direction: flip driving direction (CW/CCW) per episode.
         reward: reward callable, or None for the built-in default.
@@ -60,6 +61,7 @@ class EnvSpec:
     realtime_factor: float = 1.0   # viewer pacing (view="gui"); <=0 = uncapped
     resolution: tuple[int, int] = (160, 120)
     fov: float = 90.0
+    max_speed: float | None = None
     # camera frames stacked along channels (1 = single frame). Gives the
     # actor temporal context (ego-velocity is unobservable from one frame);
     # stack order oldest-first, fresh episodes prime by repeating the first
@@ -251,6 +253,7 @@ class ExperimentSpec:
         action_dr: action-side domain randomization.
         algorithm: the training-algorithm slice.
         eval: evaluation config (periodic + out-of-loop holdout + charts).
+        resume: checkpoint the policy starts from, or None for random weights.
         total_env_steps: total environment steps to train for.
         eval_every_steps: eval interval in env-steps (0 = final eval only).
         seed: random seed.
@@ -265,6 +268,7 @@ class ExperimentSpec:
     action_dr: ActionDRSpec = field(default_factory=ActionDRSpec)
     algorithm: Optional[AlgorithmSpec] = None
     eval: EvalConfig = field(default_factory=EvalConfig)
+    resume: Optional[str] = None      # checkpoint to start from (fine-tuning)
     total_env_steps: int = 5_000_000
     eval_every_steps: int = 0        # 0 = final eval only; N = also every N env-steps
     seed: int = 0
@@ -357,11 +361,8 @@ class ExperimentSpec:
         # is a debug / small-num_envs / no-GPU path, not a throughput path, and —
         # unlike Madrona spatial tiling (Part O) — supports a SINGLE track only.
         if env.modality == "camera" and env.backend == "cpu":
-            if len(env.tracks) > 1:
-                raise SpecError(
-                    "camera-on-CPU uses the per-env rasterizer, which renders a "
-                    "single track only; multi-track camera training needs Madrona "
-                    "tiling on backend='gpu' (got tracks=%r)" % (env.tracks,))
+            # multi-track is fine now: spatial tiling is renderer-agnostic, so
+            # each track sits on its own tile and a camera only frames its own.
             warnings.warn(
                 "camera obs on backend='cpu' uses the per-env RasterizerObsRenderer "
                 "(unbatched, far slower than Madrona) — a debug / small-num_envs / "

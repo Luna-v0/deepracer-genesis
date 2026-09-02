@@ -99,5 +99,5 @@ def deepracer(env: "DeepRacerEnv") -> dict[str, torch.Tensor]:
         "heading": -env.heading_err.abs() * env.dt,
         "steering": -env.actions[:, 0].abs() * env.dt,
         "action_rate": -((env.actions - env.last_actions) ** 2).sum(dim=1) * env.dt,
-        "off_track": (~on_track).float() * env.dt,
+        "off_track": - (~on_track).float() * env.dt,
     }

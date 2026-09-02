@@ -53,6 +53,8 @@ class Builder:
         cfg["vision"]["camera_res"] = tuple(env.resolution)
         cfg["vision"]["camera_fov"] = env.fov
         cfg["vision"]["frame_stack"] = env.frame_stack
+        if env.max_speed is not None:
+            cfg["action"]["max_speed"] = env.max_speed
         cfg["obs"]["lookahead_k"] = env.lookahead_k
         cfg["obs"]["feature_set"] = env.feature_set
         cfg["obs"]["feature_params"] = dict(env.feature_params)

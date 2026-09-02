@@ -9,3 +9,19 @@ dist/
 build/
 benchmarks/results.csv
 notebooks/*_output.ipynb
+data/
+
+# perception: datasets, checkpoints and results stay local
+runs/cnn/
+runs/videos/
+runs/showcase/
+runs/figures/
+runs/sweep_tracks.json
+
+# parked, to be revisited: run drivers and their reports
+CNN/
+runs/nuit*
+runs/rapport_nuit*
+runs/verif.log
+runs/vitrine/
+runs/*.json

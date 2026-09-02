@@ -233,7 +233,10 @@ class Renderer:
                 already positioned over the track).
 
         Returns:
-            An ``(H, W, 3)`` RGB image of the whole track with all cars.
+            An ``(H, W, 3)`` RGB image of the whole track. Under a renderer that
+            sets ``env_separate_rigid`` every camera is batched and each env is
+            drawn in isolation, so the frame shows env 0's car alone rather than
+            the whole fleet.
 
         Raises:
             AssertionError: If the spectator camera was not enabled via
@@ -241,6 +244,8 @@ class Renderer:
         """
         assert self.spec_cam is not None, "spectator camera not enabled (cfg['spectator'])"
         rgb = np.asarray(self.spec_cam.render(rgb=True)[0])
+        if rgb.ndim == 4:                      # batched camera: keep env 0
+            rgb = rgb[0]
         return rgb.reshape(rgb.shape[-3:])
 
 
@@ -514,6 +519,10 @@ class RasterizerObsRenderer(_CameraRenderer):
     merge_fixed_links = True
     _scene_batch_renderer = False    # plain Rasterizer, not a BatchRenderer
     _spectator_debug = False         # no batch pipeline, so no debug camera needed
+    # render each env's rigid bodies in isolation: one batched camera instead of
+    # one per env (a single render call), and no foreign car in frame. This is
+    # the CPU-path answer to Madrona's Part O spatial tiling.
+    env_separate_rigid = True
 
     def _build(self, env: "DeepRacerEnv", vision_cfg: dict) -> None:
         """Add one rasterizer camera per env.
@@ -530,24 +539,21 @@ class RasterizerObsRenderer(_CameraRenderer):
         """
         res = vision_cfg["camera_res"]  # (W, H)
         fov = vision_cfg["camera_fov"]
-        # non-batched renderer: each camera binds to one env (env_idx) and
-        # follows that env's camera_link when attached.
-        self.cams = [env.scene.add_camera(res=res, fov=fov, GUI=False, env_idx=i)
-                     for i in range(env.num_envs)]
-        self.top_cams = None
+        # no env_idx: with env_separate_rigid the camera is batched, so one
+        # render() call yields every env's frame and each sees only its own car.
+        self.cam = env.scene.add_camera(res=res, fov=fov, GUI=False)
+        self.top_cam = None
         if vision_cfg.get("topdown_camera", False):
-            self.top_cams = []
-            for i, t in enumerate([env.track.tracks[int(v)]
-                                   for v in env.track.variant_idx]):
-                c, extent = _track_extent(t)
-                c = c.cpu().numpy()
-                self.top_cams.append(env.scene.add_camera(
-                    res=res, pos=(float(c[0]), float(c[1]), float(extent) * 1.2),
-                    lookat=(float(c[0]), float(c[1]), 0.0),
-                    up=(0.0, 1.0, 0.0), fov=60, GUI=False, env_idx=i))
+            # camera obs on this path is single-track, so one pose fits every env
+            c, extent = _track_extent(env.track.tracks[0])
+            c = c.cpu().numpy()
+            self.top_cam = env.scene.add_camera(
+                res=res, pos=(float(c[0]), float(c[1]), float(extent) * 1.2),
+                lookat=(float(c[0]), float(c[1]), 0.0),
+                up=(0.0, 1.0, 0.0), fov=60, GUI=False)
 
     def finalize(self, env: "DeepRacerEnv", vision_cfg: dict) -> None:
-        """Attach each per-env camera to its car's ``camera_link``.
+        """Attach the batched camera to the cars' ``camera_link``.
 
         Args:
             env: The built env, providing the car link, ``num_envs``, and
@@ -557,9 +563,7 @@ class RasterizerObsRenderer(_CameraRenderer):
         """
         super().finalize(env, vision_cfg)
         self.cam_offset_T = camera_offset_T(vision_cfg.get("camera_pitch_deg", 0.0))
-        link = env.car.get_link("camera_link")
-        for cam in self.cams:
-            cam.attach(link, self.cam_offset_T)
+        self.cam.attach(env.car.get_link("camera_link"), self.cam_offset_T)
 
     def _acquire_rgb(self, env: "DeepRacerEnv") -> torch.Tensor:
         """Render each per-env camera in turn and stack the frames.
@@ -570,15 +574,8 @@ class RasterizerObsRenderer(_CameraRenderer):
         Returns:
             An ``(N, H, W, 3)`` uint8 tensor of RGB pixels on ``env.device``.
         """
-        frames = []
-        for cam in self.cams:
-            cam.move_to_attach()
-            rgb = np.asarray(cam.render(rgb=True)[0])
-            # the rasterizer returns a vertically-flipped view (negative stride);
-            # torch can't wrap negative strides, so make it contiguous first.
-            rgb = np.ascontiguousarray(rgb.reshape(rgb.shape[-3:]))
-            frames.append(torch.as_tensor(rgb, device=env.device))
-        return torch.stack(frames, dim=0)
+        self.cam.move_to_attach()
+        return self._as_batch(self.cam.render(rgb=True)[0], env)
 
     def topdown(self, env: "DeepRacerEnv") -> torch.Tensor:
         """Render the per-env top-down view from each env's rasterizer camera.
@@ -593,15 +590,20 @@ class RasterizerObsRenderer(_CameraRenderer):
             AssertionError: If the top-down cameras were not enabled via
                 ``topdown_camera``.
         """
-        assert self.top_cams is not None
-        frames = []
-        for cam in self.top_cams:
-            rgb = np.asarray(cam.render(rgb=True)[0])
-            # the rasterizer returns a vertically-flipped view (negative stride);
-            # torch can't wrap negative strides, so make it contiguous first.
-            rgb = np.ascontiguousarray(rgb.reshape(rgb.shape[-3:]))
-            frames.append(torch.as_tensor(rgb, device=env.device))
-        return torch.stack(frames, dim=0)
+        assert self.top_cam is not None
+        return self._as_batch(self.top_cam.render(rgb=True)[0], env)
+
+    @staticmethod
+    def _as_batch(rgb, env: "DeepRacerEnv") -> torch.Tensor:
+        """Normalize a batched rasterizer frame to ``(N, H, W, 3)`` on the device.
+
+        The rasterizer hands back a vertically-flipped view (negative stride),
+        which torch cannot wrap, so the array is made contiguous first.
+        """
+        rgb = np.ascontiguousarray(np.asarray(rgb))
+        if rgb.ndim == 3:                      # single env: add the batch axis
+            rgb = rgb[None]
+        return torch.as_tensor(rgb, device=env.device)
 
 
 class NyxRenderer(_CameraRenderer):
