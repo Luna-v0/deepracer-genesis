@@ -5,6 +5,7 @@ Preallocated rollout storage avoids the crash; see MIGRATION_TORCHRL_TO_RSLRL.md
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import TYPE_CHECKING
@@ -16,6 +17,8 @@ from .evaluator import EvalRecord, evaluate_policy
 if TYPE_CHECKING:
     from .spec import ExperimentSpec
 
+logger = logging.getLogger(__name__)
+
 # our PPO-stage hyperparameter names -> rsl-rl algorithm cfg names
 _PPO_KEY_MAP = {
     "clip": "clip_param",
@@ -26,6 +29,8 @@ _PPO_KEY_MAP = {
     "lr": "learning_rate",
     "entropy_coef": "entropy_coef",
     "max_grad_norm": "max_grad_norm",
+    "schedule": "schedule",
+    "desired_kl": "desired_kl",
 }
 
 
@@ -95,7 +100,10 @@ def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
     """
     from ..configs.cfgs import get_train_cfg
 
-    vision = spec.env.modality == "camera"
+    # the model class follows the POLICY, not the env: a camera env whose policy
+    # reads only vectors (frozen-encoder transfer) needs the MLP model.
+    keys = set(spec.policy.actor_keys) | set(spec.policy.critic_keys)
+    vision = spec.env.modality == "camera" and "camera" in keys
     cfg = get_train_cfg(vision=vision)
     cfg["obs_groups"] = {"actor": list(spec.policy.actor_keys),
                          "critic": list(spec.policy.critic_keys)}
@@ -277,6 +285,15 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
                   if spec.eval_every_steps else 0)
 
     runner = OnPolicyRunner(sim, train_cfg, run_dir, device=device)
+    if spec.resume:
+        # weights only: load() otherwise restores the optimizer and with it
+        # its lr, silently overwriting the one this spec asked for.
+        runner.load(spec.resume, load_cfg={"actor": True, "critic": True,
+                                           "optimizer": False, "iteration": False,
+                                           "rnd": False})
+        logger.info("resumed weights from %s (lr %g, schedule %s)", spec.resume,
+                    train_cfg["algorithm"]["learning_rate"],
+                    train_cfg["algorithm"]["schedule"])
 
     eval_history: list[dict] = []
     t0 = time.perf_counter()

@@ -3,10 +3,14 @@
 Camera training needs pixels, and there are three ways to make them. The
 same scene, same track, same camera, three renderers:
 
+> Mental model in one sentence: `make_renderer(vision_cfg)` picks `NullRenderer`
+> (no camera), `MadronaRenderer` (fast batched rasterizer), `NyxRenderer` (path
+> tracer), or `RasterizerObsRenderer` (the CPU fallback) — and the same strategy
+> also owns the world-color DR and the debug views.
+
 | Madrona (default) | Nyx (path tracer) | CPU rasterizer |
 |---|---|---|
 | ![Madrona sample](../assets/renderers/madrona.png) | ![Nyx sample](../assets/renderers/nyx.png) | ![Rasterizer sample](../assets/renderers/rasterizer.png) |
-
 *(Onboard camera at native 160×120, upscaled 3× nearest-neighbour. Madrona
 is flat-shaded and fast; Nyx ray-traces real lighting and shadows; the CPU
 rasterizer is the no-GPU fallback.)*
@@ -33,6 +37,16 @@ renderers is what transfers. In practice the 11× gap is why the
 `best_camera` experiments train on Madrona: at Nyx speed, one 10M-step run
 consumes the GPU-hours that otherwise fund an entire HPO study.
 
+- `vision=False` → **`NullRenderer`** — state observations only; `obs()` returns None.
+- `vision=True`, `vision_renderer="batch"` → **`MadronaRenderer`** — Genesis
+  `BatchRenderer`, a camera attached to the car's `camera_link`. Fast; the default
+  for camera training.
+- `vision=True`, `vision_renderer="nyx"` → **`NyxRenderer`** — Nyx path-tracer
+  sensors, true texture colors, slower.
+- `vision=True`, `vision_renderer="rasterizer"` → **`RasterizerObsRenderer`** — the
+  CPU path (`backend="cpu"`), where Madrona and Nyx are unavailable. One camera
+  shared across envs, plus `env_separate_rigid` so each env renders only its own
+  car. A debug / small-`num_envs` path, not a throughput one.
 The [DR catalog](../reference/dr-catalog.md) carries this compatibility
 matrix as data, and `ExperimentSpec.validate()` enforces it — a spec that
 asks Nyx for camera-mount jitter, or Madrona for `env_map` sky DR, refuses
@@ -83,7 +97,17 @@ mounts to jitter.
 Two human-facing views work even in a feature-only env, because they use
 their own cameras:
 
-- **Spectator** (`render_spectator()`) — one high-resolution bird's-eye
-  image of the whole scene with every car.
-- **Top-down** (`render_topdown()`) — optional per-env bird's-eye views for
-  validation. Madrona poses it per track variant; Nyx shares one pose.
+- **Spectator** (`render_spectator()`) — one high-resolution bird's-eye image of the
+  whole track with every car, from a single static camera. `env_separate_rigid`
+  (see `RasterizerObsRenderer`) batches that camera too and draws one car per
+  frame, so the strategy recomposes the batch into one image: the median across
+  envs is the empty track, and each car is pasted back where its own frame
+  departs from it. Consumers always get a single `(H, W, 3)` fleet view.
+- **Top-down** (`render_topdown()`) — an optional per-env bird's-eye view for
+  validation. Madrona and the CPU rasterizer both pose it per track variant
+  (tile offset included) and return `(N, H, W, 3)`; Nyx shares one pose.
+
+`NyxRenderer` sets `merge_fixed_links = False` (the Nyx exporter rejects merged
+links); Madrona merges them. Every strategy also declares `env_separate_rigid`
+(default `False`), which `build_scene` reads straight off the port into
+`VisOptions`.

@@ -35,6 +35,10 @@ hpo = ["optuna"]
 # telemetry DataFrames + trajectory plots (analysis/ package; not needed on
 # the car or for training itself)
 analysis = ["pandas", "matplotlib"]
+# CNN-perception dataset reader (deepracer_genesis.perception.dataset reads the
+# collected rollout parquets with pandas). Not needed on the car, and not needed
+# to run a policy through an already-trained CNN.
+perception = ["pandas"]
 # ONNX export/verification (workstation-only; the car runtime needs neither).
 # Run exports in a genesis-free process: genesis and onnxruntime bundle
 # clashing LLVM symbols (see deploy/onnx.py).
@@ -72,7 +76,8 @@ dev = [
     "lckr-jupyterlab-variableinspector>=3.2.4",
     "pycrdt>=0.13.1",
     "python-lsp-server[all]>=1.14.0",
-    # telemetry analysis (mirrors the [analysis] extra for local work)
+    # telemetry analysis + perception dataset (mirrors the [analysis] and
+    # [perception] extras for local work)
     "pandas>=2.0",
     "optuna>=4.9.0",
     "papermill>=2.7.0",

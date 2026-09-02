@@ -65,7 +65,7 @@ class _FakeEnv:
         self.progress_m = torch.tensor([1.0, 2.0, 3.0, 4.0])
         self.track = _FakeTrack()
         self.cfg = {
-            "action": {"max_speed": 4.0},
+            "action": {"min_speed": 0.1, "max_speed": 4.0},
             "obs": {"lookahead_stride": 1, "lookahead_scale": 2.0},
             "termination": {"wheel_margin": 0.0},
         }

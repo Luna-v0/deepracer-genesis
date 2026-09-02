@@ -175,7 +175,12 @@ def test_preset_loads_hash_identically(tmp_path):
 def test_run_identity_locked_with_dr_editor_imported():
     """Importing the editor must not shift existing run ids (identity lock)."""
     spec = (CameraEnvironment() >> AsymmetricCameraPolicy() >> PPO()).build()
-    assert spec.id() == "3ddf1ade78ca"
+    # CHANGED 2026-09-02 by the PR #5 merge: ExperimentSpec gained the
+    # `resume` and `max_speed` fields, so every spec's content hash moved.
+    # Both are real configuration (a fine-tune start point and the action
+    # cap), so they belong in the identity — existing run dirs do not carry
+    # over. Updated consciously, per the note above.
+    assert spec.id() == "115343e98fa5"
 
 
 # ---------------------------------------------------------- prove_refusal

@@ -63,6 +63,7 @@ nav:
       - Domain randomization: concepts/domain-randomization.md
       - Feature vectors: concepts/features.md
       - Renderers: concepts/renderers.md
+      - Perception (camera-driven state): concepts/perception.md
       - Tracks: concepts/tracks.md
       - Rewards & actions: concepts/rewards-actions.md
   - Guides:
@@ -89,4 +90,5 @@ nav:
       - datasets: api/datasets.md
       - deploy: api/deploy.md
       - envs: api/envs.md
+      - perception: api/perception.md
       - tools: api/tools.md

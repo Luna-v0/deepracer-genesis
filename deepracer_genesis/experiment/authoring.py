@@ -19,6 +19,7 @@ class Experiment:
         total_env_steps: Number of environment steps to train for.
         eval_every_steps: Evaluation interval in steps (0 disables periodic eval).
         group: Optional run-grouping tag (names the runs/<group>/ folder).
+        resume: Checkpoint the policy starts from, or None to train from scratch.
         variant: Optional variant label, defaulting to the subclass name.
     """
 
@@ -27,6 +28,7 @@ class Experiment:
     total_env_steps: int = 5_000_000
     eval_every_steps: int = 0
     group: str | None = None
+    resume: str | None = None
     variant: str | None = None
 
     def __init__(self, **overrides):
@@ -72,6 +74,7 @@ class Experiment:
             total_env_steps=self.total_env_steps,
             eval_every_steps=self.eval_every_steps,
             group=self.group,
+            resume=self.resume,
             variant=self.variant or type(self).__name__,
         )
 

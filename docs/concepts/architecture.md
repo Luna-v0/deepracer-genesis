@@ -259,9 +259,11 @@ The default `deepracer` reward (`rewards.py:58-70`) returns:
 
 Every term is a batched `(N,)` tensor summed with its scale
 (`deepracer_env.py:559-566`) and accumulated per-episode for logging
-(`Episode/rew_<name>`). The reward's `off_track` uses a *tighter* `wheel_margin`
-(all-wheels-on-track) than the termination's `off_track_margin`, so the car is
-penalized for drifting to the edge before it is actually terminated.
+(`Episode/rew_<name>`). The scales are positive magnitudes — each term carries
+its own sign, so every penalty row above is already negative-valued. The
+reward's `off_track` uses a *tighter* `wheel_margin` (all-wheels-on-track) than
+the termination's `off_track_margin`, so the car is penalized for drifting to
+the edge before it is actually terminated.
 
 ---
 

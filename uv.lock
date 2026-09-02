@@ -922,6 +922,9 @@ nyx = [
     { name = "gs-nyx" },
     { name = "gs-nyx-plugin" },
 ]
+perception = [
+    { name = "pandas" },
+]
 tracking = [
     { name = "mlflow" },
 ]
@@ -971,6 +974,7 @@ requires-dist = [
     { name = "onnxruntime", marker = "extra == 'export'" },
     { name = "optuna", marker = "extra == 'hpo'" },
     { name = "pandas", marker = "extra == 'analysis'" },
+    { name = "pandas", marker = "extra == 'perception'" },
     { name = "pillow" },
     { name = "pyarrow" },
     { name = "rsl-rl-lib", specifier = ">=5.4.0" },
@@ -979,7 +983,7 @@ requires-dist = [
     { name = "tensordict", specifier = ">=0.7" },
     { name = "torch", specifier = ">=2.5" },
 ]
-provides-extras = ["vision", "nyx", "tracking", "hpo", "analysis", "export", "docs"]
+provides-extras = ["vision", "nyx", "tracking", "hpo", "analysis", "perception", "export", "docs"]
 
 [package.metadata.requires-dev]
 dev = [

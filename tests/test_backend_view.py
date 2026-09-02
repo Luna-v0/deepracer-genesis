@@ -51,11 +51,14 @@ def test_camera_on_cpu_builds_with_slow_path_warning():
     assert spec.env.backend == "cpu" and spec.env.modality == "camera"
 
 
-def test_camera_on_cpu_multitrack_still_rejected():
-    """The per-env rasterizer renders a single track; multi-track camera needs
-    Madrona tiling on GPU, so camera+cpu+>1 track is a clear error."""
-    with pytest.raises(SpecError, match="single track"):
-        _camera_cpu_spec(tracks=("reinvent_base", "reInvent2019_track")).build()
+def test_camera_on_cpu_multitrack_builds():
+    """Spatial tiling is renderer-agnostic, so the per-env rasterizer handles
+    multi-track too: each track sits on its own world tile and a car's camera
+    only ever frames its own. The rasterizer still walks every tile's geometry,
+    so the cost grows with the track count -- hence the slow-path warning."""
+    spec = _camera_cpu_spec(tracks=("reinvent_base", "reInvent2019_track")).build()
+    assert len(spec.env.tracks) == 2
+    assert spec.env.backend == "cpu" and spec.env.modality == "camera"
 
 
 def test_builder_routes_camera_cpu_to_rasterizer():

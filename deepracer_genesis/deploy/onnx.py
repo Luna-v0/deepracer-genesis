@@ -24,11 +24,24 @@ from typing import Optional
 from ..experiment.spec import ExperimentSpec
 from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
 
-#: physical meaning of the normalized action channels (the env's mapping)
-ACTION_PHYSICAL = {
-    "steering": {"low": -MAX_STEERING_DEG, "high": MAX_STEERING_DEG, "unit": "deg"},
-    "speed": {"low": MIN_SPEED, "high": MAX_SPEED, "unit": "m/s"},
-}
+def action_physical(spec: ExperimentSpec) -> dict:
+    """Physical meaning of the normalized action channels for one spec.
+
+    The speed ceiling follows the env's action cap when set, not the physics
+    constant, so the car rescales into the range the policy actually trained on.
+
+    Args:
+        spec: The experiment the exported model was trained from.
+
+    Returns:
+        Per-channel ``low``/``high``/``unit`` ranges.
+    """
+    high = MAX_SPEED if spec.env.max_speed is None else spec.env.max_speed
+    return {
+        "steering": {"low": -MAX_STEERING_DEG, "high": MAX_STEERING_DEG,
+                     "unit": "deg"},
+        "speed": {"low": MIN_SPEED, "high": high, "unit": "m/s"},
+    }
 
 #: ONNX input/output names. The camera input is named after the sensor (not
 #: "camera") so a name-substring dispatch like the AWS inference node's can
@@ -75,10 +88,11 @@ def model_metadata(spec: ExperimentSpec) -> dict:
             "discrete action-space metadata not implemented: the rsl-rl "
             "backend cannot train discrete policies (rsl_supported), so an "
             "exported discrete model cannot exist yet")
+    speed = action_physical(spec)["speed"]
     return {
         "action_space": {
             "steering_angle": {"high": MAX_STEERING_DEG, "low": -MAX_STEERING_DEG},
-            "speed": {"high": MAX_SPEED, "low": MIN_SPEED},
+            "speed": {"high": speed["high"], "low": speed["low"]},
         },
         "action_space_type": "continuous",
         "sensor": [CAMERA_INPUT],
@@ -242,7 +256,7 @@ def export_policy(target, *, root: str = "runs", ckpt: Optional[str] = None,
             "output": f"{ACTION_OUTPUT} (1, {NUM_ACTIONS}) = [steer, speed], raw "
                       "Gaussian mean, UNBOUNDED — clip to [-1, 1] before use "
                       "(training env clips before mapping)",
-            "normalized_to_physical": ACTION_PHYSICAL,
+            "normalized_to_physical": action_physical(spec),
         },
         "observations": {
             CAMERA_INPUT: {

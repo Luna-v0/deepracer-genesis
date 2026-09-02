@@ -73,6 +73,31 @@ def _track_extent(track):
     return c, extent
 
 
+# per-pixel channel-sum departure from the background that reads as a car
+_FLEET_CAR_THRESHOLD = 28
+
+
+def _compose_fleet(frames: np.ndarray) -> np.ndarray:
+    """Paste every env's car onto one shared empty-track background.
+
+    The median across envs IS the empty track, since each car sits elsewhere.
+
+    Args:
+        frames: An ``(N, H, W, 3)`` uint8 batch, one env drawn per frame.
+
+    Returns:
+        An ``(H, W, 3)`` uint8 image of the track carrying every env's car.
+    """
+    frames = np.ascontiguousarray(frames)
+    background = np.median(frames, axis=0).astype(np.uint8)
+    out = background.copy()
+    delta = np.abs(frames.astype(np.int16) - background).sum(-1)   # (N, H, W)
+    for i in range(len(frames)):
+        mask = delta[i] > _FLEET_CAR_THRESHOLD
+        out[mask] = frames[i][mask]
+    return out
+
+
 def make_renderer(vision_cfg: dict) -> "Renderer":
     """Select and instantiate the rendering strategy from the env config.
 
@@ -106,11 +131,14 @@ class Renderer:
     Attributes:
         has_camera: Whether this strategy produces camera observations.
         merge_fixed_links: Whether the scene may merge fixed links.
+        env_separate_rigid: Whether the scene draws each env's rigid bodies in
+            isolation, so a camera shared across envs renders one car per frame.
         spec_cam: The shared bird's-eye spectator debug camera, or None.
     """
 
     has_camera: bool = False
     merge_fixed_links: bool = True
+    env_separate_rigid: bool = False
     _scene_batch_renderer: bool = False
     _spectator_debug: bool = False
 
@@ -200,13 +228,9 @@ class Renderer:
         """
 
     def randomize_mount(self, env: "DeepRacerEnv", env_ids: torch.Tensor) -> None:
-        """Jitter the per-env camera mounts (applied ONCE per run, at build).
+        """Jitter the camera mount per episode for the given envs.
 
-        Overridden by the Madrona and rasterizer strategies, which own
-        attached cameras; a no-op here and on Nyx (one batched sensor with a
-        single shared offset — no per-env mount exists to jitter, which is why
-        the ``camera_pitch_jitter``/``camera_pos_jitter`` knobs declare
-        ``renderers={"madrona", "rasterizer"}`` in the catalog).
+        No-op except on the Madrona strategy, which owns an attached camera.
 
         Args:
             env: The env owning the camera being jittered.
@@ -232,6 +256,8 @@ class Renderer:
     def spectator(self, env: "DeepRacerEnv") -> np.ndarray:
         """Render the single high-res spectator (bird's-eye) debug frame.
 
+        Batched (env-isolated) frames are recomposed into one fleet image.
+
         Args:
             env: The env to render (unused directly; the spectator camera is
                 already positioned over the track).
@@ -245,6 +271,8 @@ class Renderer:
         """
         assert self.spec_cam is not None, "spectator camera not enabled (cfg['spectator'])"
         rgb = np.asarray(self.spec_cam.render(rgb=True)[0])
+        if rgb.ndim == 4:                      # batched camera: one car per frame
+            return _compose_fleet(rgb)
         return rgb.reshape(rgb.shape[-3:])
 
 
@@ -403,9 +431,8 @@ class MadronaRenderer(_CameraRenderer):
                 centers.append(c)
                 heights.append(extent * 1.2)
             ev = env.track.variant_idx
-            # Part O tiling: each variant's mesh lives on its own world tile,
-            # so the bird's-eye centers must follow the tile offsets (zero when
-            # tiling is off).
+            # Part O tiling: each variant's mesh lives on its own world tile, so
+            # the bird's-eye centers must follow the tile offsets (zero when off)
             self._top_center = (torch.stack(centers)
                                 + env.track.variant_offset)[ev]  # (N, 2)
             self._top_height = torch.stack(heights)[ev]          # (N,)
@@ -497,68 +524,69 @@ class MadronaRenderer(_CameraRenderer):
 
 
 class RasterizerObsRenderer(_CameraRenderer):
-    """Per-env CPU rasterizer camera obs — the backend=='cpu' vision path (M.2).
+    """CPU rasterizer camera obs — the backend=='cpu' vision path (M.2).
 
-    Madrona and Nyx are GPU-only, so on the CPU backend the policy camera is
-    rendered with the same ``gs.renderers.Rasterizer()`` that already backs the
-    spectator/top-down debug views. It holds ONE camera per env (``env_idx=i``)
-    and renders them in a Python loop, so it is unbatched and far slower than
-    Madrona — a debug / small-``num_envs`` / no-GPU path, not a throughput path.
-    Reuses ``_CameraRenderer``'s device-agnostic post-processing (world-color
-    remap, pixel noise, policy downscale) verbatim; only the frame source swaps.
-
-    Note:
-        ``randomize_mount`` (``camera_jitter`` DR) IS supported on this path:
-        each env owns its own camera, so per-env mounts need no batching —
-        every camera's attach offset is rewritten individually (Nyx remains
-        the one renderer without per-env mounts: a single batched sensor with
-        one shared offset).
+    ONE batched ``Rasterizer`` camera; slower than Madrona, so a no-GPU path.
 
     Attributes:
         merge_fixed_links: Whether the scene may merge fixed links.
-        cams: One car-attached observation camera per env.
-        top_cams: One per-env top-down camera each, or None.
+        env_separate_rigid: Whether the scene draws each env's rigid bodies in
+            isolation, so a camera shared across envs renders one car per frame.
+        cam: The car-attached observation camera, batched across envs.
+        top_cam: The batched top-down camera, or None.
         cam_offset_T: The base mount transform from camera_link to the camera.
     """
 
+    # Madrona and Nyx are GPU-only, so the CPU backend renders the policy camera
+    # with the same Rasterizer that already backs the spectator/top-down debug
+    # views, reusing _CameraRenderer's device-agnostic post-processing verbatim.
+    # randomize_mount IS supported: a batched camera carries a per-env attach
+    # offset, the same mechanism Madrona uses. Image-space DR applies too.
     merge_fixed_links = True
     _scene_batch_renderer = False    # plain Rasterizer, not a BatchRenderer
     _spectator_debug = False         # no batch pipeline, so no debug camera needed
+    # render each env's rigid bodies in isolation: one batched camera instead of
+    # one per env (a single render call), and no foreign car in frame. This is
+    # the CPU-path answer to Madrona's Part O spatial tiling.
+    env_separate_rigid = True
 
     def _build(self, env: "DeepRacerEnv", vision_cfg: dict) -> None:
-        """Add one rasterizer camera per env.
-
-        The plain ``Rasterizer`` scene renderer does not support ``add_light``
-        (that is BatchRenderer-only); it lights the scene from the ambient light
-        + background in ``gs.Scene``'s VisOptions, exactly like the spectator /
-        top-down rasterizer views already do — so no explicit light is added.
+        """Add the batched observation camera and the optional top-down camera.
 
         Args:
-            env: The env being built; its ``scene`` receives the per-env cameras.
+            env: The env being built; its ``scene`` receives the cameras.
             vision_cfg: Env config; reads ``camera_res`` (W, H), ``camera_fov``,
                 and ``topdown_camera``.
         """
+        # the plain Rasterizer does not support add_light (BatchRenderer-only);
+        # it lights the scene from the ambient light + background in gs.Scene's
+        # VisOptions, exactly like the spectator / top-down views already do.
         res = vision_cfg["camera_res"]  # (W, H)
         fov = vision_cfg["camera_fov"]
-        # non-batched renderer: each camera binds to one env (env_idx) and
-        # follows that env's camera_link when attached.
-        self.cams = [env.scene.add_camera(res=res, fov=fov, GUI=False, env_idx=i)
-                     for i in range(env.num_envs)]
-        self.top_cams = None
+        # no env_idx: with env_separate_rigid the camera is batched, so one
+        # render() call yields every env's frame and each sees only its own car.
+        self.cam = env.scene.add_camera(res=res, fov=fov, GUI=False)
+        self.top_cam = None
         if vision_cfg.get("topdown_camera", False):
-            self.top_cams = []
-            for i, v in enumerate(env.track.variant_idx.tolist()):
-                c, extent = _track_extent(env.track.tracks[int(v)])
-                # Part O tiling: follow the variant's world tile (zero offset
-                # when tiling is off)
-                c = (c + env.track.variant_offset[int(v)]).cpu().numpy()
-                self.top_cams.append(env.scene.add_camera(
-                    res=res, pos=(float(c[0]), float(c[1]), float(extent) * 1.2),
-                    lookat=(float(c[0]), float(c[1]), 0.0),
-                    up=(0.0, 1.0, 0.0), fov=60, GUI=False, env_idx=i))
+            # per-env bird's-eye pose over each env's own track variant, tile
+            # offset included — a batched camera takes per-env poses via set_pose
+            centers, heights = [], []
+            for t in env.track.tracks:
+                c, extent = _track_extent(t)
+                centers.append(c)
+                heights.append(extent * 1.2)
+            ev = env.track.variant_idx
+            self._top_center = (torch.stack(centers)
+                                + env.track.variant_offset)[ev]  # (N, 2)
+            self._top_height = torch.stack(heights)[ev]          # (N,)
+            c0 = centers[0].cpu().numpy()
+            self.top_cam = env.scene.add_camera(
+                res=res, pos=(float(c0[0]), float(c0[1]), float(heights[0])),
+                lookat=(float(c0[0]), float(c0[1]), 0.0),
+                up=(0.0, 1.0, 0.0), fov=60, GUI=False)
 
     def finalize(self, env: "DeepRacerEnv", vision_cfg: dict) -> None:
-        """Attach each per-env camera to its car's ``camera_link``.
+        """Attach the batched camera to the cars' ``camera_link``.
 
         Args:
             env: The built env, providing the car link, ``num_envs``, and
@@ -568,20 +596,22 @@ class RasterizerObsRenderer(_CameraRenderer):
         """
         super().finalize(env, vision_cfg)
         self.cam_offset_T = camera_offset_T(vision_cfg.get("camera_pitch_deg", 0.0))
-        link = env.car.get_link("camera_link")
-        for cam in self.cams:
-            cam.attach(link, self.cam_offset_T)
+        self.cam.attach(env.car.get_link("camera_link"), self.cam_offset_T)
+        if self.top_cam is not None:
+            pos = torch.cat([self._top_center, self._top_height[:, None]], dim=1)
+            lookat = torch.cat([self._top_center,
+                                torch.zeros(env.num_envs, 1, device=env.device)], dim=1)
+            up = torch.tensor([[0.0, 1.0, 0.0]], device=env.device).expand(env.num_envs, 3)
+            self.top_cam.set_pose(pos=pos, lookat=lookat, up=up)
 
     def randomize_mount(self, env: "DeepRacerEnv", env_ids: torch.Tensor) -> None:
-        """Re-randomize each per-env camera's mount pitch/position offset.
+        """Re-randomize the camera mount pitch and position for the given envs.
 
-        This path holds one camera per env, so per-env mount jitter needs no
-        batching support: each camera's attach offset is rewritten from
-        :func:`~deepracer_genesis.randomization.visual.sample_mount_transforms`
-        individually (same sampler and cfg keys as the Madrona path).
+        A batched camera still carries a per-env attach offset, so mount jitter
+        works here exactly as it does on the Madrona path.
 
         Args:
-            env: The env owning the cameras; ``cfg['rand']`` supplies
+            env: The env owning the attached camera; ``cfg['rand']`` supplies
                 ``camera_pitch_jitter_deg`` and ``camera_pos_jitter_m``.
             env_ids: Indices of the envs whose camera mounts are re-randomized.
         """
@@ -590,16 +620,15 @@ class RasterizerObsRenderer(_CameraRenderer):
         jitter_pos = cfg.get("camera_pos_jitter_m", 0.0)
         if jitter_deg <= 0 and jitter_pos <= 0:
             return
-        T = sample_mount_transforms(self.cam_offset_T, jitter_deg, jitter_pos,
-                                    len(env_ids), env.device)
-        for row, i in enumerate(env_ids.tolist()):
-            cam = self.cams[i]
-            cam._attached_offset_T = T[row].to(
-                dtype=cam._attached_offset_T.dtype,
-                device=cam._attached_offset_T.device)
+        cam = self.cam
+        base = torch.as_tensor(self.cam_offset_T, dtype=torch.float32, device=env.device)
+        if cam._attached_offset_T.dim() == 2:
+            cam._attached_offset_T = base.expand(env.num_envs, 4, 4).clone()
+        cam._attached_offset_T[env_ids] = sample_mount_transforms(
+            self.cam_offset_T, jitter_deg, jitter_pos, len(env_ids), env.device)
 
     def _acquire_rgb(self, env: "DeepRacerEnv") -> torch.Tensor:
-        """Render each per-env camera in turn and stack the frames.
+        """Move the batched camera into place and render every env's frame.
 
         Args:
             env: The env whose current frame is captured.
@@ -607,18 +636,11 @@ class RasterizerObsRenderer(_CameraRenderer):
         Returns:
             An ``(N, H, W, 3)`` uint8 tensor of RGB pixels on ``env.device``.
         """
-        frames = []
-        for cam in self.cams:
-            cam.move_to_attach()
-            rgb = np.asarray(cam.render(rgb=True)[0])
-            # the rasterizer returns a vertically-flipped view (negative stride);
-            # torch can't wrap negative strides, so make it contiguous first.
-            rgb = np.ascontiguousarray(rgb.reshape(rgb.shape[-3:]))
-            frames.append(torch.as_tensor(rgb, device=env.device))
-        return torch.stack(frames, dim=0)
+        self.cam.move_to_attach()
+        return self._as_batch(self.cam.render(rgb=True)[0], env)
 
     def topdown(self, env: "DeepRacerEnv") -> torch.Tensor:
-        """Render the per-env top-down view from each env's rasterizer camera.
+        """Render the per-env top-down view from the batched rasterizer camera.
 
         Args:
             env: The env to render from above.
@@ -627,18 +649,29 @@ class RasterizerObsRenderer(_CameraRenderer):
             An ``(N, H, W, 3)`` batch of top-down RGB frames.
 
         Raises:
-            AssertionError: If the top-down cameras were not enabled via
+            AssertionError: If the top-down camera was not enabled via
                 ``topdown_camera``.
         """
-        assert self.top_cams is not None
-        frames = []
-        for cam in self.top_cams:
-            rgb = np.asarray(cam.render(rgb=True)[0])
-            # the rasterizer returns a vertically-flipped view (negative stride);
-            # torch can't wrap negative strides, so make it contiguous first.
-            rgb = np.ascontiguousarray(rgb.reshape(rgb.shape[-3:]))
-            frames.append(torch.as_tensor(rgb, device=env.device))
-        return torch.stack(frames, dim=0)
+        assert self.top_cam is not None
+        return self._as_batch(self.top_cam.render(rgb=True)[0], env)
+
+    @staticmethod
+    def _as_batch(rgb: np.ndarray, env: "DeepRacerEnv") -> torch.Tensor:
+        """Normalize a rasterizer frame to an ``(N, H, W, 3)`` device tensor.
+
+        Args:
+            rgb: The raw ``(H, W, 3)`` or ``(N, H, W, 3)`` frame off the camera.
+            env: The env supplying the target ``device``.
+
+        Returns:
+            An ``(N, H, W, 3)`` uint8 tensor of RGB pixels on ``env.device``.
+        """
+        # the rasterizer hands back a vertically-flipped view (negative stride),
+        # which torch cannot wrap, so make the array contiguous first
+        rgb = np.ascontiguousarray(np.asarray(rgb))
+        if rgb.ndim == 3:                      # single env: add the batch axis
+            rgb = rgb[None]
+        return torch.as_tensor(rgb, device=env.device)
 
 
 class NyxRenderer(_CameraRenderer):

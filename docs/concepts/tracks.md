@@ -16,8 +16,16 @@ Each `.npy` has rows `[center_x, center_y, inner_x, inner_y, outer_x, outer_y]`
 (`envs/track.py`). On load the `Track` container:
 
 - drops a duplicated closing waypoint (AWS routes repeat the first point),
+- drops any waypoint less than 1 mm from its successor — 54 of the 62 shipped
+  routes also repeat one mid-loop, and a zero-length segment has no direction:
+  `arctan2(0, 0)` poisons `track_yaw`, which then spikes `curvature`,
 - stores `center` `(W, 2)`, computes `half_width = 0.5·‖outer − inner‖`,
 - precomputes `tangent`, `normal`, `track_yaw`, `curvature`, `cum_len`, `total_len`.
+
+`W` is the **post-filter** waypoint count — usually one or two below the row count
+of the raw `.npy`. Both drops live in one loader, `envs.track.load_route()`, which
+`deepracer_genesis.tracks.info()` also calls, so `info(name).num_waypoints` is
+always the `W` the env actually drives.
 
 ## `Track` vs `MultiTrack`
 

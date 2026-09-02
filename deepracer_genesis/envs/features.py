@@ -250,8 +250,12 @@ class PerceptionFeatures(FeatureSet):
             env.progress_m, self.horizons, env.dir_sign) / CURVATURE_NORM
 
         # -- error channels vs the FIXED nominal bicycle ----------------
+        act = env.cfg["action"]
         steer_cmd = actions[:, 0] * MAX_STEER_RAD
-        speed_cmd = MIN_SPEED + (actions[:, 1] + 1) * 0.5 * (MAX_SPEED - MIN_SPEED)
+        # the commanded speed must follow the env's action cap (mdp.action_to_command),
+        # not the physics constant; the constant stays the normalizer.
+        speed_cmd = act["min_speed"] + (actions[:, 1] + 1) * 0.5 * (
+            act["max_speed"] - act["min_speed"])
         yaw_expected = v_forward * torch.tan(steer_cmd) / NOMINAL_WHEELBASE
         a_lat_expected = v_forward * yaw_expected            # v^2 tan(d)/L
         a_lat_actual = v_forward * yaw_rate_raw

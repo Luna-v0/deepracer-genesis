@@ -149,6 +149,8 @@ class FeatureEnvironment(Stage):
         num_envs: Parallel simulation instances.
         random_start: Whether episodes begin at a random track position.
         random_direction: Whether each episode randomizes CW/CCW travel.
+        max_speed: Top of the speed action range in m/s, or None for the
+            physics default.
         KIND: Stage category tag (environment).
     """
 
@@ -164,6 +166,8 @@ class FeatureEnvironment(Stage):
     view: str = "none"                 # "none" | "gui" | "spectator" | "topdown"
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
+    max_speed: float | None = None     # action-cap speed in m/s
+
     KIND = "environment"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
@@ -176,6 +180,7 @@ class FeatureEnvironment(Stage):
             tracks=tuple(self.tracks), num_envs=self.num_envs,
             random_start=self.random_start,
             random_direction=self.random_direction,
+            max_speed=self.max_speed,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -183,7 +188,7 @@ class FeatureEnvironment(Stage):
 
 @dataclass(frozen=True)
 class CameraEnvironment(Stage):
-    """Front-RGB-camera env; >1 `tracks` trains heterogeneously (Madrona only).
+    """Front-RGB-camera env; >1 `tracks` trains heterogeneously (not on nyx).
 
     Attributes:
         render: Rendering backend used to produce the camera image.
@@ -196,6 +201,8 @@ class CameraEnvironment(Stage):
         num_envs: Parallel simulation instances.
         random_start: Whether episodes begin at a random track position.
         random_direction: Whether each episode randomizes CW/CCW travel.
+        max_speed: Top of the speed action range in m/s, or None for the
+            physics default.
         KIND: Stage category tag (environment).
     """
 
@@ -214,6 +221,8 @@ class CameraEnvironment(Stage):
     view: str = "none"                 # "none" | "gui" | "spectator" | "topdown"
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
+    max_speed: float | None = None     # action-cap speed in m/s
+
     KIND = "environment"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
@@ -227,6 +236,7 @@ class CameraEnvironment(Stage):
             tracks=tuple(self.tracks),
             num_envs=self.num_envs, random_start=self.random_start,
             random_direction=self.random_direction,
+            max_speed=self.max_speed,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -615,6 +625,8 @@ class PPO(Stage):
         entropy_coef: Entropy bonus coefficient.
         max_grad_norm: Gradient-norm clipping threshold.
         horizon: Rollout steps per env per iteration.
+        schedule: "adaptive" retunes lr from the measured KL, "fixed" keeps it.
+        desired_kl: KL target the adaptive schedule steers toward.
         KIND: Stage category tag (algorithm).
     """
 
@@ -627,6 +639,8 @@ class PPO(Stage):
     entropy_coef: float = 0.01
     max_grad_norm: float = 1.0
     horizon: int = 24
+    schedule: str = "adaptive"
+    desired_kl: float = 0.01
 
     KIND = "algorithm"
 
@@ -637,6 +651,7 @@ class PPO(Stage):
             "gae_lambda": self.gae_lambda, "lr": self.lr,
             "entropy_coef": self.entropy_coef,
             "max_grad_norm": self.max_grad_norm, "horizon": self.horizon,
+            "schedule": self.schedule, "desired_kl": self.desired_kl,
         }
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:

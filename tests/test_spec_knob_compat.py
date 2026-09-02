@@ -252,4 +252,9 @@ def test_run_identity_locked():
     # spec FIELD ever changes intentionally, update this constant consciously
     # in the same commit (it is a retrain-the-world event, not noise).
     spec = (CameraEnvironment() >> AsymmetricCameraPolicy() >> PPO()).build()
-    assert spec.id() == "3ddf1ade78ca"
+    # CHANGED 2026-09-02 by the PR #5 merge: ExperimentSpec gained the
+    # `resume` and `max_speed` fields, so every spec's content hash moved.
+    # Both are real configuration (a fine-tune start point and the action
+    # cap), so they belong in the identity — existing run dirs do not carry
+    # over. Updated consciously, per the note above.
+    assert spec.id() == "115343e98fa5"

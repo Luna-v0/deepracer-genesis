@@ -53,6 +53,18 @@ class VisionDeepRacerEnv(DeepRacerEnv):
         else:
             self._frame_latency = None
 
+    @property
+    def camera_stack(self) -> torch.Tensor | None:
+        """Return the stacked camera frames the policy observes.
+
+        Oldest frame first, matching the deployment contract mirrored by the car.
+
+        Returns:
+            An ``(N, 3 * frame_stack, H, W)`` float tensor in ``[0, 1]``, or
+            ``None`` when ``frame_stack`` is 1 and no stack is kept.
+        """
+        return self._stack_buf
+
     def _observe_camera(self) -> None:
         """Refresh the camera buffers from the renderer for the current state.
 
