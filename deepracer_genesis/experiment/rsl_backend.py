@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from ..seeding import seed_everything
 from .evaluator import EvalRecord, evaluate_policy
 
 if TYPE_CHECKING:
@@ -271,6 +272,11 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
     from .builder import Builder
 
     assert spec.env is not None and spec.algorithm is not None
+    # P14: apply the recorded seed BEFORE the sim exists — spawn draws, DR
+    # draws, and net init all flow from these RNGs. DR_DETERMINISTIC=1 also
+    # requests deterministic torch kernels (the P5 investigation knob).
+    seed_everything(spec.seed,
+                    deterministic=bool(os.environ.get("DR_DETERMINISTIC")))
     # sim_cfg carries the FULL DR stack (physics + env-side action/image)
     sim = Builder(spec).sim()
     device = str(sim.device)

@@ -90,3 +90,8 @@ renderers = ["gs-madrona>=0.0.10", "gs-nyx>=0.1.4", "gs-nyx-plugin>=0.1.5"]
 
 [tool.uv]
 default-groups = ["dev", "renderers"]
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: bounded end-to-end pre-flight that builds real (CPU) sims; deselect with -m 'not smoke'",
+]

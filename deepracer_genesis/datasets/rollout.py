@@ -63,6 +63,7 @@ def collect_rollout_dataset(
     from ..experiment.run import build
     from ..experiment.spec import SpecError
     from ..experiment.stages import Pipeline, Stage, VectorPolicy
+    from ..seeding import seed_everything
 
     agent = agent or NoisyExpert()
 
@@ -81,7 +82,7 @@ def collect_rollout_dataset(
         from ..experiment.overrides import override
         spec = override(spec, "env.num_envs", num_envs)
 
-    torch.manual_seed(seed)
+    seed_everything(seed)
     b = Builder(spec)
     sim = b.sim()
     n = sim.num_envs

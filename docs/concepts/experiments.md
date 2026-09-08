@@ -132,3 +132,13 @@ instead of `pipeline()`.
 from deepracer_genesis.experiment import run
 run(FeatureBaseline, root="runs")
 ```
+
+### Seeding
+
+`run()` applies `spec.seed` process-wide (python / numpy / torch CPU + CUDA,
+via `deepracer_genesis.seeding.seed_everything`) *before* the sim is built, so
+spawn draws, DR draws, and network init all flow from it. On the CPU backend
+this makes a run bit-reproducible (pinned by `tests/test_seeding.py`); on the
+GPU, kernel nondeterminism still adds variance — set `DR_DETERMINISTIC=1` to
+also request deterministic torch algorithms (`warn_only`) when investigating.
+The seed names the run dir and is recorded in `eval_record.json`.
