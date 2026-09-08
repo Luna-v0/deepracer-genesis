@@ -97,6 +97,7 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False,
                 "off_track": 2.0,
             },
             "reward_scale_overrides": {},
+            "reward_params": {},        # constants exposed as env.reward_params
             "emit_cost": False,
             "cost_fn": None,
         },

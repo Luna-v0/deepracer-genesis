@@ -2,8 +2,8 @@
 
 Read this when the task touches the RL study orchestrator — defining, running, or
 analyzing studies over Gymnasium environments with hyperparameter optimization. It
-layers domain specifics on top of the universal standards in `CLAUDE.md`. Skip it for
-pure simulator/analysis/utility work.
+layers domain specifics on top of the universal standards in the workspace `CLAUDE.md`
+(the repo's parent folder). Skip it for pure simulator/analysis/utility work.
 
 ## This repo's contract (read first)
 The training-facing contract here is **rsl-rl-lib 5.x VecEnv**, not raw Gymnasium:

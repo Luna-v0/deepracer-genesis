@@ -1,7 +1,8 @@
 # Playbook: Refactor (restructure without changing behavior)
 
 Use when improving structure, readability, or design with no change in behavior. Layers
-on top of the universal standards and loop in `CLAUDE.md`.
+on top of the universal standards and loop in the workspace `CLAUDE.md` (the repo's
+parent folder).
 
 - **Precondition: a green safety net.** You need tests covering the behavior you're
   about to move. If coverage is thin, ADD characterization tests FIRST, then refactor.

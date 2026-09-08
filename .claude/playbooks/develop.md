@@ -2,7 +2,7 @@
 
 Use when adding new functionality — orchestrator features, simulator capabilities,
 analysis tooling, or shared utilities. Layers on top of the universal standards and
-loop in `CLAUDE.md`.
+loop in the workspace `CLAUDE.md` (the repo's parent folder).
 
 - **Nail the contract first.** Confirm the requirement and the interface before coding.
   If the shape isn't obvious, define the port/`Protocol` first and put it in the plan;

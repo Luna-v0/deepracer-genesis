@@ -12,16 +12,14 @@ from typing import TYPE_CHECKING
 import torch
 
 from deepracer_genesis.envs.features import PerceptionFeatures
-from deepracer_genesis.perception.model import PerceptionCNN
+from deepracer_genesis.perception.model import (CHANNEL_NAMES, SIGMA,
+                                                PerceptionCNN)
 
 if TYPE_CHECKING:
     from deepracer_genesis.envs.deepracer_env import DeepRacerEnv
 
-CHANNEL_NAMES = ("lateral", "heading", "speed", "yaw_rate", "beta",
-                 "curv@1m", "curv@3m")
-
-# root of each channel's validation MSE, measured on the held-out tracks
-SIGMA = (0.125, 0.064, 0.060, 0.065, 0.083, 0.122, 0.224)
+__all__ = ["CHANNEL_NAMES", "SIGMA", "CNNPerceptionFeatures",
+           "NoisyPerceptionFeatures"]
 
 
 def _frame_stack_of(env: "DeepRacerEnv") -> int:

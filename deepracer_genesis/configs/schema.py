@@ -102,6 +102,7 @@ class RewardConfig(TypedDict):
     reward: "Optional[RewardFn]"   # None -> the built-in `deepracer` default
     reward_scales: dict
     reward_scale_overrides: dict
+    reward_params: dict            # constants exposed as env.reward_params
     emit_cost: bool
     cost_fn: Optional[str]
 

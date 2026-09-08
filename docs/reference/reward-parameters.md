@@ -11,9 +11,15 @@ A reward function maps the live env to named per-step `(N,)` terms; the env
 multiplies each term by its `reward_scales` entry and sums:
 
 ```python
-RewardFn = Callable[[DeepRacerEnv], dict[str, torch.Tensor]]
+RewardFn = Callable[[DeepRacerEnv], dict[str, torch.Tensor] | torch.Tensor]
 reward = sum(scale[name] * terms[name] for name in reward_scales)
 ```
+
+A custom fn may instead return a bare `(N,)` tensor (or a `total` term with no
+scales): that value is the step reward verbatim, and `_`-prefixed terms become
+diagnostic-only TensorBoard channels — see
+[Rewards & actions](../concepts/rewards-actions.md#custom-rewards) for the full
+contract.
 
 Two conventions keep this sane:
 
@@ -82,10 +88,13 @@ vector reads): `d_progress`, `progress_m`, `v_forward`, `lateral`,
 `half_width`, `heading_err`, `actions`, `last_actions`, `dt`,
 `track.total_len_env`, and `cfg` (e.g. `cfg["termination"]["wheel_margin"]`).
 
-Optionally declare what you read with `@reads(...)`
-(`envs/rewards.py`) so the build-time learnability check can verify the
-critic sees those signals; an undeclared custom reward simply skips that
-check.
+Constants belong in `RewardShaping(params={...})`, not in closures: they reach
+the fn as `env.reward_params`, join the spec's content hash, and are recorded
+in `eval_record.json` — so they distinguish runs and are HPO-searchable.
+
+Declare what you read with `@reads(...)` (`envs/rewards.py`) so the build-time
+learnability check can verify the critic sees those signals; an undeclared
+custom reward skips that check, and `spec.validate()` warns that it did.
 
 !!! tip "Reward designs are searchable — and hackable"
     Reward functions are ordinary values, so they can go **into** an HPO

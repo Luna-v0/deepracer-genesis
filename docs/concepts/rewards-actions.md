@@ -46,11 +46,13 @@ divisors).
 A reward function is a plain callable, passed as a parameter (no registry):
 
 ```python
-RewardFn = Callable[[DeepRacerEnv], dict[str, torch.Tensor]]
+RewardFn = Callable[[DeepRacerEnv], dict[str, torch.Tensor] | torch.Tensor]
 ```
 
-It maps the env to named `(N,)` per-step terms; the env weights them by
-`reward_scales` and sums. The built-in `deepracer` reward (`envs/rewards.py:19-42`):
+It maps the env to named `(N,)` per-step terms weighted by `reward_scales` and
+summed — or to a bare `(N,)` tensor that *is* the step reward (see
+[Custom rewards](#custom-rewards)). The built-in `deepracer` reward
+(`envs/rewards.py`):
 
 | Term | Formula | Intent |
 |------|---------|--------|
@@ -103,6 +105,40 @@ def my_reward(env):
 
 ... >> RewardShaping(fn=my_reward, scales={"progress": 10.0, "smooth": 0.1})
 ```
+
+A reward doesn't have to be a weighted sum. Return a bare `(N,)` tensor and
+that tensor **is** the step reward — no term names, no scales (leave `scales`
+empty; it logs to TensorBoard as `Episode/rew_total`):
+
+```python
+def paced(env):
+    pace = -(env.v_forward - env.reward_params["target"]).abs() * env.dt
+    return 10.0 * env.d_progress + pace
+
+... >> RewardShaping(fn=paced, params={"target": 1.6})
+```
+
+Three supporting pieces make the monolithic form a first-class citizen:
+
+- **`params`** — constants the fn reads via `env.reward_params`. Unlike a
+  closure constant (`make_paced(1.6)`), they are part of the spec's content
+  hash and land in `eval_record.json`, so two runs with different targets get
+  different run dirs — and HPO can search them like any other spec field.
+- **Diagnostic channels** — a term whose name starts with `_` is accumulated
+  into the per-term TensorBoard breakdown (`Episode/diag_<name>`) but never
+  summed into the reward, so a monolithic reward keeps its decomposition.
+- **`total`** — returning `{"total": <reward>, "_pace": ..., "_progress": ...}`
+  with no scales combines the two: `total` is the reward verbatim, the `_`
+  terms are its logged breakdown. (With scales set, term names are ordinary
+  and `total` has no special meaning.)
+
+Misconfigurations fail loudly at the first step: a bare tensor alongside
+`scales`, named terms with no `scales`, an unscaled non-`_` term next to
+`total`, or a scale referencing a `_` term all raise `ValueError`.
+
+Declare what your fn reads with `@reads(...)` (`envs/rewards.py`) so the
+build-time learnability check can verify the critic sees those signals —
+`spec.validate()` warns if a custom reward leaves it undeclared.
 
 The env fields available to a reward (`v_forward`, `lateral`, `half_width`,
 `heading_err`, `d_progress`, `actions`, `last_actions`, ...) are the same ones the

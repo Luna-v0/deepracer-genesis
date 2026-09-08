@@ -1,6 +1,7 @@
 """Swappable reward functions, written in plain torch and passed as parameters.
 
-Each fn maps the env to named per-step (N,) terms weighted by ``reward_scales``.
+Each fn maps the env to named per-step (N,) terms weighted by ``reward_scales``,
+or to a bare (N,) tensor that IS the step reward (see ``mdp.compute_reward``).
 
 Reward + cost as combinations over the shared signal vocabulary (Part K.4): a
 reward fn declares which :mod:`~deepracer_genesis.envs.signals` names it reads,
@@ -16,8 +17,10 @@ import torch
 if TYPE_CHECKING:
     from .base_env import DeepRacerEnv
 
-#: a reward fn maps the env to ``{term_name: (N,) tensor}``
-RewardFn = Callable[["DeepRacerEnv"], "dict[str, torch.Tensor]"]
+#: a reward fn maps the env to ``{term_name: (N,) tensor}`` (weighted by
+#: ``reward_scales``; ``_``-prefixed names are diagnostic-only) or to a bare
+#: ``(N,)`` tensor that is the step reward verbatim (no scales involved)
+RewardFn = Callable[["DeepRacerEnv"], "dict[str, torch.Tensor] | torch.Tensor"]
 
 
 def reads(*signals: str) -> "Callable[[RewardFn], RewardFn]":
@@ -46,7 +49,7 @@ def reward_reads(fn: "RewardFn") -> "frozenset[str]":
     """Return the signal names ``fn`` declared it reads (empty if undeclared).
 
     An undeclared custom reward returns ``frozenset()``, which the K.5 check
-    treats as "nothing to verify" (no false-positive warnings).
+    treats as "nothing to verify" (``spec.validate()`` warns that it skipped).
     """
     return getattr(fn, "reads", frozenset())
 

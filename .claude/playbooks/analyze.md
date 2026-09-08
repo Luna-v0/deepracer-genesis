@@ -2,7 +2,8 @@
 
 Use for investigation and measurement — RL results, simulator behavior, profiling,
 data analysis. Often not "RL code" per se, but still a coding-and-testing task. Layers
-on top of the universal standards and loop in `CLAUDE.md`.
+on top of the universal standards and loop in the workspace `CLAUDE.md` (the repo's
+parent folder).
 
 - **Frame the question first.** State what you're trying to learn and what output
   answers it (a number, a plot, a table, a decision) before you start.

@@ -9,6 +9,13 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+#: the physical quantities the CNN predicts, in output order
+CHANNEL_NAMES = ("lateral", "heading", "speed", "yaw_rate", "beta",
+                 "curv@1m", "curv@3m")
+
+#: root of each channel's validation MSE, measured on the held-out tracks
+SIGMA = (0.125, 0.064, 0.060, 0.065, 0.083, 0.122, 0.224)
+
 DEFAULT_INPUT_HW = (120, 160)
 _CONVS = ((5, 2), (3, 2), (3, 2), (3, 2))   # (kernel, stride) per conv layer
 

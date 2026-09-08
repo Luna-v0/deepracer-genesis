@@ -302,22 +302,29 @@ def discrete_grid(steer_bins: int = 5, speed_bins: int = 2,
 @dataclass(frozen=True)
 class RewardShaping(Stage):
     """Set the reward callable (``None`` keeps built-in ``deepracer``) and/or
-    override entries of the default reward_scales dict.
+    its scales and params (contract: ``docs/concepts/rewards-actions.md``).
 
     Attributes:
-        fn: Custom reward callable, or None to keep the built-in reward.
-        scales: Overrides merged into the default reward-scales dict.
+        fn: Custom reward callable, or None to keep the built-in reward. May
+            return named terms weighted by ``scales``, or the reward itself
+            (a bare (N,) tensor, or a ``total`` term with no scales).
+        scales: Overrides merged into the default reward-scales dict; leave
+            empty for a fn that returns the reward verbatim.
+        params: Constants the fn reads via ``env.reward_params`` — part of the
+            spec's content hash, so searchable and recorded per run.
         KIND: Stage category tag (reward).
     """
 
     fn: Optional["RewardFn"] = None
     scales: Optional[dict] = None
+    params: Optional[dict] = None
 
     KIND = "reward"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, env=replace(
-            spec.env, reward=self.fn, reward_scales=dict(self.scales or {})))
+            spec.env, reward=self.fn, reward_scales=dict(self.scales or {}),
+            reward_params=dict(self.params or {})))
 
 
 # ----------------------------------------------------------------------

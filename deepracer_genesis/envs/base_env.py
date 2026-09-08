@@ -61,6 +61,7 @@ class DeepRacerEnv:
         state_buf: Current per-env state observation.
         reward_terms: Reward function producing the shaping terms.
         reward_scales: Weights applied to each reward term.
+        reward_params: Spec-recorded constants the reward fn may read.
         episode_sums: Running per-episode sums of each reward term.
         base_pos: Cached car position each step.
         yaw: Cached car heading each step.
@@ -320,13 +321,11 @@ class DeepRacerEnv:
             self.reward_scales.update(overrides)
         else:
             # custom fn: its scales stand alone (defaults reference terms the
-            # custom fn does not produce)
-            if not overrides:
-                name = getattr(reward_fn, "__qualname__", reward_fn)
-                raise ValueError(
-                    f"custom reward fn {name!r} needs explicit scales "
-                    "(RewardShaping(fn=..., scales={...}))")
+            # custom fn does not produce). Empty scales = a verbatim reward fn
+            # (bare tensor / 'total' term) — checked at the first compute_reward,
+            # the earliest point the fn's return shape is known.
             self.reward_scales = dict(overrides)
+        self.reward_params = dict(reward_cfg.get("reward_params") or {})
         if self.emit_cost:
             # the cost stream replaces the offtrack shaping term (plan: pull
             # offtrack/crash OUT of the reward, constrain them instead)
@@ -545,7 +544,8 @@ class DeepRacerEnv:
         # episode logging
         self.extras["log"] = {}
         for key, sums in self.episode_sums.items():
-            self.extras["log"][f"Episode/rew_{key}"] = sums[env_ids].mean()
+            tag = f"diag_{key[1:]}" if key.startswith("_") else f"rew_{key}"
+            self.extras["log"][f"Episode/{tag}"] = sums[env_ids].mean()
             sums[env_ids] = 0.0
         self.extras["log"]["Episode/length"] = self.episode_length_buf[env_ids].float().mean()
         if self.emit_cost:

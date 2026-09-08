@@ -1,7 +1,7 @@
 # Playbook: Debug (fix a defect / crash / unexpected behavior)
 
 Use when something is broken, crashing, or behaving unexpectedly. Layers on top of the
-universal standards and loop in `CLAUDE.md`.
+universal standards and loop in the workspace `CLAUDE.md` (the repo's parent folder).
 
 ## Standard defect
 - **Reproduce first.** Write a FAILING test that captures the bug before fixing. That
@@ -24,8 +24,8 @@ mark (a flaky pass), and you never see whether it survives PAST that point, whic
 the whole question. Run a real SOAK run and check health at and beyond the mark.
 
 - **Don't block the session.** Launch the run in the BACKGROUND, record the start time,
-  and point it at a log + status file (per Long-running jobs in `CLAUDE.md`). Poll on
-  demand — never sit in the loop waiting for it.
+  and point it at a log + status file (per Long-running jobs in the workspace
+  `CLAUDE.md`). Poll on demand — never sit in the loop waiting for it.
 - **Write your own watchdog.** Create a small script (plain Python, not you) that
   monitors the process and snapshots to a status file: is the process alive? seconds
   since the last log/heartbeat line (to catch *alive-but-stuck*)? current memory and

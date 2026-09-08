@@ -135,6 +135,7 @@ class EnvSpec:
         random_direction: flip driving direction (CW/CCW) per episode.
         reward: reward callable, or None for the built-in default.
         reward_scales: per-term scale overrides for the reward.
+        reward_params: constants the reward fn reads via ``env.reward_params``.
         emits_cost: whether the env produces a cost signal for SafeRL.
         cost_fn: which cost function to emit.
         cost_budget: per-episode cost budget.
@@ -179,11 +180,16 @@ class EnvSpec:
     # coin-flip the driving direction (CW vs CCW) each episode; heading /
     # progress / lookahead observations follow the chosen direction
     random_direction: bool = False
-    # reward: a reward CALLABLE (envs/rewards.py: env -> {term: (N,) tensor}) +
-    # scale overrides. None keeps the built-in `deepracer` default. The fn's
-    # NAME is recorded in the run-dir id (not its body); runs always retrain.
+    # reward: a reward CALLABLE (envs/rewards.py: env -> {term: (N,) tensor},
+    # or -> a bare (N,) reward tensor) + scale overrides. None keeps the
+    # built-in `deepracer` default. The fn's NAME is recorded in the run-dir
+    # id (not its body); runs always retrain.
     reward: "RewardFn | None" = None
     reward_scales: dict = field(default_factory=dict)
+    # spec-hashed constants the reward fn reads via `env.reward_params` — the
+    # searchable/recorded home for what would otherwise be closure constants.
+    # Excluded from id() when empty so pre-existing content hashes are stable.
+    reward_params: dict = field(default_factory=dict)
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None
@@ -398,6 +404,9 @@ class ExperimentSpec:
         # the same training config keeps one id however it is tagged.
         payload = {k: v for k, v in self.to_dict().items()
                    if k not in ("group", "variant")}
+        if payload.get("env") and not payload["env"].get("reward_params"):
+            # absent == empty: keeps pre-reward_params hashes (run dirs) valid
+            payload["env"].pop("reward_params", None)
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
     def run_dir(self, root: str = "runs") -> str:
@@ -794,8 +803,8 @@ class ExperimentSpec:
         ``reward.reads ∪ cost.reads ⊆ critic-visible signals`` and warns when a
         term is genuinely **unlearnable** — no network (not even the critic) can
         recover its inputs, so the run is wasted. Purely additive: it emits at
-        most one :class:`UserWarning`, changing no run behavior. An undeclared
-        custom reward (no ``reads``) is skipped.
+        most warnings, changing no run behavior. An undeclared custom reward
+        (no ``reads``) is skipped — with a warning saying so.
 
         The softer "the actor can't directly act on this signal" advisory that
         :func:`~deepracer_genesis.envs.signals.check_learnability` also returns is
@@ -816,8 +825,16 @@ class ExperimentSpec:
         reward_fn = env.reward or deepracer
         r_reads = reward_reads(reward_fn)
         c_reads = cost_reads(env.cost_fn) if env.emits_cost else frozenset()
+        if env.reward is not None and not r_reads:
+            # an opaque custom reward is exactly the case that SHOULD be
+            # checked — say loudly that it cannot be, instead of waiving it
+            warnings.warn(
+                "custom reward fn %r declares no signal reads: the K.5 "
+                "learnability check cannot verify the critic sees its inputs "
+                "— decorate it with envs.rewards.reads(...)"
+                % getattr(env.reward, "__qualname__", env.reward), stacklevel=2)
         if not r_reads and not c_reads:
-            return   # nothing declared to verify (undeclared custom reward)
+            return   # nothing declared to verify
 
         actor_signals = self._signals_for_keys(set(policy.actor_keys))
         critic_signals = self._signals_for_keys(set(policy.critic_keys))

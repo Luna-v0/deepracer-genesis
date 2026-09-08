@@ -55,6 +55,7 @@ class Builder:
         cfg["sim"]["realtime_factor"] = env.realtime_factor
         cfg["reward"]["reward"] = env.reward   # a callable (or None -> deepracer default)
         cfg["reward"]["reward_scale_overrides"] = dict(env.reward_scales)
+        cfg["reward"]["reward_params"] = dict(env.reward_params)
         # Renderer resolution has ONE source of truth (EnvSpec.effective_renderer;
         # Part M.2 rule folded in: cpu wins over nyx). "madrona" keeps the cfg
         # default vision_renderer='batch'.

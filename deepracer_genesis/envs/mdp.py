@@ -40,30 +40,72 @@ def map_action(env: "DeepRacerEnv") -> tuple[torch.Tensor, torch.Tensor]:
     return steer, speed
 
 
-def compute_reward(env: "DeepRacerEnv") -> None:
-    """Accumulate the weighted reward terms into the env's reward buffer.
+def _reward_verbatim(env: "DeepRacerEnv", r: torch.Tensor) -> None:
+    """Write ``r`` into ``rew_buf`` as the whole step reward (logged as ``total``)."""
+    r = r.reshape(env.rew_buf.shape)
+    env.rew_buf.copy_(r)
+    env.episode_sums.setdefault("total", torch.zeros_like(env.rew_buf)).add_(r)
 
-    Zeroes ``env.rew_buf``, then adds each ``scale * terms[name]`` into it and ``episode_sums``.
+
+def compute_reward(env: "DeepRacerEnv") -> None:
+    """Reduce the reward fn's output into the env's reward buffer.
+
+    A bare (N,) tensor (or a ``total`` term with no scales) is the reward
+    verbatim; named terms are summed as ``scale * terms[name]``. Both paths
+    accumulate ``episode_sums``; ``_``-prefixed terms are logged, never summed.
 
     Args:
         env: The live DeepRacer env whose ``reward_terms`` callable, per-term
             ``reward_scales``, ``rew_buf``, and ``episode_sums`` are read/written.
 
     Raises:
+        ValueError: If a verbatim reward is mixed with ``reward_scales``, a
+            scale names a ``_`` diagnostic term, or named terms have no scales.
         KeyError: If ``reward_scales`` references a term name the reward fn did
             not produce.
     """
     terms = env.reward_terms(env)          # named per-step terms (rewards.py)
-    env.rew_buf.zero_()
-    for name, scale in env.reward_scales.items():
-        try:
-            r = terms[name] * scale
-        except KeyError:
-            raise KeyError(
-                f"reward_scales references term {name!r} but the reward fn "
-                f"produced {sorted(terms)}") from None
-        env.rew_buf += r
-        env.episode_sums[name] += r
+    if isinstance(terms, torch.Tensor):
+        if env.reward_scales:
+            raise ValueError(
+                "reward fn returned a bare tensor (the reward itself) but "
+                f"reward_scales {sorted(env.reward_scales)} are set — they "
+                "would be silently ignored; drop the scales or return named terms")
+        _reward_verbatim(env, terms)
+        return
+    if env.reward_scales:
+        bad = sorted(k for k in env.reward_scales if k.startswith("_"))
+        if bad:
+            raise ValueError(
+                f"reward_scales references diagnostic term(s) {bad}: "
+                "'_'-prefixed names are logged but never summed into the reward")
+        env.rew_buf.zero_()
+        for name, scale in env.reward_scales.items():
+            try:
+                r = terms[name] * scale
+            except KeyError:
+                raise KeyError(
+                    f"reward_scales references term {name!r} but the reward fn "
+                    f"produced {sorted(terms)}") from None
+            env.rew_buf += r
+            env.episode_sums[name] += r
+    elif "total" in terms:
+        stray = sorted(k for k in terms if k != "total" and not k.startswith("_"))
+        if stray:
+            raise ValueError(
+                f"reward fn returned unscaled term(s) {stray} beside 'total': "
+                "prefix them with '_' (diagnostic-only) or provide scales")
+        _reward_verbatim(env, terms["total"])
+    else:
+        name = getattr(env.reward_terms, "__qualname__", env.reward_terms)
+        raise ValueError(
+            f"custom reward fn {name!r} returned named terms but no scales are "
+            "set: pass RewardShaping(fn=..., scales={...}), or return the "
+            "reward itself (a bare (N,) tensor, or a 'total' term)")
+    for name, value in terms.items():
+        if name.startswith("_"):
+            env.episode_sums.setdefault(
+                name, torch.zeros_like(env.rew_buf)).add_(value)
 
 
 def check_termination(env: "DeepRacerEnv") -> None:
