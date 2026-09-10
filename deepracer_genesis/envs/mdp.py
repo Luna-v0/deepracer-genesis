@@ -60,7 +60,8 @@ def compute_reward(env: "DeepRacerEnv") -> None:
 
     Raises:
         ValueError: If a verbatim reward is mixed with ``reward_scales``, a
-            scale names a ``_`` diagnostic term, or named terms have no scales.
+            scale names a ``_`` diagnostic term or the reserved
+            ``crash_penalty``, or named terms have no scales.
         KeyError: If ``reward_scales`` references a term name the reward fn did
             not produce.
     """
@@ -79,6 +80,11 @@ def compute_reward(env: "DeepRacerEnv") -> None:
             raise ValueError(
                 f"reward_scales references diagnostic term(s) {bad}: "
                 "'_'-prefixed names are logged but never summed into the reward")
+        if "crash_penalty" in env.reward_scales:
+            raise ValueError(
+                "'crash_penalty' is reserved for the terminal penalty "
+                "check_termination logs (set it via EnvSpec.crash_penalty, "
+                "not as a reward term)")
         env.rew_buf.zero_()
         for name, scale in env.reward_scales.items():
             try:
@@ -115,15 +121,22 @@ def check_termination(env: "DeepRacerEnv") -> None:
 
     Args:
         env: The live DeepRacer env; reads ``lateral``, ``half_width``, ``up_z``,
-            ``v_forward``, ``episode_length_buf``, ``max_episode_length``,
-            ``emit_cost``, ``cost_fn``, and ``cfg``, and writes the termination
-            (and cost) buffers listed above.
+            ``v_forward``, ``laps``, ``episode_length_buf``,
+            ``max_episode_length``, ``emit_cost``, ``cost_fn``, and ``cfg``,
+            and writes the termination (and cost) buffers listed above.
     """
     cfg = env.cfg
     off = rules.is_off_track(env.lateral, env.half_width, cfg["termination"]["off_track_margin"])
     flipped = rules.is_flipped(env.up_z)
     env.flipped_buf = flipped
     env.time_out_buf = env.episode_length_buf >= env.max_episode_length
+    max_laps = cfg["termination"].get("max_laps")
+    if max_laps is not None:
+        # Completing the lap quota ends the episode as a TRUNCATION (like the
+        # time cap): bootstrapped via extras["time_outs"], never penalized. A
+        # terminal-no-bootstrap end would pay the policy to hover short of the
+        # line and keep farming per-step bonuses.
+        env.time_out_buf = env.time_out_buf | (env.laps >= max_laps)
     if env.emit_cost:
         # CMDP framing: offtrack is a COST, not a termination — declare
         # "violate at most `budget`" instead of hand-tuning a penalty.
@@ -142,8 +155,13 @@ def check_termination(env: "DeepRacerEnv") -> None:
     else:
         env.offtrack_buf = off
         env.reset_buf = off | flipped | env.time_out_buf
-        # terminal penalty for genuine failures (not timeouts)
-        env.rew_buf += (off | flipped).float() * cfg["termination"]["crash_penalty"]
+        # terminal penalty for genuine failures (not timeouts). Accumulated
+        # into episode_sums under the reserved `crash_penalty` key (P11) so
+        # the per-term TB breakdown sums to the reward the learner saw.
+        pen = (off | flipped).float() * cfg["termination"]["crash_penalty"]
+        env.rew_buf += pen
+        env.episode_sums.setdefault(
+            "crash_penalty", torch.zeros_like(env.rew_buf)).add_(pen)
 
     # A physics blow-up yields NaN/Inf (or absurdly large) state. NaN
     # comparisons are all False, so such an env passes every predicate above

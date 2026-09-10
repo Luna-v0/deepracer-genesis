@@ -45,11 +45,20 @@ track_yaw}`:
 - `lateral = (pos − c) · normal` (signed offset)
 - `progress_m = (cum_len[wp_idx] + (pos − c)·tangent) mod total_len` (wraps at the finish line)
 
+### `lookahead_points_m(progress_m, distances, dir_sign)` → `(N, H, 2)`
+
+Centerline points at fixed arc-length **meters** ahead, linearly interpolated
+between waypoints; `dir_sign` samples backwards for reversed-direction
+episodes. This is what the feature vector uses — the horizon is
+track-independent (ADR 0003).
+
 ### `lookahead(wp_idx, k, stride, dir_sign)` → `(N, k)`
 
 Indices of the next `k` waypoints at fixed `stride`; `dir_sign` flips the walk for
 reversed-direction episodes. `lookahead_points(idx)` gathers their `(N, k, 2)` world
-positions.
+positions. Index-based, so the horizon in meters varies with the track's
+waypoint spacing (~48× across the catalog) — prefer `lookahead_points_m` for
+anything the policy observes.
 
 ### `curvature_ahead(progress_m, distances, dir_sign)` → `(N, H)`
 

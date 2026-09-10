@@ -25,14 +25,11 @@ FULL = ("v_forward", "v_lateral", "yaw_rate", "lateral", "heading",
 class _FakeTrack:
     """Deterministic lookahead + curvature geometry with no waypoints DB."""
 
-    def lookahead(self, wp_idx, k, stride, dir_sign):
-        n = wp_idx.shape[0]
-        return torch.arange(k).float().expand(n, k)
-
-    def lookahead_points(self, la_idx):
-        n, k = la_idx.shape
-        # (N, K, 2): x = index, y = 0.5*index — arbitrary but fixed
-        x = la_idx
+    def lookahead_points_m(self, progress_m, distances, dir_sign):
+        d = torch.as_tensor(distances, dtype=progress_m.dtype)
+        # (N, K, 2): x = arc position of the sample, y = 0.5*x — arbitrary
+        # but a fixed pure function of the inputs
+        x = progress_m[:, None] + d[None, :] * dir_sign[:, None]
         return torch.stack([x, 0.5 * x], dim=-1)
 
     def curvature_ahead(self, progress_m, distances, dir_sign):
@@ -66,7 +63,7 @@ class _FakeEnv:
         self.track = _FakeTrack()
         self.cfg = {
             "action": {"min_speed": 0.1, "max_speed": 4.0},
-            "obs": {"lookahead_stride": 1, "lookahead_scale": 2.0},
+            "obs": {"lookahead_spacing_m": 0.45, "lookahead_scale": 2.0},
             "termination": {"wheel_margin": 0.0},
         }
         self.signals = SignalBus(self) if with_bus else None

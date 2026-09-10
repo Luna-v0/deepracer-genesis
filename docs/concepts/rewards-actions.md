@@ -68,6 +68,16 @@ All terms scale by control `dt`, so weights are timestep-independent. Per-term s
 are tracked for logging. The full term/scale table with defaults lives in the
 [reward parameters reference](../reference/reward-parameters.md).
 
+The weighted sum is **not** the whole reward: when an episode ends by going
+off track or flipping (not by timeout), `check_termination` adds a one-time
+**crash penalty** (default −10.0) on top — the largest single-step magnitude
+in the system. It appears in the TensorBoard breakdown as
+`Episode/rew_crash_penalty` (so the per-term rows sum to what the learner
+saw), and is searchable via `RewardShaping(crash_penalty=...)` /
+`EnvSpec.crash_penalty`. Under a cost-emitting (safe-RL) env the penalty is
+**not** applied — crashes become the constrained cost instead — so the same
+reward fn trains against a different effective objective there.
+
 !!! note "Signs live in the terms"
     Penalty terms are negative and `reward_scales` stay positive. This is
     load-bearing: until 2026-08 the `off_track` term was accidentally

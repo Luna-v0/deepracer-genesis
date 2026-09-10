@@ -57,13 +57,14 @@ class TerminationConfig(TypedDict):
     wheel_margin: float
     crash_penalty: float
     overspeed_limit: float
+    max_laps: Optional[int]   # truncate the episode after N laps (None = endless)
 
 
 class ObsConfig(TypedDict):
     """State-vector / feature-set observation settings."""
 
     lookahead_k: int
-    lookahead_stride: int
+    lookahead_spacing_m: float   # meters between arclength lookahead samples (P1)
     lookahead_scale: float
     obs_noise: float
     feature_set: Optional[type]   # a FeatureSet subclass, or None -> ClassicFeatures

@@ -236,11 +236,22 @@ rew_buf  += (off | flipped) * crash_penalty                 # −10 terminal hit
 ```
 
 So going off track **does not push the car back** — the episode terminates,
-takes `crash_penalty = −10` (`cfgs.py:28`), and `reset_idx` respawns it at a
-fresh random waypoint. There is also an alternate **CMDP/constrained** framing
-(`deepracer_env.py:575-589`, gated by `emit_cost`): off-track becomes a *cost*
-signal instead of a termination+penalty; only flips or far-off-road terminate.
-This feeds the PPO-Lagrangian variant.
+takes `crash_penalty` (−10 default, overridable via
+`RewardShaping(crash_penalty=...)`, logged as `Episode/rew_crash_penalty`),
+and `reset_idx` respawns it at a fresh random waypoint. There is also an
+alternate **CMDP/constrained** framing (gated by `emit_cost`): off-track
+becomes a *cost* signal instead of a termination+penalty; only flips or
+far-off-road terminate. This feeds the PPO-Lagrangian variant.
+
+Two truncations end episodes without a penalty (both surfaced through
+`extras["time_outs"]` so PPO bootstraps instead of scoring them as
+failures): the **time cap** (`episode_length_s`, 30 s default — a spec knob
+since P3) and, when set, the **lap quota** `max_laps=N` (e.g.
+`FeatureEnvironment(max_laps=3)`), which ends the episode once the car has
+completed N laps from its spawn. With `max_laps=None` (the default) laps are
+bookkeeping only and a good policy loops until the clock runs out. The quota
+is deliberately a truncation, not a terminal state — a terminal end would
+pay the policy to hover short of the line and keep farming per-step bonuses.
 
 ### 5.3 Reward — `_compute_reward` (`deepracer_env.py:556-567`) + `envs/rewards.py`
 

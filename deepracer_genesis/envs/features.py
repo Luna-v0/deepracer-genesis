@@ -144,10 +144,8 @@ class ClassicFeatures(FeatureSet):
     def compute(self) -> torch.Tensor:
         env = self.env
         cy, sy = torch.cos(env.yaw), torch.sin(env.yaw)
-        la_idx = env.track.lookahead(env.wp_idx, env.lookahead_k,
-                                     env.cfg["obs"]["lookahead_stride"],
-                                     dir_sign=env.dir_sign)
-        la_pts = env.track.lookahead_points(la_idx)              # (N, K, 2)
+        la_pts = env.track.lookahead_points_m(                   # (N, K, 2)
+            env.progress_m, _lookahead_dists(env), dir_sign=env.dir_sign)
         rel = la_pts - env.base_pos[:, None, :2]
         rel_x = rel[..., 0] * cy[:, None] + rel[..., 1] * sy[:, None]
         rel_y = -rel[..., 0] * sy[:, None] + rel[..., 1] * cy[:, None]
@@ -354,13 +352,18 @@ def _read(env, name: str):
     return getattr(env, name)
 
 
+def _lookahead_dists(env) -> torch.Tensor:
+    """(K,) fixed arclength offsets for the lookahead, in meters (P1)."""
+    return (torch.arange(1, env.lookahead_k + 1, device=env.device,
+                         dtype=torch.float32)
+            * env.cfg["obs"]["lookahead_spacing_m"])
+
+
 def _lookahead_xy(env) -> torch.Tensor:
-    """Body-frame (rel_x, rel_y) of the upcoming waypoints, (N, 2K)."""
+    """Body-frame (rel_x, rel_y) of the upcoming centerline samples, (N, 2K)."""
     cy, sy = torch.cos(env.yaw), torch.sin(env.yaw)
-    la_idx = env.track.lookahead(env.wp_idx, env.lookahead_k,
-                                 env.cfg["obs"]["lookahead_stride"],
-                                 dir_sign=env.dir_sign)
-    la_pts = env.track.lookahead_points(la_idx)
+    la_pts = env.track.lookahead_points_m(
+        env.progress_m, _lookahead_dists(env), dir_sign=env.dir_sign)
     rel = la_pts - env.base_pos[:, None, :2]
     rel_x = rel[..., 0] * cy[:, None] + rel[..., 1] * sy[:, None]
     rel_y = -rel[..., 0] * sy[:, None] + rel[..., 1] * cy[:, None]

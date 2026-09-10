@@ -10,7 +10,7 @@ This section is the **API reference**, one page per module.
 ## Lifecycle
 
 ```
-stages  ──>>──▶  Pipeline.build()  ──▶  ExperimentSpec  ──▶  run() / Trainer.fit()
+stages  ──>>──▶  Pipeline.build()  ──▶  ExperimentSpec  ──▶  run() → run_rsl()
                                                                      │
                                              evaluator ◀────────────┘
                                                   │
@@ -25,8 +25,8 @@ stages  ──>>──▶  Pipeline.build()  ──▶  ExperimentSpec  ──�
 | [stages](stages.md) | The `>>` DSL: `Stage`/`Pipeline` and every stage (envs, DR, encoders, policies, algorithms) folded into a spec. |
 | [authoring](authoring.md) | The `Experiment` base class (`pipeline`/`spec`/`run`) — subclass it to author an experiment. |
 | [run](run.md) | The `build()` and `run()` entry points. |
-| [trainer](trainer.md) | `Trainer.fit()` — the training loop. |
+| [trainer](trainer.md) | The rsl-rl training backend (`run_rsl`, `spec_to_train_cfg`). |
 | [evaluator](evaluator.md) | `EvalRecord`, `evaluate_policy`, `aggregate_episodes`. |
-| [ablation](ablation.md) | `override()` for building spec variants. |
+| [overrides](overrides.md) | `override()` for building spec variants. |
 | [report](report.md) | Aggregate runs into comparison tables (`load_records`, `spec_axes`, `grouped_rows`, `build_report`). |
 | [visualize](visualize.md) | `rollout_video`, `dr_preview_video`. |

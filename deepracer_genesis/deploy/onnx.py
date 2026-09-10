@@ -48,6 +48,9 @@ def action_physical(spec: ExperimentSpec) -> dict:
 #: route EvoSensorMsg.images[0] to it; "action" (singular) matches the model
 #: card and all prior deployment docs.
 CAMERA_INPUT = "FRONT_FACING_CAMERA"
+#: feature-policy input: the assembled state vector (computed onboard by the
+#: perception pipeline — stock AWS nodes only feed camera models)
+STATE_INPUT = "STATE"
 ACTION_OUTPUT = "action"
 
 #: number of continuous action channels [steer, speed] (envs/base_env.py).
@@ -57,10 +60,8 @@ NUM_ACTIONS = 2
 def state_dim(spec: ExperimentSpec) -> int:
     """Width of the state vector (delegates to the spec's feature set).
 
-    NOTE: importing ``envs.features`` triggers ``envs/__init__`` which loads
-    genesis — never call this on the camera-only export path (the guard in
-    ``export_policy`` would already have passed, and onnxruntime would then
-    crash the process).
+    ``envs/__init__`` exports lazily (PEP 562), so importing ``envs.features``
+    is genesis-free and safe in the export process.
     """
     from ..envs.features import feature_dim
     return feature_dim(spec.env.feature_set, lookahead_k=spec.env.lookahead_k,
@@ -95,25 +96,127 @@ def model_metadata(spec: ExperimentSpec) -> dict:
             "speed": {"high": speed["high"], "low": speed["low"]},
         },
         "action_space_type": "continuous",
-        "sensor": [CAMERA_INPUT],
+        "sensor": [STATE_INPUT if tuple(spec.policy.actor_keys) == ("state",)
+                   else CAMERA_INPUT],
         "neural_network": "DEEP_CONVOLUTIONAL_NETWORK_SHALLOW",
         "training_algorithm": "clipped_ppo",
         "version": "5",
     }
 
 
+def _state_layout_for_card(spec: ExperimentSpec, ckpt_dim: int) -> str:
+    """The state layout for the model card, cross-checked against the ckpt.
+
+    A record round-trip nulls a custom feature_set (stored by qualname), so
+    the layout is only claimed when the spec's feature set reproduces the
+    checkpoint's input width.
+    """
+    try:
+        if state_dim(spec) == ckpt_dim:
+            return state_layout(spec)
+    except Exception:  # noqa: BLE001 - a card label must never fail the export
+        pass
+    return (f"unknown ({ckpt_dim} channels): the spec's feature set does not "
+            "match the checkpoint width — custom set lost in the record "
+            "round-trip? See the training repo.")
+
+
 def _rebuild_actor(spec: ExperimentSpec, ckpt_payload: dict):
     """Rebuild the trained actor on CPU and wrap it for single-input export.
 
-    Uses rsl-rl's own ``CNNModel`` with the SAME cfg mapping training uses
+    Uses rsl-rl's own model classes with the SAME cfg mapping training uses
     (``spec_to_train_cfg``), so exporter and trainer cannot disagree on
     architecture; then loads ``actor_state_dict`` strictly so any mismatch
     fails here, not on the car.
 
     Returns:
-        ``(export_actor, reference_model)`` — the export wrapper (camera tensor
-        in, action out) and the full rsl-rl model used as the parity reference.
+        ``(export_actor, reference_model)`` — the export wrapper (one input
+        tensor in, action out) and the full rsl-rl model as parity reference.
     """
+    keys = tuple(spec.policy.actor_keys)
+    if keys == ("camera",) and spec.env.modality == "camera":
+        return _rebuild_camera_actor(spec, ckpt_payload)
+    if keys == ("state",):
+        return _rebuild_feature_actor(spec, ckpt_payload)
+    raise NotImplementedError(
+        f"export supports camera-only (actor_keys=('camera',)) or feature "
+        f"(actor_keys=('state',)) actors; got modality={spec.env.modality!r}, "
+        f"actor_keys={keys!r} — routed/mixed-key actors are not wired.")
+
+
+def _feature_input_dim(ckpt_payload: dict) -> int:
+    """State width read from the checkpoint itself — ground truth even when a
+    record-reconstructed spec lost a custom feature_set class."""
+    sd = ckpt_payload["actor_state_dict"]
+    mean = sd.get("obs_normalizer._mean")
+    if mean is not None:
+        return int(mean.shape[-1])
+    if "mlp.0.weight" in sd:
+        return int(sd["mlp.0.weight"].shape[1])
+    raise KeyError(
+        f"cannot infer the state width: checkpoint actor keys {sorted(sd)[:6]}... "
+        "carry neither obs_normalizer._mean nor mlp.0.weight")
+
+
+def _rebuild_feature_actor(spec: ExperimentSpec, ckpt_payload: dict):
+    """Rebuild a vector (state) actor for export, baking the normalization.
+
+    The exported forward is ``head(mlp((state - mean) / (std + eps)))`` —
+    ``EmpiricalNormalization.forward`` over frozen buffers is plain tensor
+    math, so it exports as part of the graph (P6).
+    """
+    import copy
+
+    import torch
+    from rsl_rl.models import MLPModel
+    from tensordict import TensorDict
+    from torch import nn
+
+    from ..experiment.rsl_backend import spec_to_train_cfg
+
+    train_cfg = spec_to_train_cfg(spec)
+    actor_cfg = dict(train_cfg["actor"])
+    class_name = actor_cfg.pop("class_name")
+    if class_name != "MLPModel":
+        raise NotImplementedError(
+            f"feature export supports the MLP actor; got {class_name!r} "
+            "(a recurrent actor keeps hidden state outside the graph — not wired)")
+
+    dim = _feature_input_dim(ckpt_payload)
+    dummy_obs = TensorDict({"state": torch.zeros(1, dim)}, batch_size=[1])
+    model = MLPModel(dummy_obs, train_cfg["obs_groups"], "actor", NUM_ACTIONS,
+                     **actor_cfg)
+    model.load_state_dict(ckpt_payload["actor_state_dict"], strict=True)
+    model.eval()
+
+    class _ExportFeatureActor(nn.Module):
+        """state (1, D) float32 -> action (1, 2); normalization baked, no sampling."""
+
+        def __init__(self, m: MLPModel):
+            super().__init__()
+            self.norm = copy.deepcopy(m.obs_normalizer)   # or Identity
+            self.mlp = copy.deepcopy(m.mlp)
+            self.head = (m.distribution.as_deterministic_output_module()
+                         if m.distribution is not None else nn.Identity())
+
+        def forward(self, state):
+            return self.head(self.mlp(self.norm(state)))
+
+    actor = _ExportFeatureActor(model).eval()
+
+    with torch.no_grad():
+        state = torch.rand(1, dim)
+        ref = model(TensorDict({"state": state}, batch_size=[1]))
+        got = actor(state)
+        if not torch.equal(ref, got):
+            raise RuntimeError(
+                f"export wrapper diverges from MLPModel forward "
+                f"(max abs diff {(ref - got).abs().max().item():.3e})")
+    return actor, model
+
+
+def _rebuild_camera_actor(spec: ExperimentSpec, ckpt_payload: dict):
+    """Rebuild the camera actor for export (see :func:`_rebuild_actor`)."""
     import copy
 
     import torch
@@ -122,13 +225,6 @@ def _rebuild_actor(spec: ExperimentSpec, ckpt_payload: dict):
     from torch import nn
 
     from ..experiment.rsl_backend import spec_to_train_cfg
-
-    if spec.env.modality != "camera" or tuple(spec.policy.actor_keys) != ("camera",):
-        raise NotImplementedError(
-            f"export supports camera-only actors (actor_keys=('camera',)); got "
-            f"modality={spec.env.modality!r}, actor_keys={spec.policy.actor_keys!r}. "
-            "Feature policies bake an EmpiricalNormalization whose export is "
-            "not wired up yet.")
 
     train_cfg = spec_to_train_cfg(spec)
     actor_cfg = dict(train_cfg["actor"])
@@ -227,9 +323,40 @@ def export_policy(target, *, root: str = "runs", ckpt: Optional[str] = None,
             "rsl-rl OnPolicyRunner save with 'actor_state_dict'")
     actor, _model = _rebuild_actor(spec, payload)
 
-    w, h = spec.env.resolution
-    frame_stack = getattr(spec.env, "frame_stack", 1)
-    dummy = torch.zeros(1, 3 * frame_stack, h, w)
+    if tuple(spec.policy.actor_keys) == ("state",):
+        dim = _feature_input_dim(payload)
+        dummy = torch.zeros(1, dim)
+        input_name = STATE_INPUT
+        obs_card = {
+            STATE_INPUT: {
+                "shape": [1, dim],
+                "dtype": "float32",
+                "range": "raw feature vector, normalization is BAKED into the "
+                         "graph ((x - mean) / (std + 1e-2), frozen from training)",
+                "layout": _state_layout_for_card(spec, dim),
+                "note": "stock AWS nodes feed camera models only; the state "
+                        "vector must be assembled onboard (perception pipeline)",
+            },
+        }
+    else:
+        w, h = spec.env.resolution
+        frame_stack = getattr(spec.env, "frame_stack", 1)
+        dummy = torch.zeros(1, 3 * frame_stack, h, w)
+        input_name = CAMERA_INPUT
+        obs_card = {
+            CAMERA_INPUT: {
+                "shape": [1, 3 * frame_stack, h, w],
+                "dtype": "float32",
+                "range": "[0, 1] (= uint8 RGB / 255, no mean/std)",
+                "layout": "NCHW, RGB",
+                # The stack contract the node must reproduce exactly:
+                "frame_stack": frame_stack,
+                "stack_order": "oldest_first (newest frame = last 3 channels)",
+                "stack_priming": "repeat_first_frame (never zeros)",
+                "fov_deg": spec.env.fov,
+                "camera": "front RGB, native 160x120 in sim (no train-time resize)",
+            },
+        }
 
     onnx_path = os.path.join(out, "policy.onnx")
     # Static batch 1 on purpose: the car infers one frame at a time and
@@ -237,11 +364,11 @@ def export_policy(target, *, root: str = "runs", ckpt: Optional[str] = None,
     # per-sample instead of batching.
     torch.onnx.export(
         actor, (dummy,), onnx_path, opset_version=opset,
-        input_names=[CAMERA_INPUT], output_names=[ACTION_OUTPUT],
+        input_names=[input_name], output_names=[ACTION_OUTPUT],
         dynamo=False,
     )
 
-    verified = _verify_onnx(actor, onnx_path, dummy)
+    verified = _verify_onnx(actor, onnx_path, dummy, input_name)
 
     card = {
         "policy": {
@@ -258,20 +385,7 @@ def export_policy(target, *, root: str = "runs", ckpt: Optional[str] = None,
                       "(training env clips before mapping)",
             "normalized_to_physical": action_physical(spec),
         },
-        "observations": {
-            CAMERA_INPUT: {
-                "shape": [1, 3 * frame_stack, h, w],
-                "dtype": "float32",
-                "range": "[0, 1] (= uint8 RGB / 255, no mean/std)",
-                "layout": "NCHW, RGB",
-                # The stack contract the node must reproduce exactly:
-                "frame_stack": frame_stack,
-                "stack_order": "oldest_first (newest frame = last 3 channels)",
-                "stack_priming": "repeat_first_frame (never zeros)",
-                "fov_deg": spec.env.fov,
-                "camera": "front RGB, native 160x120 in sim (no train-time resize)",
-            },
-        },
+        "observations": obs_card,
         "training": {
             "spec": spec.to_dict(),
             "spec_id": spec.id(),
@@ -292,7 +406,7 @@ def export_policy(target, *, root: str = "runs", ckpt: Optional[str] = None,
     return out
 
 
-def _verify_onnx(actor, onnx_path: str, dummy) -> bool:
+def _verify_onnx(actor, onnx_path: str, dummy, input_name: str = CAMERA_INPUT) -> bool:
     """Check the ONNX graph reproduces the torch actor on random inputs.
 
     Returns False (with a loud warning) only when onnxruntime is missing;
@@ -310,7 +424,7 @@ def _verify_onnx(actor, onnx_path: str, dummy) -> bool:
     sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
     for _ in range(8):
         rand = torch.rand_like(dummy)
-        (onnx_out,) = sess.run(None, {CAMERA_INPUT: rand.numpy()})
+        (onnx_out,) = sess.run(None, {input_name: rand.numpy()})
         with torch.no_grad():
             torch_out = actor(rand).numpy()
         # 1e-5 is comfortably above fp32 kernel-order noise for this graph
@@ -351,10 +465,11 @@ def _spec_from_record(payload: dict) -> ExperimentSpec:
     """Reconstruct an exportable spec from a saved eval_record spec dump.
 
     The record's spec dict is a one-way display dump: callables are stored
-    by qualname. For the camera-only export path none of them matter — the
-    actor rebuild reads only plain data (resolution, frame_stack, policy
-    cnn/mlp/distribution, actor keys) — so string-valued callable fields
-    are dropped and sequences are re-tupled.
+    by qualname. The actor rebuild reads only plain data (resolution,
+    frame_stack, policy cnn/mlp/distribution, actor keys; the state width
+    comes from the checkpoint) — so string-valued callable fields are
+    dropped and sequences are re-tupled. A custom feature_set lost this way
+    only degrades the model card's layout label (cross-checked by width).
 
     Args:
         payload: The parsed ``eval_record.json``.

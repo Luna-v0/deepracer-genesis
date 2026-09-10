@@ -56,6 +56,12 @@ class Builder:
         cfg["reward"]["reward"] = env.reward   # a callable (or None -> deepracer default)
         cfg["reward"]["reward_scale_overrides"] = dict(env.reward_scales)
         cfg["reward"]["reward_params"] = dict(env.reward_params)
+        if env.crash_penalty is not None:
+            cfg["termination"]["crash_penalty"] = env.crash_penalty
+        if env.episode_length_s is not None:
+            cfg["sim"]["episode_length_s"] = env.episode_length_s
+        if env.max_laps is not None:
+            cfg["termination"]["max_laps"] = env.max_laps
         # Renderer resolution has ONE source of truth (EnvSpec.effective_renderer;
         # Part M.2 rule folded in: cpu wins over nyx). "madrona" keeps the cfg
         # default vision_renderer='batch'.

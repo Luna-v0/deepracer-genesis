@@ -145,9 +145,11 @@ default `lookahead_k=10` → 28). Normalization divisors come from
 | 8–17 | `lookahead_rel_x[10]/scale` | rotate `(la_pts − base_pos)` into body x | pos + `track` | **yes** |
 | 18–27 | `lookahead_rel_y[10]/scale` | body y of the same offsets | pos + `track` | **yes** |
 
-The look-ahead points come from the track geometry helpers: `track.lookahead(...)`
-picks the next K waypoint indices (`track.py:229`), `track.lookahead_points(idx)`
-returns their world XY, and `features.py:135-137` rotates them into the body frame.
+The look-ahead points come from `track.lookahead_points_m(...)`: `k` centerline
+samples at fixed arc-length meters ahead (`lookahead_spacing_m`, default 0.45 m
+→ a 4.5 m horizon on **every** track, interpolated between waypoints), rotated
+into the body frame. Before ADR 0003 the walk was index-based, so the horizon
+in meters varied ~48× with each track's waypoint spacing.
 
 ---
 

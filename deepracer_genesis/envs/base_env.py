@@ -548,6 +548,7 @@ class DeepRacerEnv:
             self.extras["log"][f"Episode/{tag}"] = sums[env_ids].mean()
             sums[env_ids] = 0.0
         self.extras["log"]["Episode/length"] = self.episode_length_buf[env_ids].float().mean()
+        self.extras["log"]["Episode/laps"] = self.laps[env_ids].mean()
         if self.emit_cost:
             self.extras["log"]["Episode/cost"] = self.cost_episode_sum[env_ids].mean()
             self.cost_episode_sum[env_ids] = 0.0

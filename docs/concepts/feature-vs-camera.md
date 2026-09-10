@@ -18,9 +18,9 @@ RTX 4060 Ti.
 | Hardware | runs CPU-only (`backend="cpu"`) | NVIDIA GPU in practice (the [CPU rasterizer](renderers.md) trains end-to-end at ~90 env-steps/s — fine for CI, ~30× too slow for real runs) |
 | Needs a renderer | no (`NullRenderer`) | yes — and the [choice costs 11×](renderers.md) |
 | Reward sensitivity | forgiving | decisive: reward design moved held-out completion from ~8% to ~78% |
-| Deploys to the physical car | not directly — the car has no ground-truth state, only a camera | **yes**: this is the [ONNX export](../guides/deployment.md) target (`FRONT_FACING_CAMERA` input) |
+| Deploys to the physical car | [exports](../guides/deployment.md) (`STATE` input, normalization baked) — but the car must assemble the state onboard via the [perception pipeline](perception.md); stock AWS nodes can't | **yes**: the primary [ONNX export](../guides/deployment.md) target (`FRONT_FACING_CAMERA` input) |
 
-## Why feature vector exists (even though it can't drive the car)
+## Why feature vector exists (even though it can't drive the stock car)
 
 It is the **fast half of every workflow**:
 
@@ -35,9 +35,10 @@ It is the **fast half of every workflow**:
 
 ## Why camera training is the destination
 
-The physical DeepRacer sees exactly one thing: a front camera. A deployable
-policy must map those pixels to steering and throttle, which is why the
-export pipeline only makes sense for camera policies — and why everything
+The physical DeepRacer sees exactly one thing: a front camera. A directly
+deployable policy must map those pixels to steering and throttle (a feature
+policy exports too, but needs the perception pipeline to feed it onboard) —
+which is why everything
 hard in this repo (renderer choice, the [DR catalog](../reference/dr-catalog.md),
 the [track zoo](../guides/track-zoo.md), reward design) ultimately serves
 the camera modality.

@@ -11,6 +11,7 @@ and a second call with a different backend is ignored (the first one wins).
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 import genesis as gs
@@ -32,6 +33,11 @@ def ensure_init(backend: Backend = "gpu", *, logging_level: str = "warning") -> 
     """
     if backend not in _BACKENDS:
         raise ValueError(f"backend must be 'gpu' or 'cpu', got {backend!r}")
+    # P10: Madrona's default device heap fails init / kills processes when the
+    # GPU is shared (e.g. ollama resident). Madrona reads this at scene build,
+    # which always happens after ensure_init, so setting it here covers every
+    # entry point; an explicit environment value still wins.
+    os.environ.setdefault("MADRONA_MWGPU_DEVICE_HEAP_SIZE", str(1 << 30))
     try:
         gs.init(backend=_BACKENDS[backend](), logging_level=logging_level)
     except Exception as e:  # already initialized in this process

@@ -147,9 +147,14 @@ def test_empty_reward_params_keep_pre_p12_content_hashes():
                           cnn={"channels": (32,)}),
         algorithm=AlgorithmSpec())
     assert camera.id() == "074585c63896"
-    # and the exemption is only for the EMPTY default, not a hash exclusion
+    # and the exemption is only for the UNSET defaults, not a hash exclusion
     payload = {k: v for k, v in _spec(reward_params={"t": 1}).to_dict().items()
                if k not in ("group", "variant")}
+    # mirror id()'s prune list
+    for late, unset in (("crash_penalty", None), ("episode_length_s", None),
+                        ("max_laps", None)):
+        if payload["env"].get(late) is unset:
+            payload["env"].pop(late, None)
     manual = hashlib.sha1(
         json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
     assert _spec(reward_params={"t": 1}).id() == manual

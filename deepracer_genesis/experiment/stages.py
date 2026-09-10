@@ -151,6 +151,10 @@ class FeatureEnvironment(Stage):
         random_direction: Whether each episode randomizes CW/CCW travel.
         max_speed: Top of the speed action range in m/s, or None for the
             physics default.
+        episode_length_s: Episode time limit in seconds, or None for the
+            30 s default (long tracks need more to be completable).
+        max_laps: Truncate the episode after N completed laps (bootstrapped,
+            no penalty), or None for endless episodes.
         KIND: Stage category tag (environment).
     """
 
@@ -167,6 +171,8 @@ class FeatureEnvironment(Stage):
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
     max_speed: float | None = None     # action-cap speed in m/s
+    episode_length_s: float | None = None   # None -> the 30 s config default
+    max_laps: int | None = None        # truncate after N laps (None = endless)
 
     KIND = "environment"
 
@@ -181,6 +187,8 @@ class FeatureEnvironment(Stage):
             random_start=self.random_start,
             random_direction=self.random_direction,
             max_speed=self.max_speed,
+            episode_length_s=self.episode_length_s,
+            max_laps=self.max_laps,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -203,6 +211,10 @@ class CameraEnvironment(Stage):
         random_direction: Whether each episode randomizes CW/CCW travel.
         max_speed: Top of the speed action range in m/s, or None for the
             physics default.
+        episode_length_s: Episode time limit in seconds, or None for the
+            30 s default (long tracks need more to be completable).
+        max_laps: Truncate the episode after N completed laps (bootstrapped,
+            no penalty), or None for endless episodes.
         KIND: Stage category tag (environment).
     """
 
@@ -222,6 +234,8 @@ class CameraEnvironment(Stage):
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
     max_speed: float | None = None     # action-cap speed in m/s
+    episode_length_s: float | None = None   # None -> the 30 s config default
+    max_laps: int | None = None        # truncate after N laps (None = endless)
 
     KIND = "environment"
 
@@ -237,6 +251,8 @@ class CameraEnvironment(Stage):
             num_envs=self.num_envs, random_start=self.random_start,
             random_direction=self.random_direction,
             max_speed=self.max_speed,
+            episode_length_s=self.episode_length_s,
+            max_laps=self.max_laps,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -312,19 +328,26 @@ class RewardShaping(Stage):
             empty for a fn that returns the reward verbatim.
         params: Constants the fn reads via ``env.reward_params`` — part of the
             spec's content hash, so searchable and recorded per run.
+        crash_penalty: Terminal off-track/flip penalty override; None keeps
+            the -10.0 default. Added AFTER the weighted terms (or the verbatim
+            reward) and logged as ``Episode/rew_crash_penalty``.
         KIND: Stage category tag (reward).
     """
 
     fn: Optional["RewardFn"] = None
     scales: Optional[dict] = None
     params: Optional[dict] = None
+    crash_penalty: Optional[float] = None
 
     KIND = "reward"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
-        return replace(spec, env=replace(
+        env = replace(
             spec.env, reward=self.fn, reward_scales=dict(self.scales or {}),
-            reward_params=dict(self.params or {})))
+            reward_params=dict(self.params or {}))
+        if self.crash_penalty is not None:
+            env = replace(env, crash_penalty=self.crash_penalty)
+        return replace(spec, env=env)
 
 
 # ----------------------------------------------------------------------

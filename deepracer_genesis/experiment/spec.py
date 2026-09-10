@@ -136,6 +136,9 @@ class EnvSpec:
         reward: reward callable, or None for the built-in default.
         reward_scales: per-term scale overrides for the reward.
         reward_params: constants the reward fn reads via ``env.reward_params``.
+        crash_penalty: terminal off-track/flip penalty override (None = -10.0).
+        episode_length_s: episode time limit override in seconds (None = 30.0).
+        max_laps: truncate the episode after N completed laps (None = endless).
         emits_cost: whether the env produces a cost signal for SafeRL.
         cost_fn: which cost function to emit.
         cost_budget: per-episode cost budget.
@@ -190,6 +193,19 @@ class EnvSpec:
     # searchable/recorded home for what would otherwise be closure constants.
     # Excluded from id() when empty so pre-existing content hashes are stable.
     reward_params: dict = field(default_factory=dict)
+    # terminal crash penalty override (P11.c) — searchable like any weight.
+    # None keeps the config default (-10.0) and is excluded from id() so
+    # pre-existing content hashes are stable. Ignored under emits_cost (the
+    # CMDP path constrains crashes instead of penalizing them).
+    crash_penalty: float | None = None
+    # episode time limit override (P3): long tracks (arctic_open 42 m, Albert
+    # 51 m) are unwinnable in the 30 s default. None keeps the config default
+    # and is excluded from id() so pre-existing content hashes are stable.
+    episode_length_s: float | None = None
+    # lap-quota episode end: N truncates the episode once `laps >= N` (a
+    # bootstrapped truncation like the time cap — no penalty), None keeps the
+    # endless default. Excluded from id() when None (hash-stable).
+    max_laps: int | None = None
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None
@@ -404,9 +420,15 @@ class ExperimentSpec:
         # the same training config keeps one id however it is tagged.
         payload = {k: v for k, v in self.to_dict().items()
                    if k not in ("group", "variant")}
-        if payload.get("env") and not payload["env"].get("reward_params"):
-            # absent == empty: keeps pre-reward_params hashes (run dirs) valid
-            payload["env"].pop("reward_params", None)
+        env_p = payload.get("env")
+        if env_p:
+            # fields added after launch are hash-exempt at their unset default
+            # (absent == default), keeping pre-existing hashes/run dirs valid
+            if not env_p.get("reward_params"):
+                env_p.pop("reward_params", None)
+            for late in ("crash_penalty", "episode_length_s", "max_laps"):
+                if env_p.get(late) is None:
+                    env_p.pop(late, None)
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
     def run_dir(self, root: str = "runs") -> str:
@@ -484,6 +506,11 @@ class ExperimentSpec:
         # sits on its own tile and a car only ever frames its own. It stays a
         # debug / small-num_envs / no-GPU path, because the rasterizer walks
         # every tile's geometry per frame, so its cost grows with track count.
+        if env.max_laps is not None and (not isinstance(env.max_laps, int)
+                                         or env.max_laps < 1):
+            raise SpecError(
+                "max_laps must be an int >= 1 (or None for endless episodes); "
+                "got %r" % (env.max_laps,))
         if env.modality == "camera" and env.backend == "cpu":
             warnings.warn(
                 "camera obs on backend='cpu' uses the RasterizerObsRenderer: one "

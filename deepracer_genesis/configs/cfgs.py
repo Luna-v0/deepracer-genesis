@@ -51,10 +51,15 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False,
             "wheel_margin": 0.08,       # ~half car width, for all_wheels_on_track
             "crash_penalty": -10.0,
             "overspeed_limit": 3.5,     # m/s, for the offtrack_or_overspeed cost
+            "max_laps": None,           # end the episode after N laps (None = endless)
         },
         "obs": {
             "lookahead_k": 10,
-            "lookahead_stride": 3,
+            # meters between lookahead samples (arclength-based, P1): the k=10
+            # default spans a 4.5 m horizon on EVERY track. 0.45 m calibrated
+            # to reproduce reinvent_base's pre-fix horizon (k=10, stride=3,
+            # 0.15 m spacing), so reference-track features are unchanged.
+            "lookahead_spacing_m": 0.45,
             "lookahead_scale": 3.0,
             "obs_noise": 0.0,
             "feature_set": None,        # a FeatureSet subclass, or None -> ClassicFeatures

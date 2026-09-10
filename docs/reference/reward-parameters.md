@@ -47,8 +47,12 @@ term moved when behavior changes.
 | `off_track` | 2.0 | `−(any wheel outside half_width − wheel_margin) · dt` | − | keeping all wheels on the road |
 
 On top of the per-step terms, `mdp.check_termination` adds a one-time
-`crash_penalty` (**−10.0**, `configs/cfgs.py`) when an episode ends by
-going off track or flipping (not on timeouts).
+`crash_penalty` (**−10.0** default) when an episode ends by going off track
+or flipping (not on timeouts). It is logged as `Episode/rew_crash_penalty`
+(so the TensorBoard breakdown sums to the effective reward), overridable per
+experiment via `RewardShaping(crash_penalty=...)` (spec-hashed), and skipped
+under a cost-emitting env, where crashes are constrained instead. The name
+`crash_penalty` is reserved — `reward_scales` may not use it.
 
 !!! warning "The `speed` term trains qualifying laps, not race finishers"
     "Faster is better" plus dense progress reward reliably produces fast,

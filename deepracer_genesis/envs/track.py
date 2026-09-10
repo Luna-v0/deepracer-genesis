@@ -248,12 +248,46 @@ class MultiTrack:
         }
 
     def lookahead(self, wp_idx, k, stride=2, dir_sign=None):
-        """Indices of the k upcoming waypoints per env, (N, k); `dir_sign` (N,) of +/-1 reverses walk direction."""
+        """Indices of the k upcoming waypoints per env, (N, k); `dir_sign` (N,) of +/-1 reverses walk direction.
+
+        CAUTION: index-based, so the horizon in meters is k*stride*spacing and
+        waypoint spacing varies ~48x across tracks (P1) — feature code uses
+        the arclength-based :meth:`lookahead_points_m` instead.
+        """
         offs = torch.arange(1, k + 1, device=self.device) * stride
         offs = offs[None, :]
         if dir_sign is not None:
             offs = offs * dir_sign[:, None].long()
         return torch.remainder(wp_idx[:, None] + offs, self.n_wps_env[:, None])
+
+    def lookahead_points_m(self, progress_m, distances, dir_sign=None):
+        """Centerline points at fixed arclengths ahead, interpolated, (N, H, 2).
+
+        Same searchsorted-on-``cum_len`` pattern as :meth:`curvature_ahead`,
+        so the horizon in meters is track-independent (the P1 fix). Points are
+        linearly interpolated along the waypoint tangent, which also bridges
+        coarse segments (e.g. ``Straight_track``'s 5.7 m closing hop).
+
+        Args:
+            progress_m: (N,) current arc position of each env.
+            distances: (H,) meters ahead (in each env's own driving direction)
+                at which to sample.
+            dir_sign: (N,) of +/-1; reversed envs sample backwards along the
+                waypoint order.
+
+        Returns:
+            (N, H, 2) world-frame centerline points.
+        """
+        d = torch.as_tensor(distances, device=self.device, dtype=progress_m.dtype)
+        sign = torch.ones_like(progress_m) if dir_sign is None else dir_sign
+        s = torch.remainder(progress_m[:, None] + sign[:, None] * d[None, :],
+                            self.total_len_env[:, None])       # (N, H)
+        rows = self.cum_len[self._ev]                           # (N, W), inf-padded
+        idx = (torch.searchsorted(rows, s.contiguous()) - 1).clamp(min=0)
+        idx = torch.minimum(idx, (self.n_wps_env[:, None] - 1).long())
+        ev = self._ev[:, None].expand_as(idx)
+        along = (s - torch.gather(rows, 1, idx)).unsqueeze(-1)  # (N, H, 1)
+        return self.center[ev, idx] + self.tangent[ev, idx] * along
 
     def curvature_ahead(self, progress_m, distances, dir_sign=None):
         """Signed track curvature sampled at fixed arclengths ahead.
