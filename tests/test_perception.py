@@ -13,7 +13,9 @@ from deepracer_genesis.perception.dataset import (DATASET_TRACKS, HOLDOUT_TRACKS
 from deepracer_genesis.perception.features import (CHANNEL_NAMES, SIGMA,
                                                    CNNPerceptionFeatures,
                                                    NoisyPerceptionFeatures)
-from deepracer_genesis.perception.model import PerceptionCNN
+from deepracer_genesis.perception.model import (DEFAULT_ARCH, PerceptionCNN,
+                                                load_checkpoint,
+                                                save_checkpoint)
 
 
 class _FakeEnv:
@@ -62,6 +64,60 @@ def test_the_model_refuses_a_frame_too_small_for_its_convolutions():
     """Fails at construction with the shape, not at the first matmul."""
     with pytest.raises(ValueError, match="too small"):
         PerceptionCNN(input_hw=(16, 16))
+
+
+def test_a_searched_architecture_round_trips_through_a_checkpoint(tmp_path):
+    """HPO contract: the arch travels WITH the weights, so any consumer can
+    rebuild a non-stock network without being told its shape."""
+    net = PerceptionCNN(channels=(16, 24), kernels=(5, 3), strides=(4, 2),
+                        head=64)
+    path = tmp_path / "custom.pt"
+    save_checkpoint(net, path)
+    again = load_checkpoint(path)
+    assert again.arch == net.arch
+    x = torch.rand(2, 12, 120, 160)
+    with torch.no_grad():
+        assert torch.equal(net(x), again(x))
+
+
+def test_a_bare_state_dict_still_loads_as_the_stock_architecture(tmp_path):
+    net = PerceptionCNN()
+    path = tmp_path / "bare.pt"
+    torch.save(net.state_dict(), path)
+    again = load_checkpoint(path)
+    assert again.arch["channels"] == DEFAULT_ARCH["channels"]
+    x = torch.rand(1, 12, 120, 160)
+    with torch.no_grad():
+        assert torch.equal(net.eval()(x), again(x))
+
+
+def test_probe_keys_are_invariant_across_architectures():
+    """`features.0.weight` / `head.3.weight` exist whatever the arch — the
+    bare-dict probes and any external tooling keep working."""
+    for net in (PerceptionCNN(),
+                PerceptionCNN(channels=(8,), kernels=(7,), strides=(4,),
+                              head=32, n_targets=5)):
+        sd = net.state_dict()
+        assert sd["features.0.weight"].shape[1] == net.arch["in_channels"]
+        assert sd["head.3.weight"].shape[0] == net.arch["n_targets"]
+
+
+def test_mismatched_arch_tuple_lengths_fail_at_construction():
+    with pytest.raises(ValueError, match="equal lengths"):
+        PerceptionCNN(channels=(32, 64), kernels=(5,), strides=(2, 2))
+
+
+def test_cnn_features_accept_a_searched_architecture(tmp_path):
+    """The sim-side consumer must rebuild a custom arch — a strict stock
+    rebuild here is what made HPO winners unusable downstream."""
+    net = PerceptionCNN(channels=(8, 16), kernels=(5, 3), strides=(4, 4),
+                        head=16)
+    path = tmp_path / "custom.pt"
+    save_checkpoint(net, path)
+    fs = CNNPerceptionFeatures(_FakeEnv(), {"checkpoint": path,
+                                            "cnn_device": "cpu"})
+    assert fs.net.arch == net.arch
+    assert not any(p.requires_grad for p in fs.net.parameters())
 
 
 # ---------------------------------------------------------------- the jitter

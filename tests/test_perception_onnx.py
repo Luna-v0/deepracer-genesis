@@ -74,7 +74,27 @@ try:
 except KeyError:
     rejects_bad_ckpt = True
 
+# a searched (non-stock) architecture with its own input size must export
+# from the arch the checkpoint carries — no shape arguments involved
+from deepracer_genesis.perception.model import save_checkpoint
+custom = PerceptionCNN(in_channels=6, n_targets=5, input_hw=(60, 80),
+                       channels=(8, 16), kernels=(5, 3), strides=(4, 2),
+                       head=32).eval()
+custom_ckpt = os.path.join(out, "custom.pt")
+save_checkpoint(custom, custom_ckpt)
+custom_path = export_perception_cnn(custom_ckpt, os.path.join(out, "c"))
+cust = ort.InferenceSession(custom_path, providers=["CPUExecutionProvider"])
+sample = torch.rand(1, 6, 60, 80)
+with torch.no_grad():
+    cref = custom(sample).numpy()
+(cgot,) = cust.run(None, {PERCEPTION_INPUT: sample.numpy()})
+custom_parity = float(np.abs(cgot - cref).max())
+
 print("REPORT:" + json.dumps({
+    "custom_inputs": [(i.name, list(i.shape)) for i in cust.get_inputs()],
+    "custom_parity": custom_parity,
+    "custom_card_arch": json.load(
+        open(os.path.join(out, "c", "perception_card.json")))["arch"],
     "per_inputs": [(i.name, list(i.shape)) for i in per.get_inputs()],
     "per_outputs": [(o.name, list(o.shape)) for o in per.get_outputs()],
     "act_inputs": [(i.name, list(i.shape)) for i in act.get_inputs()],
@@ -99,6 +119,16 @@ def report(tmp_path_factory):
     assert proc.returncode == 0, f"driver failed:\n{proc.stdout}\n{proc.stderr}"
     line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("REPORT:"))
     return json.loads(line[len("REPORT:"):])
+
+
+def test_custom_arch_exports_from_its_own_payload(report):
+    """A searched arch (6ch, 60x80, non-stock trunk) must export using the
+    arch the checkpoint carries and match torch numerically."""
+    assert report["custom_inputs"] == [[PERCEPTION_INPUT, [1, 6, 60, 80]]]
+    assert report["custom_parity"] < 1e-5
+    arch = report["custom_card_arch"]
+    assert arch["channels"] == [8, 16] and arch["head"] == 32
+    assert arch["input_hw"] == [60, 80]
 
 
 def test_perception_graph_io(report):

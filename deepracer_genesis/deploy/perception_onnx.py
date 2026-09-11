@@ -77,7 +77,8 @@ def export_perception_cnn(checkpoint: str, out_dir: str, *,
         checkpoint: Path to a ``PerceptionCNN`` state dict.
         out_dir: Directory the graph and card are written to.
         frame_stack: Camera frames stacked along the channel axis.
-        input_hw: Frame height and width the checkpoint was trained for.
+        input_hw: Frame height and width a BARE state dict was trained for;
+            arch-carrying checkpoints record their own and ignore this.
         opset: ONNX opset to emit.
 
     Returns:
@@ -90,14 +91,19 @@ def export_perception_cnn(checkpoint: str, out_dir: str, *,
     import torch
 
     from deepracer_genesis.perception.model import (CHANNEL_NAMES, SIGMA,
-                                                    PerceptionCNN)
+                                                    load_checkpoint)
 
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    in_channels = state["features.0.weight"].shape[1]
-    n_targets = state["head.3.weight"].shape[0]
-    net = PerceptionCNN(in_channels=in_channels, n_targets=n_targets,
-                        input_hw=input_hw).eval()
-    net.load_state_dict(state)
+    if "state_dict" not in state:
+        # bare stock state dict: the head was sized for the input_hw ARGUMENT
+        state = {"arch": {"in_channels": state["features.0.weight"].shape[1],
+                          "n_targets": state["head.3.weight"].shape[0],
+                          "input_hw": tuple(input_hw)},
+                 "state_dict": state}
+    net = load_checkpoint(state)
+    in_channels = net.arch["in_channels"]
+    n_targets = net.arch["n_targets"]
+    input_hw = tuple(net.arch["input_hw"])   # arch-carrying payloads win
 
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "perception.onnx")
@@ -115,6 +121,8 @@ def export_perception_cnn(checkpoint: str, out_dir: str, *,
         "kind": "perception_cnn",
         "source_checkpoint": os.path.basename(checkpoint),
         "opset": opset,
+        "arch": {k: list(v) if isinstance(v, tuple) else v
+                 for k, v in net.arch.items()},
         "parameters": sum(p.numel() for p in net.parameters()),
         "inputs": {PERCEPTION_INPUT: {
             "shape": [1, in_channels, h, w], "dtype": "float32",

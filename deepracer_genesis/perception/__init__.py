@@ -10,7 +10,12 @@ from deepracer_genesis.perception.features import (
     CNNPerceptionFeatures,
     NoisyPerceptionFeatures,
 )
-from deepracer_genesis.perception.model import PerceptionCNN
+from deepracer_genesis.perception.model import (
+    DEFAULT_ARCH,
+    PerceptionCNN,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 __all__ = [
     "CHANNEL_NAMES",
@@ -18,4 +23,7 @@ __all__ = [
     "CNNPerceptionFeatures",
     "NoisyPerceptionFeatures",
     "PerceptionCNN",
+    "DEFAULT_ARCH",
+    "save_checkpoint",
+    "load_checkpoint",
 ]

@@ -6,6 +6,7 @@ file lets every worker share the OS page cache instead.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 K = 4
 MAX_CURVATURE = 1.0          # past this, the track polyline itself is wrong
-CACHE_VERSION = 3            # bump to invalidate caches with a stale layout
+CACHE_VERSION = 4            # bump to invalidate caches with a stale layout
 
 # Where collected rollouts live. Defaults to ./data so a repo-root checkout
 # works unchanged; override to keep datasets outside the source tree.
@@ -112,7 +113,24 @@ def _fingerprint(tracks: Sequence[str]) -> list[list]:
                   for t in tracks for f in _parquet_files(t))
 
 
-def build_cache(tracks: Sequence[str] = DATASET_TRACKS) -> None:
+def _cache_dir(tracks: Sequence[str]) -> Path:
+    """One cache directory per track SET, keyed by content.
+
+    Datasets over different subsets (train vs holdout) must never overwrite
+    each other's blob: a shared cache re-stamped per subset corrupted the
+    first dataset's lazily-read frames (see the P16 ledger entry).
+
+    Args:
+        tracks: Dataset track names.
+
+    Returns:
+        The directory holding this set's blob, index and stamps.
+    """
+    key = hashlib.sha1("|".join(tracks).encode()).hexdigest()[:10]
+    return CACHE / key
+
+
+def build_cache(tracks: Sequence[str] = DATASET_TRACKS) -> Path:
     """Copy every image into one flat file and write the row index beside it.
 
     Writes nothing when the cache already matches the shards on disk.
@@ -120,20 +138,24 @@ def build_cache(tracks: Sequence[str] = DATASET_TRACKS) -> None:
     Args:
         tracks: Dataset track names to include.
 
+    Returns:
+        The track set's cache directory.
+
     Raises:
         FileNotFoundError: If a track directory has no ``meta.json``.
     """
-    CACHE.mkdir(parents=True, exist_ok=True)
-    stamp = CACHE / "sources.json"
+    cache = _cache_dir(tracks)
+    cache.mkdir(parents=True, exist_ok=True)
+    stamp = cache / "sources.json"
     state = {"version": CACHE_VERSION, "tracks": list(tracks),
              "sources": _fingerprint(tracks)}
     if stamp.exists() and json.loads(stamp.read_text()) == state:
-        return
+        return cache
 
     offsets, sizes, targets = [], [], []
     env, episode, step, track_id = [], [], [], []
     position = 0
-    with open(CACHE / "images.bin", "wb") as blob:
+    with open(cache / "images.bin", "wb") as blob:
         for tid, track in enumerate(tracks):
             meta = DATA_ROOT / track / "meta.json"
             if not meta.exists():
@@ -154,7 +176,7 @@ def build_cache(tracks: Sequence[str] = DATASET_TRACKS) -> None:
                 track_id.append(np.full(len(df), tid))
             logger.info("cached %s", track)
 
-    np.savez(CACHE / "index.npz",
+    np.savez(cache / "index.npz",
              offsets=np.array(offsets, np.int64),
              sizes=np.array(sizes, np.int32),
              targets=np.concatenate(targets).astype(np.float32),
@@ -164,6 +186,50 @@ def build_cache(tracks: Sequence[str] = DATASET_TRACKS) -> None:
              track_id=np.concatenate(track_id).astype(np.int16),
              tracks=np.array(tracks))
     stamp.write_text(json.dumps(state))
+    return cache
+
+
+def build_raw_cache(tracks: Sequence[str], hw: tuple[int, int]) -> Path:
+    """Materialize every frame at ``(h, w)`` as one raw uint8 memmap.
+
+    Decode and resize happen ONCE here; serving is then a byte slice, so no
+    PNG decoder runs in the training loop (the loaders, not the GPU, bound
+    perception-HPO wall-clock). Rebuilds only when the sources change.
+
+    Args:
+        tracks: Dataset track names to include.
+        hw: Target frame height and width; must not exceed the collected
+            resolution (upscaling invents nothing).
+
+    Returns:
+        The track set's cache directory.
+
+    Raises:
+        ValueError: If ``hw`` exceeds a collected frame's size.
+    """
+    cache = build_cache(tracks)
+    h, w = hw
+    stamp = cache / f"raw_{h}x{w}.json"
+    state = {"version": CACHE_VERSION, "hw": [h, w],
+             "sources": json.loads((cache / "sources.json").read_text())["sources"]}
+    if stamp.exists() and json.loads(stamp.read_text()) == state:
+        return cache
+
+    d = np.load(cache / "index.npz")
+    blob = np.memmap(cache / "images.bin", dtype=np.uint8, mode="r")
+    with open(cache / f"raw_{h}x{w}.bin", "wb") as out:
+        for offset, size in zip(d["offsets"], d["sizes"]):
+            img = Image.open(io.BytesIO(blob[offset:offset + size].tobytes()))
+            if img.height < h or img.width < w:
+                raise ValueError(
+                    f"raw cache at {hw} would UPSCALE {img.height}x{img.width} "
+                    "frames; collect at the highest resolution you search")
+            if (img.height, img.width) != (h, w):
+                img = img.resize((w, h), Image.LANCZOS)
+            out.write(np.asarray(img, dtype=np.uint8).tobytes())
+    stamp.write_text(json.dumps(state))
+    logger.info("raw cache %sx%s built for %d tracks", h, w, len(tracks))
+    return cache
 
 
 class RolloutDataset(Dataset):
@@ -175,10 +241,12 @@ class RolloutDataset(Dataset):
         k: Frames per stack.
         index: Row indices at which a valid stack starts.
         targets: Supervision targets for every cached row.
+        resolution: ``(h, w)`` frames are served at, or None for as-collected.
     """
 
     def __init__(self, tracks: Sequence[str] = DATASET_TRACKS, k: int = K,
-                 jitter: bool = False, seed: int = 0) -> None:
+                 jitter: bool = False, seed: int = 0,
+                 resolution: tuple[int, int] | None = None) -> None:
         """Build the cache if needed and index every valid stack start.
 
         Args:
@@ -186,12 +254,20 @@ class RolloutDataset(Dataset):
             k: Frames per stack.
             jitter: Apply camera jitter to the training frames.
             seed: Base seed; each dataloader worker derives its own stream.
+            resolution: ``(h, w)`` to serve frames at, from a raw uint8 cache
+                materialized once (no per-batch PNG decode); None serves the
+                collected frames as-is via PNG decode.
 
         Raises:
-            ValueError: If a requested track is absent from the cache.
+            ValueError: If a requested track is absent from the cache, or
+                ``resolution`` exceeds the collected frame size.
         """
-        build_cache(tracks)
-        d = np.load(CACHE / "index.npz")
+        self.resolution = tuple(resolution) if resolution is not None else None
+        if self.resolution is not None:
+            self._dir = build_raw_cache(tracks, self.resolution)
+        else:
+            self._dir = build_cache(tracks)
+        d = np.load(self._dir / "index.npz")
         all_tracks = [str(t) for t in d["tracks"]]
         missing = set(tracks) - set(all_tracks)
         if missing:
@@ -247,7 +323,7 @@ class RolloutDataset(Dataset):
         return frames, target
 
     def _frame(self, row: int, camera: tuple | None = None) -> torch.Tensor:
-        """Decode one cached frame and apply the stack's camera state.
+        """Serve one cached frame and apply the stack's camera state.
 
         Args:
             row: Cache row index.
@@ -256,11 +332,22 @@ class RolloutDataset(Dataset):
         Returns:
             A ``(3, H, W)`` float tensor in ``[0, 1]``.
         """
-        if self._blob is None:
-            self._blob = np.memmap(CACHE / "images.bin", dtype=np.uint8, mode="r")
-        offset, size = self.offsets[row], self.sizes[row]
-        img = Image.open(io.BytesIO(self._blob[offset:offset + size].tobytes()))
-        a = np.asarray(img, dtype=np.float32) / 255.0   # (H, W, 3)
+        if self.resolution is not None:
+            # raw path: a byte slice off the memmap — no PNG decoder involved
+            h, w = self.resolution
+            if self._blob is None:
+                self._blob = np.memmap(self._dir / f"raw_{h}x{w}.bin",
+                                       dtype=np.uint8, mode="r")
+            start = row * h * w * 3
+            a = (np.asarray(self._blob[start:start + h * w * 3])
+                 .reshape(h, w, 3).astype(np.float32) / 255.0)
+        else:
+            if self._blob is None:
+                self._blob = np.memmap(self._dir / "images.bin",
+                                       dtype=np.uint8, mode="r")
+            offset, size = self.offsets[row], self.sizes[row]
+            img = Image.open(io.BytesIO(self._blob[offset:offset + size].tobytes()))
+            a = np.asarray(img, dtype=np.float32) / 255.0   # (H, W, 3)
         if camera is not None:
             a = camera_jitter.apply(a, camera, self._rng)
         return torch.from_numpy(a).permute(2, 0, 1)     # (3, H, W)
