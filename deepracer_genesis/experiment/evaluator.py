@@ -80,7 +80,8 @@ class EvalRecord:
 def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
                     obs_transform: Callable | None = None,
                     cost_budget: Optional[float] = None,
-                    telemetry: Optional[str] = None) -> dict:
+                    telemetry: Optional[str] = None,
+                    telemetry_envs: Optional[int] = None) -> dict:
     """Run a deterministic eval rollout on the raw sim, reading exact
     terminal stats from sim.step_info (no collector/autoreset).
 
@@ -98,6 +99,8 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
             telemetry for the whole rollout (``analysis.telemetry``) and
             flushes it there; recording failures are printed, never raised
             (an eval must not die over its bookkeeping).
+        telemetry_envs: Record only this many evenly spaced envs (None = all);
+            metrics still cover every env.
 
     Returns:
         Scalar metrics dict from aggregate_episodes().
@@ -111,8 +114,9 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
     recorder = None
     if telemetry is not None:
         try:
-            from ..analysis.telemetry import TelemetryRecorder
-            recorder = TelemetryRecorder(sim)
+            from ..analysis.telemetry import TelemetryRecorder, telemetry_env_ids
+            recorder = TelemetryRecorder(
+                sim, envs=telemetry_env_ids(sim.num_envs, telemetry_envs))
         except Exception as e:                    # noqa: BLE001
             print(f"[telemetry] recorder unavailable ({e}); eval continues")
 

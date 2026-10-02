@@ -50,7 +50,7 @@ def rollout_video(target, *, root: str = "runs", ckpt: Optional[str] = None,
         target: Any experiment handle (registered name / function / class /
             spec).
         root: Runs directory the run dir resolves under.
-        ckpt: Checkpoint path; defaults to best.pt in the experiment's own
+        ckpt: Checkpoint path; defaults to model.pt in the experiment's own
             run directory.
         track: Evaluate the SAME policy on a different track (policies are
             track-agnostic — observations are track-relative).

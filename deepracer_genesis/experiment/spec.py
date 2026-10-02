@@ -115,6 +115,16 @@ class SpecError(ValueError):
 
 VALID_COST_FNS = ("offtrack", "offtrack_or_overspeed", "crash")
 
+#: checkpoint retention policies (``EvalConfig.keep_checkpoints``)
+KEEP_CHECKPOINTS = ("best_last", "all")
+
+#: eval metrics that may pick ``model_best.pt`` — all higher-is-better
+BEST_METRICS = ("mean_progress_m", "mean_return", "completion_rate",
+                "mean_laps", "mean_speed_mps")
+
+#: ``EvalConfig`` fields that shape run OUTPUT, never training — hash-exempt
+_OUTPUT_ONLY_EVAL = ("telemetry_envs", "keep_checkpoints", "best_metric")
+
 
 @dataclass(frozen=True)
 class EnvSpec:
@@ -363,6 +373,13 @@ class EvalConfig:
             you can watch the policy drive each real track (needs a display; use
             a small ``eval_num_envs``). Orthogonal to the obs renderer — the
             window shows the cars while the policy still runs on its own obs.
+        telemetry_envs: envs recorded in PERIODIC-eval telemetry (evenly
+            spaced; None = all). Final/holdout telemetry is always full.
+        keep_checkpoints: ``"best_last"`` keeps only ``model.pt``,
+            ``model_last.pt`` and ``model_best.pt``; ``"all"`` keeps every
+            ``model_<iter>.pt``.
+        best_metric: periodic-eval metric (higher is better) that picks
+            ``model_best.pt``; one of :data:`BEST_METRICS`.
     """
 
     real_tracks: tuple[str, ...] = ()
@@ -370,6 +387,23 @@ class EvalConfig:
     eval_episodes: Optional[int] = None
     charts: bool = True
     gui: bool = False
+    telemetry_envs: Optional[int] = 64
+    keep_checkpoints: str = "best_last"
+    best_metric: str = "mean_progress_m"
+
+    def __post_init__(self) -> None:
+        if self.telemetry_envs is not None and (
+                isinstance(self.telemetry_envs, bool)
+                or not isinstance(self.telemetry_envs, int)
+                or self.telemetry_envs < 1):
+            raise ValueError(f"telemetry_envs must be an int >= 1 or None, "
+                             f"got {self.telemetry_envs!r}")
+        if self.keep_checkpoints not in KEEP_CHECKPOINTS:
+            raise ValueError(f"keep_checkpoints must be one of {KEEP_CHECKPOINTS}, "
+                             f"got {self.keep_checkpoints!r}")
+        if self.best_metric not in BEST_METRICS:
+            raise ValueError(f"best_metric must be one of {BEST_METRICS}, "
+                             f"got {self.best_metric!r}")
 
 
 @dataclass(frozen=True)
@@ -429,6 +463,8 @@ class ExperimentSpec:
             for late in ("crash_penalty", "episode_length_s", "max_laps"):
                 if env_p.get(late) is None:
                     env_p.pop(late, None)
+        for key in _OUTPUT_ONLY_EVAL:        # retention knobs: never identity
+            payload.get("eval", {}).pop(key, None)
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
     def run_dir(self, root: str = "runs") -> str:

@@ -609,17 +609,23 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
         v = _write_strip(f, inner, inner - normal * line_width, 0.002, v, flip)
         v = _write_strip(f, outer, outer + normal * line_width, 0.002, v, not flip)
 
-        # dashed centerline: quads along arclength
+        # dashed centerline: quads along arclength. Endpoints INTERPOLATE
+        # between waypoints (like _dash_quads.at): extrapolating along the
+        # waypoint tangent walked dashes off the road on coarse tracks
+        # (~0.9 m spacing), since the residual can be a full segment long.
         f.write("usemtl centerline\n")
         seg = np.linalg.norm(np.roll(center, -1, axis=0) - center, axis=1)
         cum = np.concatenate([[0.0], np.cumsum(seg)])
+        nxt = np.roll(center, -1, axis=0)
         s, total = 0.0, cum[-1]
         while s < total - dash_len:
             a = np.searchsorted(cum, s, side="right") - 1
             b = np.searchsorted(cum, s + dash_len, side="right") - 1
             a, b = min(a, len(center) - 1), min(b, len(center) - 1)
-            pa = center[a] + tangent[a] * (s - cum[a])
-            pb = center[b] + tangent[b] * (s + dash_len - cum[b])
+            fa = (s - cum[a]) / max(seg[a], 1e-9)
+            fb = (s + dash_len - cum[b]) / max(seg[b], 1e-9)
+            pa = center[a] * (1 - fa) + nxt[a] * fa
+            pb = center[b] * (1 - fb) + nxt[b] * fb
             na, nb = normal[a] * (line_width * 1.2), normal[b] * (line_width * 1.2)
             for p in (pa + na, pa - na, pb - nb, pb + nb):
                 f.write(f"v {p[0]:.5f} {p[1]:.5f} 0.003\n")

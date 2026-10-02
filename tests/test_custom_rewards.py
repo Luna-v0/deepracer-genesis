@@ -155,6 +155,8 @@ def test_empty_reward_params_keep_pre_p12_content_hashes():
                         ("max_laps", None)):
         if payload["env"].get(late) is unset:
             payload["env"].pop(late, None)
+    for key in ("telemetry_envs", "keep_checkpoints", "best_metric"):
+        payload["eval"].pop(key)                     # ADR 0004: output-only
     manual = hashlib.sha1(
         json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
     assert _spec(reward_params={"t": 1}).id() == manual

@@ -158,15 +158,21 @@ A run directory is self-contained — copy it anywhere:
 
 ```
 runs/<group>/<variant>-<seed>-<id>/
-  best.pt            # actor+critic weights + the spec that trained them
-  spec.json          # exact config (one-way record)
-  eval_record.json   # final + periodic eval metrics
+  model.pt           # final weights + optimizer (resumable; export/video default)
+  model_best.pt      # weights only, best periodic eval by EvalConfig.best_metric
+  model_last.pt      # only while running / when stopped early (HPO-pruned)
+  eval_record.json   # spec + final/periodic/holdout metrics + best checkpoint
+  telemetry/         # eval_<frames>.parquet (telemetry_envs subset), final, holdout_*
   events.out.*       # TensorBoard
   videos/            # rollout_video outputs
 ```
 
+`Evaluation(keep_checkpoints="all")` keeps rsl-rl's `model_<iter>.pt` files and
+`Evaluation(telemetry_envs=None)` records every env in periodic evals — both are
+off by default to keep run dirs small (ADR 0004).
+
 ```python
-rollout_video(MyFirst, ckpt="wherever/best.pt")       # load explicitly
+rollout_video(MyFirst, ckpt="wherever/model.pt")       # load explicitly
 ```
 
 On Colab, mount Drive and `shutil.copytree(run_dir, "/content/drive/MyDrive/...")`

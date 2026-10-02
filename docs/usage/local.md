@@ -84,7 +84,7 @@ python -m deepracer_genesis.train -B 4096 --max_iterations 500 --exp_name teache
 ## Evaluate & inspect
 
 ```bash
-python -m deepracer_genesis.eval --checkpoint runs/.../best.pt --num_envs 24 --res 1280x960
+python -m deepracer_genesis.eval --checkpoint runs/.../model.pt --num_envs 24 --res 1280x960
 python -m deepracer_genesis.validation.camera_check --num_envs 4
 python -m deepracer_genesis.validation.dr_check --knobs world_color,brightness   # see the DR editor guide
 tensorboard --logdir runs/
@@ -94,9 +94,15 @@ tensorboard --logdir runs/
 
 ```
 runs/<group>/<variant>-<seed>-<id>/
-  best.pt           # actor + critic weights + spec
-  spec.json         # config record
-  eval_record.json  # final + periodic metrics
-  events.out.*      # TensorBoard
-  videos/           # rollout videos
+  model.pt           # final weights + optimizer (resumable; export/video default)
+  model_best.pt      # weights only, best periodic eval by EvalConfig.best_metric
+  model_last.pt      # only while running / when stopped early (HPO-pruned)
+  eval_record.json   # spec + final/periodic/holdout metrics + best checkpoint
+  telemetry/         # eval_<frames>.parquet (telemetry_envs subset), final, holdout_*
+  events.out.*       # TensorBoard
+  videos/            # rollout_video outputs
 ```
+
+`Evaluation(keep_checkpoints="all")` keeps rsl-rl's `model_<iter>.pt` files and
+`Evaluation(telemetry_envs=None)` records every env in periodic evals — both are
+off by default to keep run dirs small (ADR 0004).

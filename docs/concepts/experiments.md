@@ -94,7 +94,7 @@ class FeatureBaselineSmall(FeatureBaseline):     # a variant
     num_envs = 256
 
 class FeatureBaselineFineTune(FeatureBaseline):  # start from trained weights
-    resume = "runs/.../model_1500.pt"
+    resume = "runs/.../model_best.pt"  # or model.pt
 
 run(FeatureBaseline)
 ```

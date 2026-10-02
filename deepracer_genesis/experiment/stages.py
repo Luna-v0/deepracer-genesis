@@ -749,6 +749,9 @@ class Evaluation(Stage):
         gui: open the interactive viewer during the out-of-loop holdout eval so
             you can watch the policy drive each real track (needs a display;
             keep eval_num_envs small).
+        telemetry_envs: envs recorded in periodic-eval telemetry (None = all).
+        keep_checkpoints: ``"best_last"`` (model.pt + last + best) or ``"all"``.
+        best_metric: higher-is-better eval metric that picks ``model_best.pt``.
         KIND: Stage category tag (eval).
     """
 
@@ -757,6 +760,9 @@ class Evaluation(Stage):
     eval_episodes: Optional[int] = None
     charts: bool = True
     gui: bool = False
+    telemetry_envs: Optional[int] = 64
+    keep_checkpoints: str = "best_last"
+    best_metric: str = "mean_progress_m"
 
     KIND = "eval"
 
@@ -766,7 +772,10 @@ class Evaluation(Stage):
             eval_num_envs=self.eval_num_envs,
             eval_episodes=self.eval_episodes,
             charts=self.charts,
-            gui=self.gui))
+            gui=self.gui,
+            telemetry_envs=self.telemetry_envs,
+            keep_checkpoints=self.keep_checkpoints,
+            best_metric=self.best_metric))
 
 
 # ----------------------------------------------------------------------
