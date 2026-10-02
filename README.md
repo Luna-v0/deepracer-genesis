@@ -1,6 +1,7 @@
 # deepracer-genesis
 
-**New here? Start with [TUTORIAL.md](TUTORIAL.md).**
+**New here? Start with [TUTORIAL.md](TUTORIAL.md).** The full manual (concepts,
+guides, API reference) is the mkdocs site under [`docs/`](docs/) — `uv run mkdocs serve`.
 
 AWS DeepRacer RL environment ported from ROS/Gazebo to [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) —
 ROS-free, GPU-batched, vision-based, trained with rsl-rl-lib PPO.
@@ -13,62 +14,62 @@ ROS-free, GPU-batched, vision-based, trained with rsl-rl-lib PPO.
   front RGB camera at 160x120 (rendered per env by the Madrona `BatchRenderer`).
 - rsl-rl-lib **5.x** VecEnv contract (TensorDict observation groups
   `"state"` / `"camera"`, no `reset()` from the runner, `extras["time_outs"]`).
+- Reproducible by construction: `spec.seed` seeds python/numpy/torch before the
+  sim builds (bit-identical same-seed runs on the CPU backend;
+  `DR_DETERMINISTIC=1` additionally requests deterministic torch kernels).
 
 ## Renderers (one stack, three options)
 
 | Renderer | Use for | Quality | Colors | Vision steps/s (RTX 4060 Ti, 160x120) |
 |---|---|---|---|---|
 | Madrona batch (`vision_renderer="batch"`, default) | **training camera policies** | rasterized | dash-hue quirk | ~27.5k @ 256 envs |
-| Nyx (`vision_renderer="nyx"`, `pip install gs-nyx-plugin`) | correct-color eval / validation | path traced | correct | ~1.5k @ 256 envs |
-| per-env rasterizer (`raster-vision` branch; also the spectator cam) | videos, debugging, per-env scene variants | rasterized | correct | ~600 ceiling |
+| Nyx (`vision_renderer="nyx"`, extras `nyx`) | correct-color eval / validation | path traced | correct | ~1.5k @ 256 envs |
+| per-env rasterizer (`backend="cpu"`; also the spectator cam) | videos, debugging, GPU-free smoke runs | rasterized | correct | ~90 end-to-end camera training on CPU |
 
 Default recipe: train on Madrona, validate frames on Nyx, record videos with
 the rasterizer spectator (`rollout_video` does this automatically). Full
-decision guide + walkthrough: [TUTORIAL.md](TUTORIAL.md).
+decision guide: [`docs/concepts/renderers.md`](docs/concepts/renderers.md).
 
 Nyx facts: reads OBJ not DAE (tracks ship converted under `assets/tracks/*/obj/`),
 requires unmerged URDF links, denoise/AA kept off (temporal history smears
-moving objects), no heterogeneous multi-track scenes, driver 575+.
-
+moving objects), driver 575+.
 
 ## Layout
 
 ```
 deepracer_genesis/
-  envs/deepracer_env.py     # batched VecEnv-style environment
-  envs/track.py             # track registry + GPU waypoint geometry
-  randomization/domain_rand.py
+  envs/                     # batched VecEnv env, track geometry, signals bus,
+                            #   feature sets, renderers, MDP (reward/termination)
+  experiment/               # the >> DSL: stages -> content-hashed ExperimentSpec,
+                            #   Builder, rsl-rl backend, evaluator, report, visualize
+  perception/               # frozen-CNN perception: model, dataset, camera jitter
+  datasets/rollout.py       # camera rollout collection -> parquet shards
+  deploy/                   # ONNX export (policy + perception) + car bundle
+  tools/                    # track builder, track zoo, DR editor, track split
   configs/cfgs.py           # env cfg + rsl-rl 5.x train cfg
-  train.py / eval.py
-  validation/camera_check.py  # paired onboard+topdown images, automated checks
-  assets/                   # car URDF/meshes, track DAEs, waypoint routes
-benchmarks/throughput.py    # sweep -> results.csv + results.md (final table)
+  randomization/            # DR catalog, spaces, domain_rand
+  validation/camera_check.py
+  assets/                   # car URDF/meshes, track meshes, waypoint routes
+benchmarks/throughput.py    # sweep -> results.csv + results.md
+examples/                   # runnable single-file experiments (camera, feature,
+                            #   HPO study, zoos, live viewer)
+docs/                       # mkdocs manual + ADRs (docs/decisions/)
 ```
 
 ## Setup
 
 ```bash
-uv venv --python 3.12 .venv && source .venv/bin/activate
-uv sync                        # everything (torch, genesis, torchrl, ...)
-uv sync --extra tracking --extra hpo   # + mlflow, optuna
+uv sync                                  # core (feature-vector training runs CPU-only)
+uv sync --extra vision --extra nyx       # + GPU renderers
+# other extras: hpo (optuna), analysis (pandas+matplotlib), perception,
+# export (onnx+onnxruntime; run exports in a genesis-free process)
 ```
 
-Requires Linux x86-64 + NVIDIA GPU (BatchRenderer needs CUDA; genesis-world
-pulls `gs-madrona` automatically).
-
-### CUDA 13 toolkit note (gs-madrona 0.0.7)
-
-`gs-madrona` bundles `libnvJitLink.so.12` (CUDA 12.4) but prefers the system's
-`libnvrtc.so.13` at runtime. With a CUDA 13 system toolkit the NVRTC-13 LTO
-output can't be linked by nvJitLink-12 and scene build dies with
-`nvJitLink error: Internal error`. Fix used here (see `scripts/fix_madrona_cuda13.sh`):
-
-1. `uv pip install nvidia-cuda-nvrtc-cu12==12.4.127`
-2. symlink `libnvrtc.so.12`, `libnvrtc.so`, `libnvrtc-builtins.so.12.4` from
-   `site-packages/nvidia/cuda_nvrtc/lib/` into `site-packages/gs_madrona/`
-   (madrona's `$ORIGIN` RUNPATH picks them up)
-3. binary-patch the dlopen name `libnvrtc.so.13` -> `libnvrtc.so.12` in
-   `site-packages/gs_madrona/libmadgs_mgr.so` (same byte length)
+Camera training wants Linux x86-64 + an NVIDIA GPU; feature-vector training
+and the CPU rasterizer path run without one. Madrona's device heap is
+pre-sized to 1 GiB on init so a shared GPU (e.g. with an LLM resident)
+doesn't kill the process; override via `MADRONA_MWGPU_DEVICE_HEAP_SIZE`.
+(Historical CUDA-13 / gs-madrona 0.0.7 linking fix: `scripts/fix_madrona_cuda13.sh`.)
 
 ## Google Colab
 
@@ -78,21 +79,22 @@ defines a single-file experiment in a cell, trains it, renders the
 many-agents spectator video inline, and saves the run directory to Google
 Drive. Point the `REPO` variable in the install cell at your fork.
 
-## Experiment framework (TorchRL, config-as-code)
+## Experiment framework (config-as-code, rsl-rl backend)
 
-`deepracer_genesis/experiment/` implements EXPERIMENT_PLAN.md: experiments are
-Python functions/classes composing stages with `>>` into a content-hashed
-`ExperimentSpec`; a `Builder` turns specs into TorchRL objects (Collector,
-ClipPPOLoss, GAE — PPO-Lagrangian with a PID-controlled lambda for SafeRL*
-envs); the `Trainer` writes checkpoints + an `EvalRecord` per run under
-`runs/{group}/{variant}-{seed}-{id}/`; re-running an identical config is a
-cache hit.
+`deepracer_genesis/experiment/`: experiments are Python classes composing
+stages with `>>` into a frozen, content-hashed `ExperimentSpec`; `run()`
+validates it, builds the Genesis sim, and trains it with rsl-rl's
+`OnPolicyRunner`, writing checkpoints + an `eval_record.json` per run under
+`runs/{group}/{variant}-{seed}-{id}/`. The content hash names the run dir —
+identical configs share one — but **runs always retrain** (there is no result
+cache). `resume="path/to/model.pt"` warm-starts from a checkpoint
+(weights only, so the spec's own lr/schedule apply).
 
 ### Running experiments
 
 An experiment is one file, one class — no command line needed: training
 config as class attributes, the env / DR / policy pipeline as a `>>` chain,
-`run(TheClass)` in `__main__`. Copy `experiments/template.py`:
+`run(TheClass)` in `__main__`. Copy an example from `examples/`:
 
 ```python
 from deepracer_genesis.experiment import (CameraEnvironment, Experiment,
@@ -113,147 +115,127 @@ class MyExperiment(Experiment):
                                           critic_keys=("camera", "state")))
 
 if __name__ == "__main__":
-    run(MyExperiment)                     # uv run experiments/my_experiment.py
+    run(MyExperiment)                     # uv run examples/my_experiment.py
 ```
 
 Variants are subclasses (`class NoDR(MyExperiment): ...`) — each gets its own
-content-hashed run dir; re-running an identical config is a cache hit.
-
-The same experiments run from the CLI or from Python:
+content-hashed run dir. Experiments are referenced **by class**, not by a
+name registry; the CLI takes a `module:Class` path:
 
 ```bash
-python -m deepracer_genesis.experiment --list                 # registered names
-python -m deepracer_genesis.experiment feature_baseline --seed 3 --eval-every 1000000
-python -m deepracer_genesis.experiment MyExperiment --set num_envs=64
-python -m deepracer_genesis.experiment feature_baseline --video --track reInvent2019_track
+python -m deepracer_genesis.experiment examples.camera:CameraMadronaDr --seed 3
+python -m deepracer_genesis.experiment examples.camera:CameraMadronaDr --set num_envs=64
 python -m deepracer_genesis.experiment --report                # runs/report.md
 ```
 
 ```python
-import experiments                             # registrations fire
-from deepracer_genesis.experiment import run
-run("feature_baseline")                        # 5M steps in ~90 s on a 4060 Ti
-run("cam_baseline", seed=3)                    # Env 1: camera+asym+full DR
+from deepracer_genesis.experiment import build, run
+from deepracer_genesis.experiment.overrides import override
 
-from deepracer_genesis.experiment.ablation import sweep, seeds
-for spec in seeds(sweep(run("safe_feature", build_only=True),
-                        "env.cost_budget", [10, 25, 50]), k=3):
-    run(spec)
+base = build(MyExperiment)                     # frozen ExperimentSpec
+for seed in range(3):                          # variants are plain comprehensions
+    run(override(base, "seed", seed))          # 3 seeds, 3 run dirs
 from deepracer_genesis.experiment.report import build_report
 build_report("runs")                           # report.md + report.csv
 ```
 
-Multi-track training: pass `tracks=(...)` to a feature env stage — Genesis
-builds a heterogeneous morph per track and each parallel env simulates its
-own geometry. (Camera multi-track is rejected: the batch renderer has no
-per-env variant visibility in genesis 1.2.1, so all tracks would render
-superimposed.)
+Episode knobs on the env stages: `episode_length_s` (time cap, default 30 s),
+`max_laps=N` (truncate after N laps — bootstrapped like a timeout, no
+penalty), `random_start` / `random_direction` (a lap is cumulative progress
+from the spawn, so a lap's finish line is its own random start point). Run
+artifacts are bounded by `Evaluation(keep_checkpoints=..., telemetry_envs=...)`
+(ADR 0004): finished runs keep `model.pt` + a weights-only best checkpoint
+instead of one file per eval.
 
-Spawns are randomized (`random_start=True`, plus lateral/yaw noise under DR);
-a lap is measured as cumulative progress from the spawn point, so the finish
-line of a lap is exactly the (random) start location. Adding
-`random_direction=True` to an env stage also coin-flips the driving direction
-(clockwise vs counter-clockwise) each episode — heading, progress and
-lookahead observations all follow the chosen direction.
+Multi-track training: pass `tracks=(...)` to an env stage. Feature envs build
+a heterogeneous morph per track; camera envs use **spatial tiling** (each
+track on its own world tile, works on Madrona, Nyx, and the rasterizer —
+render and memory scale with the track count).
 
-### Custom rewards, discrete actions, agents
+### Custom rewards, actions, agents
 
-- **Reward functions** are named, registered, plain-torch:
-  `@register_reward("time_trial")` over the batched env, then
-  `>> RewardShaping(fn="time_trial", scales={"progress": 10.0})` — every term
-  is logged per episode. (The spec hashes the NAME, not the body — rename
-  after editing, or `force=True`.)
-- **Action space**: continuous TanhNormal `[steer, speed]` by default; pass
-  `actions=discrete_grid(steer_bins=5, speed_bins=2)` (or any list of
-  `(steer, speed)` pairs) to a policy stage for the original DeepRacer-style
-  DISCRETE Categorical policy. The sim accepts indices transparently.
-- **Scripted agents** (`experiment/agents.py`): `CenterlineFollower` /
-  `NoisyExpert` drive collection and previews; subclass `PrivilegedAgent`
-  to script your own behavior over the sim's track-frame state.
+- **Reward functions are plain callables passed as parameters** (no registry;
+  the spec hashes the fn's *name*, not its body). A fn returns named per-step
+  terms weighted by `scales` — or the reward itself (a bare `(N,)` tensor);
+  `_`-prefixed terms are diagnostic-only TensorBoard channels, and
+  `RewardShaping(params={...})` makes constants spec-hashed and searchable
+  (ADR 0002). The terminal `crash_penalty` (−10 default) is logged in the
+  per-term breakdown and overridable per experiment. Declare what a fn reads
+  with `@reads(...)` so the build can verify the critic sees those signals.
+  Contract: [`docs/concepts/rewards-actions.md`](docs/concepts/rewards-actions.md).
+- **Action space**: continuous Gaussian `[steer, speed]`. Discrete action
+  tables are accepted by the DSL (`actions=discrete_grid(...)`) but have no
+  trainer on the rsl-rl backend yet — `run()` raises a clear `SpecError`
+  (same for PPO-Lagrangian / cost specs since the TorchRL removal).
+- **Scripted agents** (`agents/`): `CenterlineFollower` / `NoisyExpert` drive
+  collection and previews; subclass `PrivilegedAgent` to script your own
+  behavior over the sim's track-frame state.
 
 ### Deployment: ONNX + model card
 
 ```python
-from deepracer_genesis.experiment.export import export_policy
-export_policy("feature_baseline")     # -> run_dir/export/policy.onnx + model_card.json
+from deepracer_genesis.deploy.onnx import export_policy, export_from_run_dir
+export_policy(MyExperiment)            # -> run_dir/export/: policy.onnx,
+                                       #    model_card.json, model_metadata.json,
+                                       #    <name>.tar.gz car bundle
+export_from_run_dir("runs/g/v-0-abc")  # no spec rebuild; also a CLI:
+                                       #    python -m deepracer_genesis.deploy.onnx <run_dir>
 ```
 
-The actor exports with a deterministic head (verified against torch to
-1e-6); `model_card.json` records the observation definitions (camera
-res/FOV, state layout), the action space (continuous bounds + physical
-mapping, or the discrete table), the full training spec and final metrics.
+Camera actors export with the `FRONT_FACING_CAMERA` input the car's inference
+stack expects; feature actors export as `STATE` with the observation
+normalization **baked into the graph**. Output is the raw Gaussian mean —
+unbounded, clip to `[-1, 1]` before use. Opset 11 (the car's OpenVINO
+ceiling), verified against torch, and refused inside a process that imported
+genesis (clashing LLVM symbols). Guide:
+[`docs/guides/deployment.md`](docs/guides/deployment.md).
 
-### Track dataset for ML
+### Perception: a frozen CNN instead of privileged state
 
-```python
-from deepracer_genesis.tools.track_split import TrackDataset
-ds = TrackDataset()        # holdout: the physically printed tracks
-ds.train, ds.test, ds.holdout
-```
+`deepracer_genesis.perception`: train a CNN to predict the camera-recoverable
+state channels, then drive the sim from it (`CNNPerceptionFeatures`) or add
+calibrated noise instead (`NoisyPerceptionFeatures`). `PerceptionCNN` is
+parameterized for architecture search and checkpoints carry their own
+architecture; `RolloutDataset` serves k-frame stacks from per-track-set
+memmap caches, optionally at a chosen `resolution` (decode+resize once — no
+PNG decode in the training loop). Collection (`datasets/rollout.py`) writes
+single frames per step; stacks are rebuilt at train time, so one dataset
+serves every frame-stack depth. See
+[`docs/concepts/perception.md`](docs/concepts/perception.md).
 
-Deterministic train/test split over all registered tracks with a by-name
-holdout (default: `reinvent_base`, `Oval_track`) that never enters training
-or tuning; `scripts/collect_sim2real.py --split train` collects accordingly.
+### Domain randomization: what varies, when
 
-### Domain randomization: what varies, when, and what can't (yet)
+**Per step** (tensor ops on obs/actions, fresh draws every step):
+`DomainRandomizationCamera` (brightness, contrast, saturation, hue, blur,
+cutout, pixel noise), `DomainRandomizationActions` (steer/speed noise;
+`delay_steps=k` adds constant action latency).
 
-**Per step — effectively unlimited.** Anything expressible as a tensor op on
-observations or actions runs at full speed with fresh draws every step:
+**Per episode** (env-side, no scene rebuild): `DomainRandomizationPhysics`
+(friction, mass/COM shift, steering kp, wheel kv, armature — per env, batched),
+camera mount jitter, spawn randomization, `DomainRandomizationTrackAppearance`
+(per-env world-color remap of the rendered obs).
 
-- `DomainRandomizationCamera` → image aug on the rendered obs: brightness,
-  contrast, saturation, hue rotation, gaussian blur, cutout patches, pixel
-  noise (per env, per step).
-- `DomainRandomizationActions` → gaussian steer/speed noise on the action
-  path (per env, per step).
+**Per run** (baked at scene build): track geometry/meshes, lighting (one sun
+per scene — no per-env lighting), camera FOV/resolution, env count, and the
+Nyx per-env sky tint/exposure (`env_map_tint` / `env_map_multiplier`).
 
-**Per episode — resampled at every reset, env-side.** These change the world
-each episode without touching the compiled scene:
-
-- `DomainRandomizationPhysics` → friction, mass shift, center-of-mass shift,
-  steering kp scale, wheel kv scale, armature (per env, batched via Genesis's
-  `batch_dofs_info`/`batch_links_info`).
-- Camera mount jitter (pitch/position of the onboard camera).
-- Spawn: random waypoint + lateral/yaw noise (`random_start`), coin-flip
-  driving direction (`random_direction`).
-- `DomainRandomizationTrackAppearance` → world-color remap of the rendered
-  obs (hue rotation + saturation/value + channel mix + bias; invertible so
-  the task stays readable). Cost @128 camera envs: 16k → 12k steps/s.
-
-**Fixed for the whole run — the scene compiles once.** Changing these means
-a new process/run (cheap: content-hashed runs make sweeps over them easy):
-
-- Track geometry and scene textures/meshes.
-- Lighting (one sun per scene: direction/intensity — **no per-env lighting**
-  in Genesis 1.2).
-- Camera FOV/resolution, number of envs.
-- Action DELAY depth: `delay_steps=k` is a constant latency (the ring buffer
-  is fixed size); the noise on top varies per step, but per-episode-random
-  latency would need a variable-depth read (easy extension, not built).
-
-**Hard renderer limits (the brick wall).** Genesis 1.2.1 never passes
-per-env variant visibility (`vgeom.active_envs_mask`) to the Madrona batch
-renderer — only the (slow, ~600 steps/s) rasterizer path honors it. Until
-that lands upstream, under Madrona there is no per-env: scene textures,
-track meshes, or multi-track camera training (all variants render
-superimposed and z-fight). Nyx additionally refuses heterogeneous morphs
-outright and reads only OBJ. `randomization/appearance.py` still bakes
-texture-variant meshes for rasterizer-based use, and validation rejects the
-unsound combinations with an explanation.
+The full knob catalog with costs is
+[`docs/reference/dr-catalog.md`](docs/reference/dr-catalog.md); the
+interactive DR editor (`tools/dr_editor`) previews any combination.
 
 ### Hyperparameter optimization
 
-`experiments/hpo_optuna.py` is a working single-GPU Optuna study: each trial
-trains in a fresh subprocess (Genesis builds one scene per process), the
-trainer's periodic deterministic evals (`eval_every_steps`) stream back as the
-optimization signal, and Hyperband prunes bad trials mid-training. The study
-is resumable (`sqlite:///runs/hpo/study.db`), and the content-hash identity
-cache makes duplicate configs free.
+`examples/hpo.py` is a working single-GPU Optuna study over PPO knobs AND
+network architecture (MLP vs recurrent arms as conditional parameters): the
+trainer's periodic deterministic evals stream to the pruner via `on_eval`, so
+Hyperband kills bad trials mid-training. Because rewards, scales,
+`reward_params`, and architectures are all ordinary spec data, they are all
+searchable. Guide: [`docs/guides/hpo.md`](docs/guides/hpo.md).
 
 ### Tracks
 
-17 tracks ship registered (3 original DAE + 14 generated); any of the 126
-official DeepRacer routes is one call away, and custom tracks are drawn in a
-notebook:
+**298 tracks ship registered** (originals + the generated zoo); any official
+DeepRacer route is one call away, and custom tracks are drawn in a notebook:
 
 ```python
 from deepracer_genesis.tools.track_builder import fetch_official_track, build_route, install_track
@@ -264,74 +246,53 @@ install_track("my_track", route)            # -> tracks=("my_track",) anywhere
 
 Generated tracks get a procedural road mesh (asphalt, border lines, dashed
 centerline) that renders identically under Madrona/Nyx/rasterizer. The
-interactive flow lives in `notebooks/track_designer.ipynb`: sketch a polygon,
-preview, install, sanity-drive with the built-in controller, train.
+interactive flow lives in `notebooks/track_designer.ipynb`; the zoo tools
+(`tools/zoo.py`) compile and preview track sets in bulk, and
+`tools/track_split.py` provides the deterministic train/test/holdout split
+(`scripts/collect_sim2real.py --split train` collects accordingly).
 
 ### Observability
 
-TensorBoard always (event file per run dir). MLflow when
-`MLFLOW_TRACKING_URI` is set (e.g. `sqlite:////path/mlflow.db`): spec params,
-per-iteration training metrics, periodic + final eval metrics, spec/record
-artifacts. Both log per collector iteration (~200 per 5M-step run), never per
-env-step — the overhead is unmeasurable. `runs/report.md` aggregation and the
-identity cache work regardless.
+TensorBoard always (event file per run dir): per-iteration training metrics
+plus per-term episode reward sums — the breakdown includes the terminal
+`crash_penalty`, so the rows add up to the reward the learner actually saw.
+Every run writes `eval_record.json` (spec dump, seed, metrics, eval history);
+`build_report("runs")` aggregates records into comparison tables. Periodic
+eval telemetry records a configurable env subset (`telemetry_envs`) so long
+runs don't grow unbounded.
 
-### Visual verification & data collection
+### Custom algorithms
 
-```python
-from deepracer_genesis.experiment.visualize import rollout_video, dr_preview_video
-rollout_video("feature_baseline")                       # bird's-eye mp4, trained policy
-rollout_video("feature_baseline", track="reInvent2019_track")   # same policy, new track
-dr_preview_video("cam_baseline")                        # raw|augmented onboard + random-spawn view
-# cam_baseline includes appearance DR: the preview shows each car in its own world
+Pass `... >> Algo(cls=MyAlgorithm, params={...})` with any class speaking the
+rsl-rl runner interface (`algorithms/protocol.py`; subclassing
+`rsl_rl.algorithms.PPO` and overriding `compute_returns`/`update` is the easy
+path). The spec validates the interface up front instead of failing inside
+the runner.
 
-from deepracer_genesis.experiment.data_collection import collect_camera_dataset
-collect_camera_dataset(track="reinvent_base", out="data/reinvent")  # .npz shards:
-# image (B,H,W,3) uint8, state (B,28), pose (B,4) — teleport sweep over
-# (waypoint x lateral x yaw) grid, optional ImageAug
-```
-
-### Custom algorithms (SAC, world models, ...)
-
-`deepracer_genesis/experiment/algorithms.py` defines the `Algorithm` protocol
-the Trainer drives: implement `setup(builder)`, `collect_policy`,
-`eval_actor`, `train_on_batch(data)`, `observe_env_logs(logs)`,
-`checkpoint()`, register with `@register_algorithm("my_kind")`, and select it
-from the DSL with `... >> Algo(kind="my_kind", params={...})`. PPO and
-PPO-Lagrangian are themselves implementations of the protocol — see the
-module docstring for the step-by-step guide.
-
-## Usage
+## Usage (plain CLI, no experiment framework)
 
 ```bash
 # state-based teacher (fast policy search)
 python -m deepracer_genesis.train -B 4096 --max_iterations 500 --exp_name teacher
-
-# heterogeneous parallel envs: pass a list of morphs per track — each env
-# simulates + renders a different track (Genesis balanced block assignment)
-python -m deepracer_genesis.validation.camera_check --num_envs 6 \
-    --tracks reinvent_base,reInvent2019_track,2022_reinvent_champ
 
 # vision policy (CNN on 160x120 RGB), with domain randomization
 python -m deepracer_genesis.train -B 256 --vision --randomize --max_iterations 1000 --exp_name vision
 
 # camera validation: paired onboard/topdown snapshots + videos + automated checks
 python -m deepracer_genesis.validation.camera_check --num_envs 4
-python -m deepracer_genesis.validation.camera_check --checkpoint logs/vision/model_1000.pt
+python -m deepracer_genesis.validation.camera_check --num_envs 6 \
+    --tracks reinvent_base,reInvent2019_track,2022_reinvent_champ
 
-# eval a checkpoint: records a high-res "spectator" video (bird's-eye,
-# ALL agents on the track at once, true colors) + onboard video (vision envs)
+# eval a checkpoint: high-res spectator video (all agents, true colors) + onboard
 python -m deepracer_genesis.eval --checkpoint logs/teacher/model_500.pt --num_envs 24 --res 1280x960
 
-# throughput sweep -> benchmarks/results.md (max steps/s per agent x n_agents)
+# throughput sweep -> benchmarks/results.md
 python benchmarks/throughput.py --sweep
 ```
 
 Training is fully headless; nothing needs a display. The vision pipeline is
-validated by `camera_check.py`, which saves paired images from the onboard
-camera and a top-down camera above the track and runs four automated checks
-(non-degenerate frames, temporal change, per-env difference, cross-view
-position consistency).
+validated by `camera_check.py` (non-degenerate frames, temporal change,
+per-env difference, cross-view position consistency).
 
 ## Notes / known quirks
 
@@ -344,25 +305,20 @@ position consistency).
 - Drive torque is clamped (`wheel_max_torque`) near the traction limit;
   unbounded torque with a P velocity controller causes wheel-slip limit cycles.
 - The Madrona BatchRenderer renders some alpha-textured DAE ground materials
-  fully transparent (background bleed-through). `reinvent_base` ships with the
-  field submesh stripped and a Genesis-surface-colored overlay instead
-  (also a handy hook for per-track visual DR).
-- Per-env lighting and per-env actuator gains are not supported by Genesis
-  1.2; lighting is global at build time, gains are jittered globally per reset.
-- Heterogeneous tracks: `scene.add_entity([morph_a, morph_b, ...])` gives each
-  env one geometry variant (contiguous blocks, `_balanced_variant_mapping`).
-  `MeshSet` is unrelated (soft-body mesh collections) — the plan's original
-  assumption was wrong for genesis 1.2.0.
+  fully transparent; `reinvent_base` ships with the field submesh stripped and
+  a surface-colored overlay instead.
+- Madrona renders the alpha-cutout centerline texture with R and G swapped
+  (dashes look yellow-green onboard). Consistent for training, cosmetic
+  otherwise; `madrona_rg_swap` in the vision cfg flips it back.
+- Baked track meshes from before 2026-09-11 place centerline dashes slightly
+  off the road on coarse-waypoint tracks (tangent-extrapolation bug, fixed in
+  the baker); shipped assets are not yet regenerated — rebake a track to pick
+  up the fix.
+- Per-env lighting is not supported by Genesis (lighting is global at build
+  time); per-env *tracks* are supported via spatial tiling.
+- The BatchRenderer requires all cameras to share one resolution. The
+  "spectator" camera escapes this via the rasterizer (`add_camera(debug=True)`):
+  any resolution, true colors, every env's car in one image.
 - On the reInvent2019 track, cars under the start-gate bridge are occluded
   from the top-down camera; the cross-view validation check tolerates
   legitimate occlusion (visible cars must project within 8 px).
-- The BatchRenderer requires all cameras to share one resolution. The
-  "spectator" camera escapes this via `add_camera(debug=True)`: it renders
-  through the rasterizer at any resolution, with true texture colors, and
-  shows every env's car in a single image — used for high-res demo videos.
-- Madrona renders the alpha-cutout centerline texture with R and G swapped
-  (dashes look yellow-green onboard instead of orange). Asset-level fixes
-  don't take; the rasterizer path (spectator, cpu-vision branch) is correct.
-  Consistent for training, cosmetic otherwise.
-- Branch `cpu-vision`: visual-only training on the CPU backend (per-env
-  rasterizer cameras instead of Madrona). Slow; for correctness checks.
