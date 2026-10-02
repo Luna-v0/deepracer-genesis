@@ -46,11 +46,13 @@ divisors).
 A reward function is a plain callable, passed as a parameter (no registry):
 
 ```python
-RewardFn = Callable[[DeepRacerEnv], dict[str, torch.Tensor]]
+RewardFn = Callable[[DeepRacerEnv], dict[str, torch.Tensor] | torch.Tensor]
 ```
 
-It maps the env to named `(N,)` per-step terms; the env weights them by
-`reward_scales` and sums. The built-in `deepracer` reward (`envs/rewards.py:19-42`):
+It maps the env to named `(N,)` per-step terms weighted by `reward_scales` and
+summed — or to a bare `(N,)` tensor that *is* the step reward (see
+[Custom rewards](#custom-rewards)). The built-in `deepracer` reward
+(`envs/rewards.py`):
 
 | Term | Formula | Intent |
 |------|---------|--------|
@@ -60,11 +62,47 @@ It maps the env to named `(N,)` per-step terms; the env weights them by
 | `heading` | `−|heading_err|·dt` | align with track tangent |
 | `steering` | `−|steer_action|·dt` | discourage needless steering |
 | `action_rate` | `−‖aₜ − aₜ₋₁‖²·dt` | smooth control |
-| `off_track` | `−(lateral outside half_width − wheel_margin)·dt` | penalize leaving the road |
+| `off_track` | `−(lateral outside half_width − wheel_margin)·dt` | penalize edge-riding |
 
 All terms scale by control `dt`, so weights are timestep-independent. Per-term sums
-are tracked for logging. The `reward_scales` are positive magnitudes — each term
-carries its own sign, so every penalty row above is already negative-valued.
+are tracked for logging. The full term/scale table with defaults lives in the
+[reward parameters reference](../reference/reward-parameters.md).
+
+The weighted sum is **not** the whole reward: when an episode ends by going
+off track or flipping (not by timeout), `check_termination` adds a one-time
+**crash penalty** (default −10.0) on top — the largest single-step magnitude
+in the system. It appears in the TensorBoard breakdown as
+`Episode/rew_crash_penalty` (so the per-term rows sum to what the learner
+saw), and is searchable via `RewardShaping(crash_penalty=...)` /
+`EnvSpec.crash_penalty`. Under a cost-emitting (safe-RL) env the penalty is
+**not** applied — crashes become the constrained cost instead — so the same
+reward fn trains against a different effective objective there.
+
+!!! note "Signs live in the terms"
+    Penalty terms are negative and `reward_scales` stay positive. This is
+    load-bearing: until 2026-08 the `off_track` term was accidentally
+    positive, so the default reward *paid* +2·dt per step for riding the
+    track edge — 4× the centering bonus — and camera policies dutifully
+    learned to crash. `tests/test_rewards.py` pins every term's sign.
+
+### What the reward taught us (a short story)
+
+Three generations of camera policy, same network, same PPO settings:
+
+1. **Progress + "faster is better" speed bonus** — fast, crash-prone
+   driving: ~1.0 off-track rate, under 40% lap completion even on training
+   tracks.
+2. **Progress gated on-track, no speed term** — reward-hacked itself: with
+   nothing paying for motion, standing still on the centerline farms the
+   `centered` bonus forever. The cars parked.
+3. **Target-pace speed term** (`−|v − 1.6 m/s|·dt`) — the winner of a
+   reward-design search scored on ground-truth lap completion. Roughly
+   doubled completion everywhere, including 78% on a track the policy had
+   never seen.
+
+Moral: the reward is the strongest lever in this repo, it is searchable
+(functions are parameters), and it must be *evaluated* on a metric it
+cannot inflate.
 
 ### Custom rewards
 
@@ -78,9 +116,43 @@ def my_reward(env):
 ... >> RewardShaping(fn=my_reward, scales={"progress": 10.0, "smooth": 0.1})
 ```
 
+A reward doesn't have to be a weighted sum. Return a bare `(N,)` tensor and
+that tensor **is** the step reward — no term names, no scales (leave `scales`
+empty; it logs to TensorBoard as `Episode/rew_total`):
+
+```python
+def paced(env):
+    pace = -(env.v_forward - env.reward_params["target"]).abs() * env.dt
+    return 10.0 * env.d_progress + pace
+
+... >> RewardShaping(fn=paced, params={"target": 1.6})
+```
+
+Three supporting pieces make the monolithic form a first-class citizen:
+
+- **`params`** — constants the fn reads via `env.reward_params`. Unlike a
+  closure constant (`make_paced(1.6)`), they are part of the spec's content
+  hash and land in `eval_record.json`, so two runs with different targets get
+  different run dirs — and HPO can search them like any other spec field.
+- **Diagnostic channels** — a term whose name starts with `_` is accumulated
+  into the per-term TensorBoard breakdown (`Episode/diag_<name>`) but never
+  summed into the reward, so a monolithic reward keeps its decomposition.
+- **`total`** — returning `{"total": <reward>, "_pace": ..., "_progress": ...}`
+  with no scales combines the two: `total` is the reward verbatim, the `_`
+  terms are its logged breakdown. (With scales set, term names are ordinary
+  and `total` has no special meaning.)
+
+Misconfigurations fail loudly at the first step: a bare tensor alongside
+`scales`, named terms with no `scales`, an unscaled non-`_` term next to
+`total`, or a scale referencing a `_` term all raise `ValueError`.
+
+Declare what your fn reads with `@reads(...)` (`envs/rewards.py`) so the
+build-time learnability check can verify the critic sees those signals —
+`spec.validate()` warns if a custom reward leaves it undeclared.
+
 The env fields available to a reward (`v_forward`, `lateral`, `half_width`,
 `heading_err`, `d_progress`, `actions`, `last_actions`, ...) are the same ones the
 feature vector reads — see [Feature vectors](features.md) for the full palette, and
-`REFACTOR_PLAN.md` Part K for the planned shared **signal bus** that unifies
+`envs/signals.py` for the shared **signal bus** that unifies
 features, reward, and cost over one vocabulary (e.g. `off_track` as a reward term in
 plain RL and a cost term under safe RL).

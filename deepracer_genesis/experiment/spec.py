@@ -20,11 +20,110 @@ def _json_default(o):
     return getattr(o, "__qualname__", None) or getattr(o, "__name__", None) or repr(o)
 
 
+# Per-key values that leave the physics/geometry/mount DR inert: the builder
+# seeds cfg["rand"] from this and knob-compat validation uses it to tell "the
+# stage's neutral default" apart from "an actually-activated knob" (the physics
+# stage always emits every key, neutral or not).
+NEUTRAL_PHYSICS = {
+    "friction_range": (1.0, 1.0),
+    "mass_shift_kg": 0.0,
+    "com_shift_m": 0.0,
+    "steer_kp_scale": (1.0, 1.0),
+    "wheel_kv_scale": (1.0, 1.0),
+    "armature_range": (0.0, 0.0),
+    "track_width_scale": (1.0, 1.0),
+}
+
+
+def _is_neutral(leaf: str, value) -> bool:
+    """True when ``value`` for a ``rand.*`` leaf equals its inert default.
+
+    Args:
+        leaf: The ``cfg["rand"]`` key (e.g. ``"friction_range"``).
+        value: The value the spec carries for it (tuple/list/scalar).
+
+    Returns:
+        Whether applying this value is a no-op (so compat checks skip it).
+    """
+    neutral = NEUTRAL_PHYSICS.get(leaf)
+    if neutral is None:
+        return False
+    v = tuple(value) if isinstance(value, (list, tuple)) else value
+    return v == neutral
+
+
+def _active_knobs(spec: "ExperimentSpec") -> list[tuple]:
+    """Resolve every DR knob this spec activates to its catalog entry.
+
+    The spec's DR containers are stringly-keyed dicts; this is the single
+    place mapping them onto ``randomization.catalog`` entries, so a typo
+    fails loudly here instead of silently sampling nothing at runtime.
+
+    Args:
+        spec: The experiment spec being validated.
+
+    Returns:
+        ``(knob, value)`` pairs for every activated catalog knob. Falsy values
+        and physics values equal to their :data:`NEUTRAL_PHYSICS` default are
+        not activations (the physics stage always emits every key).
+
+    Raises:
+        SpecError: If a DR dict carries a key no catalog knob claims.
+    """
+    from ..randomization.catalog import BY_NAME, CATALOG
+
+    image = {k.cfg_key.rsplit(".", 1)[1]: k for k in CATALOG
+             if k.cfg_key.startswith("obs_dr.image_aug.")}
+    physics = {k.cfg_key.rsplit(".", 1)[1]: k for k in CATALOG
+               if k.cfg_key.startswith("rand.")
+               and k.layer in ("physics", "geometry")}
+    action = {k.cfg_key.rsplit(".", 1)[1]: k for k in CATALOG
+              if k.cfg_key.startswith("action_dr.")}
+    active: list[tuple] = []
+
+    def resolve(dct: dict, table: dict, what: str) -> None:
+        unknown = sorted(set(dct) - set(table))
+        if unknown:
+            raise SpecError(
+                "%s has unknown key(s) %s (they would be silently ignored at "
+                "runtime); known keys: %s" % (what, unknown, sorted(table)))
+        active.extend((table[k], v) for k, v in dct.items()
+                      if v and not _is_neutral(table[k].cfg_key.rsplit(".", 1)[1], v))
+
+    resolve(spec.obs_dr.image_aug, image, "obs_dr.image_aug")
+    resolve(spec.obs_dr.physics, physics, "obs_dr.physics")
+    resolve(spec.obs_dr.camera_jitter,
+            {"pitch_deg": BY_NAME["camera_pitch_jitter"],
+             "pos_m": BY_NAME["camera_pos_jitter"]}, "obs_dr.camera_jitter")
+    resolve(spec.obs_dr.appearance,
+            {"world_color": BY_NAME["world_color"]}, "obs_dr.appearance")
+    resolve(spec.obs_dr.env_map,
+            {"tint": BY_NAME["env_map_tint"],
+             "multiplier": BY_NAME["env_map_multiplier"]}, "obs_dr.env_map")
+    if spec.obs_dr.pixel_noise:
+        active.append((BY_NAME["pixel_noise"], spec.obs_dr.pixel_noise))
+    for leaf in ("steer_noise", "speed_noise", "delay_steps"):
+        value = getattr(spec.action_dr, leaf)
+        if value:
+            active.append((action[leaf], value))
+    return active
+
+
 class SpecError(ValueError):
     """A structurally or semantically invalid experiment declaration."""
 
 
 VALID_COST_FNS = ("offtrack", "offtrack_or_overspeed", "crash")
+
+#: checkpoint retention policies (``EvalConfig.keep_checkpoints``)
+KEEP_CHECKPOINTS = ("best_last", "all")
+
+#: eval metrics that may pick ``model_best.pt`` — all higher-is-better
+BEST_METRICS = ("mean_progress_m", "mean_return", "completion_rate",
+                "mean_laps", "mean_speed_mps")
+
+#: ``EvalConfig`` fields that shape run OUTPUT, never training — hash-exempt
+_OUTPUT_ONLY_EVAL = ("telemetry_envs", "keep_checkpoints", "best_metric")
 
 
 @dataclass(frozen=True)
@@ -46,6 +145,10 @@ class EnvSpec:
         random_direction: flip driving direction (CW/CCW) per episode.
         reward: reward callable, or None for the built-in default.
         reward_scales: per-term scale overrides for the reward.
+        reward_params: constants the reward fn reads via ``env.reward_params``.
+        crash_penalty: terminal off-track/flip penalty override (None = -10.0).
+        episode_length_s: episode time limit override in seconds (None = 30.0).
+        max_laps: truncate the episode after N completed laps (None = endless).
         emits_cost: whether the env produces a cost signal for SafeRL.
         cost_fn: which cost function to emit.
         cost_budget: per-episode cost budget.
@@ -90,14 +193,52 @@ class EnvSpec:
     # coin-flip the driving direction (CW vs CCW) each episode; heading /
     # progress / lookahead observations follow the chosen direction
     random_direction: bool = False
-    # reward: a reward CALLABLE (envs/rewards.py: env -> {term: (N,) tensor}) +
-    # scale overrides. None keeps the built-in `deepracer` default. The fn's
-    # NAME is recorded in the run-dir id (not its body); runs always retrain.
+    # reward: a reward CALLABLE (envs/rewards.py: env -> {term: (N,) tensor},
+    # or -> a bare (N,) reward tensor) + scale overrides. None keeps the
+    # built-in `deepracer` default. The fn's NAME is recorded in the run-dir
+    # id (not its body); runs always retrain.
     reward: "RewardFn | None" = None
     reward_scales: dict = field(default_factory=dict)
+    # spec-hashed constants the reward fn reads via `env.reward_params` — the
+    # searchable/recorded home for what would otherwise be closure constants.
+    # Excluded from id() when empty so pre-existing content hashes are stable.
+    reward_params: dict = field(default_factory=dict)
+    # terminal crash penalty override (P11.c) — searchable like any weight.
+    # None keeps the config default (-10.0) and is excluded from id() so
+    # pre-existing content hashes are stable. Ignored under emits_cost (the
+    # CMDP path constrains crashes instead of penalizing them).
+    crash_penalty: float | None = None
+    # episode time limit override (P3): long tracks (arctic_open 42 m, Albert
+    # 51 m) are unwinnable in the 30 s default. None keeps the config default
+    # and is excluded from id() so pre-existing content hashes are stable.
+    episode_length_s: float | None = None
+    # lap-quota episode end: N truncates the episode once `laps >= N` (a
+    # bootstrapped truncation like the time cap — no penalty), None keeps the
+    # endless default. Excluded from id() when None (hash-stable).
+    max_laps: int | None = None
     emits_cost: bool = False
     cost_fn: Optional[str] = None
     cost_budget: Optional[float] = None
+
+    @property
+    def effective_renderer(self) -> Optional[str]:
+        """The renderer that will actually back this env's camera, or None.
+
+        The single source of truth for renderer resolution, mirrored by
+        ``Builder.sim_cfg``: feature envs render nothing; camera envs on the
+        CPU backend always fall to the per-env rasterizer (cpu wins over an
+        explicit ``render='nyx'``, matching the builder's branch order);
+        otherwise ``render`` picks Nyx or Madrona.
+
+        Returns:
+            ``"madrona"``, ``"nyx"``, or ``"rasterizer"`` for camera envs;
+            ``None`` for feature envs.
+        """
+        if self.modality != "camera":
+            return None
+        if self.backend == "cpu":
+            return "rasterizer"
+        return "nyx" if self.render == "nyx" else "madrona"
 
 
 @dataclass(frozen=True)
@@ -232,6 +373,13 @@ class EvalConfig:
             you can watch the policy drive each real track (needs a display; use
             a small ``eval_num_envs``). Orthogonal to the obs renderer — the
             window shows the cars while the policy still runs on its own obs.
+        telemetry_envs: envs recorded in PERIODIC-eval telemetry (evenly
+            spaced; None = all). Final/holdout telemetry is always full.
+        keep_checkpoints: ``"best_last"`` keeps only ``model.pt``,
+            ``model_last.pt`` and ``model_best.pt``; ``"all"`` keeps every
+            ``model_<iter>.pt``.
+        best_metric: periodic-eval metric (higher is better) that picks
+            ``model_best.pt``; one of :data:`BEST_METRICS`.
     """
 
     real_tracks: tuple[str, ...] = ()
@@ -239,6 +387,23 @@ class EvalConfig:
     eval_episodes: Optional[int] = None
     charts: bool = True
     gui: bool = False
+    telemetry_envs: Optional[int] = 64
+    keep_checkpoints: str = "best_last"
+    best_metric: str = "mean_progress_m"
+
+    def __post_init__(self) -> None:
+        if self.telemetry_envs is not None and (
+                isinstance(self.telemetry_envs, bool)
+                or not isinstance(self.telemetry_envs, int)
+                or self.telemetry_envs < 1):
+            raise ValueError(f"telemetry_envs must be an int >= 1 or None, "
+                             f"got {self.telemetry_envs!r}")
+        if self.keep_checkpoints not in KEEP_CHECKPOINTS:
+            raise ValueError(f"keep_checkpoints must be one of {KEEP_CHECKPOINTS}, "
+                             f"got {self.keep_checkpoints!r}")
+        if self.best_metric not in BEST_METRICS:
+            raise ValueError(f"best_metric must be one of {BEST_METRICS}, "
+                             f"got {self.best_metric!r}")
 
 
 @dataclass(frozen=True)
@@ -257,7 +422,7 @@ class ExperimentSpec:
         total_env_steps: total environment steps to train for.
         eval_every_steps: eval interval in env-steps (0 = final eval only).
         seed: random seed.
-        ablation_group: bookkeeping tag grouping related runs.
+        group: run-grouping tag — names the runs/<group>/ folder.
         variant: bookkeeping tag naming this run within its group.
     """
 
@@ -272,7 +437,7 @@ class ExperimentSpec:
     total_env_steps: int = 5_000_000
     eval_every_steps: int = 0        # 0 = final eval only; N = also every N env-steps
     seed: int = 0
-    ablation_group: Optional[str] = None
+    group: Optional[str] = None
     variant: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -283,16 +448,27 @@ class ExperimentSpec:
 
     def id(self) -> str:
         """Content-hash identity (sha1 of the config JSON, excluding the
-        ablation_group/variant tags) so equal configs share a run dir."""
+        group/variant tags) so equal configs share a run dir."""
         # sha1, NOT built-in hash(): identity must be stable across processes.
-        # ablation_group/variant are bookkeeping tags, not configuration —
+        # group/variant are bookkeeping tags, not configuration —
         # the same training config keeps one id however it is tagged.
         payload = {k: v for k, v in self.to_dict().items()
-                   if k not in ("ablation_group", "variant")}
+                   if k not in ("group", "variant")}
+        env_p = payload.get("env")
+        if env_p:
+            # fields added after launch are hash-exempt at their unset default
+            # (absent == default), keeping pre-existing hashes/run dirs valid
+            if not env_p.get("reward_params"):
+                env_p.pop("reward_params", None)
+            for late in ("crash_penalty", "episode_length_s", "max_laps"):
+                if env_p.get(late) is None:
+                    env_p.pop(late, None)
+        for key in _OUTPUT_ONLY_EVAL:        # retention knobs: never identity
+            payload.get("eval", {}).pop(key, None)
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
     def run_dir(self, root: str = "runs") -> str:
-        group = self.ablation_group or "default"
+        group = self.group or "default"
         variant = self.variant or "run"
         return f"{root}/{group}/{variant}-{self.seed}-{self.id()}"
 
@@ -327,9 +503,11 @@ class ExperimentSpec:
         self._validate_environment()
         self._validate_obs_routing()
         self._validate_key_routing()
+        self._validate_policy_arch()
         self._validate_encoder()
         self._validate_obs_dr()
         self._validate_action_dr()
+        self._validate_knob_compat()
         self._validate_algorithm()
         self._validate_learnability()
         return self
@@ -338,8 +516,8 @@ class ExperimentSpec:
         """Check env modality/render coherence and the cost signal.
 
         Raises:
-            SpecError: On a modality/render mismatch, nyx multi-track, or a
-                bad cost_fn/cost_budget.
+            SpecError: On a modality/render mismatch or a bad
+                cost_fn/cost_budget.
         """
         env = self.env
         from ..tracks import exists, names
@@ -351,18 +529,24 @@ class ExperimentSpec:
                 raise SpecError("feature envs do not render; got render=%r" % env.render)
             case "camera" if env.render not in ("madrona", "nyx"):
                 raise SpecError("camera envs need render='madrona'|'nyx'; got %r" % env.render)
-        if env.render == "nyx" and len(env.tracks) > 1:
-            raise SpecError(
-                "heterogeneous tracks are Madrona-only (repo constraint); "
-                "render='nyx' with tracks=%r" % (env.tracks,))
+        # multi-track camera envs use Part O spatial tiling on Madrona AND Nyx
+        # (verified by scripts/verify_nyx_tiling.py: tiled variants are plain
+        # meshes on separate world tiles — no per-env visibility needed); the
+        # old blanket nyx refusal only ever applied to the heterogeneous
+        # (superimposed) path, which envs/scene.py still rejects.
         # Part M Tier 2: Madrona/Nyx are GPU-only, so camera obs on the CPU
         # backend goes through the RasterizerObsRenderer, which the builder
         # selects by setting vision_renderer='rasterizer'. It is ONE batched
-        # camera over all envs, and spatial tiling (Part O) is renderer-agnostic,
-        # so multi-track works here too (verified on a 2-track render): each
-        # track sits on its own tile and a car only ever frames its own. It stays
-        # a debug / small-num_envs / no-GPU path, because the rasterizer walks
-        # every tile's geometry per frame, so its cost grows with the track count.
+        # camera over all envs, and spatial tiling is renderer-agnostic, so
+        # multi-track works there too (verified on a 2-track render): each track
+        # sits on its own tile and a car only ever frames its own. It stays a
+        # debug / small-num_envs / no-GPU path, because the rasterizer walks
+        # every tile's geometry per frame, so its cost grows with track count.
+        if env.max_laps is not None and (not isinstance(env.max_laps, int)
+                                         or env.max_laps < 1):
+            raise SpecError(
+                "max_laps must be an int >= 1 (or None for endless episodes); "
+                "got %r" % (env.max_laps,))
         if env.modality == "camera" and env.backend == "cpu":
             warnings.warn(
                 "camera obs on backend='cpu' uses the RasterizerObsRenderer: one "
@@ -424,6 +608,26 @@ class ExperimentSpec:
             raise SpecError(
                 "obs_routing critic must see >= the actor's blocks (privileged "
                 "critic); actor-only blocks %s" % sorted(actor_only))
+
+    def _validate_policy_arch(self) -> None:
+        """Check the policy's mlp dict (recurrence support, rnn shape).
+
+        Raises:
+            SpecError: If a camera (CNN) policy requests recurrence —
+                rsl-rl's ``RNNModel`` has no CNN trunk — or the rnn config
+                names an unsupported cell type.
+        """
+        rnn = (self.policy.mlp or {}).get("rnn")
+        if rnn is None:
+            return
+        if self.policy.cnn is not None:
+            raise SpecError(
+                "mlp={'rnn': ...} needs a vector policy: rsl-rl's RNNModel "
+                "has no CNN trunk, so camera policies cannot be recurrent "
+                "(drop the rnn config or switch to a feature environment)")
+        cell = rnn.get("type", "lstm")
+        if cell not in ("lstm", "gru"):
+            raise SpecError(f"rnn type must be 'lstm' or 'gru', got {cell!r}")
 
     def _validate_key_routing(self) -> None:
         """Check actor/critic obs keys, discrete actions, and camera routing.
@@ -502,7 +706,8 @@ class ExperimentSpec:
         if obs_dr.env_map and env.modality != "camera":
             raise SpecError("env_map DR randomizes the rendered sky; "
                             "it needs a camera env")
-        if env.modality == "camera" and len(env.tracks) > 1 and env.render == "madrona":
+        if env.modality == "camera" and len(env.tracks) > 1 \
+                and env.render in ("madrona", "nyx"):
             # Part O: sound via spatial tiling (each variant on its own world
             # tile), NOT the broken heterogeneous-morph path. It costs K× track
             # geometry per env (render + memory ~linear in K) — run the Part O
@@ -526,6 +731,35 @@ class ExperimentSpec:
             raise SpecError("delay_steps must be >= 0")
         if self.action_dr.steer_noise < 0 or self.action_dr.speed_noise < 0:
             raise SpecError("action noise magnitudes must be >= 0")
+
+    def _validate_knob_compat(self) -> None:
+        """Check every activated DR knob acts under this modality/renderer.
+
+        The compatibility matrix lives on the catalog knobs themselves
+        (``Knob.modalities`` / ``Knob.renderers``); this loop only enforces
+        it, so a renderer limitation is a one-line catalog edit, not a code
+        branch. Principle: a knob either acts or refuses to build — never a
+        silent no-op (e.g. ``track_width`` under camera, camera-mount jitter
+        under Nyx, ``env_map`` under Madrona).
+
+        Raises:
+            SpecError: If an activated knob has no effect in this env's
+                modality, is inert under the renderer that will actually run,
+                or a DR dict carries a key no catalog knob claims.
+        """
+        env = self.env
+        renderer = env.effective_renderer
+        for knob, _value in _active_knobs(self):
+            hint = " (%s)" % knob.note if knob.note else ""
+            if env.modality not in knob.modalities:
+                raise SpecError(
+                    "DR knob '%s' has no effect in %s mode%s"
+                    % (knob.name, env.modality, hint))
+            if renderer is not None and renderer not in knob.renderers:
+                raise SpecError(
+                    "DR knob '%s' is inert under render=%r; supported "
+                    "renderer(s): %s%s"
+                    % (knob.name, renderer, sorted(knob.renderers), hint))
 
     def _validate_algorithm(self) -> None:
         """Check the algorithm matches the env's cost signal and budget.
@@ -562,7 +796,7 @@ class ExperimentSpec:
                     and algo.lagrangian.get("budget") not in (None, env.cost_budget)):
                 raise SpecError(
                     "conflicting budgets: env.cost_budget=%r vs algorithm.lagrangian"
-                    "['budget']=%r — sweep 'env.cost_budget' (ablation.override keeps "
+                    "['budget']=%r — sweep 'env.cost_budget' (overrides.override keeps "
                     "them in sync)" % (env.cost_budget, algo.lagrangian.get("budget")))
         elif env.emits_cost:
             warnings.warn(
@@ -632,8 +866,8 @@ class ExperimentSpec:
         ``reward.reads ∪ cost.reads ⊆ critic-visible signals`` and warns when a
         term is genuinely **unlearnable** — no network (not even the critic) can
         recover its inputs, so the run is wasted. Purely additive: it emits at
-        most one :class:`UserWarning`, changing no run behavior. An undeclared
-        custom reward (no ``reads``) is skipped.
+        most warnings, changing no run behavior. An undeclared custom reward
+        (no ``reads``) is skipped — with a warning saying so.
 
         The softer "the actor can't directly act on this signal" advisory that
         :func:`~deepracer_genesis.envs.signals.check_learnability` also returns is
@@ -654,8 +888,16 @@ class ExperimentSpec:
         reward_fn = env.reward or deepracer
         r_reads = reward_reads(reward_fn)
         c_reads = cost_reads(env.cost_fn) if env.emits_cost else frozenset()
+        if env.reward is not None and not r_reads:
+            # an opaque custom reward is exactly the case that SHOULD be
+            # checked — say loudly that it cannot be, instead of waiving it
+            warnings.warn(
+                "custom reward fn %r declares no signal reads: the K.5 "
+                "learnability check cannot verify the critic sees its inputs "
+                "— decorate it with envs.rewards.reads(...)"
+                % getattr(env.reward, "__qualname__", env.reward), stacklevel=2)
         if not r_reads and not c_reads:
-            return   # nothing declared to verify (undeclared custom reward)
+            return   # nothing declared to verify
 
         actor_signals = self._signals_for_keys(set(policy.actor_keys))
         critic_signals = self._signals_for_keys(set(policy.critic_keys))

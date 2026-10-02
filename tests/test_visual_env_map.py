@@ -76,7 +76,9 @@ def _camera_policy():
 
 
 def test_env_map_authoring_and_builder_wiring():
-    spec = (CameraEnvironment(render="madrona")
+    # render='nyx': env maps exist only as Nyx build-time assets, and the
+    # knob-compat matrix now (correctly) refuses env_map under Madrona.
+    spec = (CameraEnvironment(render="nyx")
             >> DomainRandomizationTrackAppearance(
                 env_map_tint=(0.35, 0.75), env_map_multiplier=(0.5, 2.0))
             >> _camera_policy()).build()

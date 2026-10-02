@@ -63,7 +63,7 @@ def collect_rollout_dataset(
     from ..experiment.run import build
     from ..experiment.spec import SpecError
     from ..experiment.stages import Pipeline, Stage, VectorPolicy
-    from ..randomization.image_aug import apply_image_aug
+    from ..seeding import seed_everything
 
     agent = agent or NoisyExpert()
 
@@ -79,15 +79,14 @@ def collect_rollout_dataset(
     if spec.env.modality != "camera":
         raise SpecError("rollout collection records the camera; use a camera env stage")
     if num_envs:
-        from ..experiment.ablation import override
+        from ..experiment.overrides import override
         spec = override(spec, "env.num_envs", num_envs)
 
-    torch.manual_seed(seed)
+    seed_everything(seed)
     b = Builder(spec)
     sim = b.sim()
     n = sim.num_envs
     dev = sim.device
-    aug = dict(spec.obs_dr.image_aug) if spec.obs_dr.image_aug else None
 
     os.makedirs(out, exist_ok=True)
     buf: dict[str, list] = {k: [] for k in ("image", "state", "action", "pose", "done")}
@@ -140,9 +139,11 @@ def collect_rollout_dataset(
         for _ in range(steps):
             act = agent.act(sim)
 
-            img = sim.obs_image_buf                                # post world-color
-            if aug is not None:
-                img = apply_image_aug(img, aug)
+            # obs_image_buf is what the policy sees: the env applies world
+            # colour, pixel noise, image aug, AND frame latency itself (the
+            # spec's image_aug rides sim_cfg since the DR-honesty change —
+            # re-applying it here would double-augment).
+            img = sim.obs_image_buf
             state = sim.state_buf.clone()
             pose = torch.stack([sim.base_pos[:, 0], sim.base_pos[:, 1],
                                 sim.yaw, sim.progress_m], dim=1)

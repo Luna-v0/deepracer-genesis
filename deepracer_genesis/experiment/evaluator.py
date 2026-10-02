@@ -23,8 +23,8 @@ class EvalRecord:
         spec_id: Identifier of the experiment spec that produced this run.
         spec: One-way dump of the ExperimentSpec.
         seed: Random seed used for the run.
-        ablation_group: Ablation group label, if part of an ablation study.
-        variant: Variant name within the ablation group, if any.
+        group: Run-grouping tag (the runs/<group>/ folder), if set.
+        variant: Variant name within the group, if any.
         metrics: Final scalar evaluation metrics.
         train: Training-side stats (steps_per_s, wall_clock_s, ...).
         eval_history: Periodic evals as [{frames, **metrics}] entries.
@@ -34,7 +34,7 @@ class EvalRecord:
     spec_id: str
     spec: dict                      # one-way dump of the ExperimentSpec
     seed: int
-    ablation_group: Optional[str]
+    group: Optional[str]
     variant: Optional[str]
     metrics: dict = field(default_factory=dict)
     train: dict = field(default_factory=dict)   # steps_per_s, wall_clock_s, ...
@@ -64,18 +64,24 @@ class EvalRecord:
         """Load a record previously written by save().
 
         Args:
-            path: Path to an eval_record.json file.
+            path: Path to an eval_record.json file (records written before
+                the ``ablation_group`` → ``group`` rename load fine).
 
         Returns:
             The reconstructed EvalRecord.
         """
         with open(path) as f:
-            return EvalRecord(**json.load(f))
+            payload = json.load(f)
+        if "ablation_group" in payload:              # pre-rename records
+            payload["group"] = payload.pop("ablation_group")
+        return EvalRecord(**payload)
 
 
 def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
                     obs_transform: Callable | None = None,
-                    cost_budget: Optional[float] = None) -> dict:
+                    cost_budget: Optional[float] = None,
+                    telemetry: Optional[str] = None,
+                    telemetry_envs: Optional[int] = None) -> dict:
     """Run a deterministic eval rollout on the raw sim, reading exact
     terminal stats from sim.step_info (no collector/autoreset).
 
@@ -89,6 +95,12 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
             derived keys.
         cost_budget: Per-episode cost budget; enables the cost metrics when
             the sim exposes a cost_buf.
+        telemetry: Optional ``.parquet`` path — records per-step trajectory
+            telemetry for the whole rollout (``analysis.telemetry``) and
+            flushes it there; recording failures are printed, never raised
+            (an eval must not die over its bookkeeping).
+        telemetry_envs: Record only this many evenly spaced envs (None = all);
+            metrics still cover every env.
 
     Returns:
         Scalar metrics dict from aggregate_episodes().
@@ -98,6 +110,15 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
     device = sim.device
     sim.reset_idx(torch.arange(n, device=device))
     sim._post_physics(torch.arange(n, device=device))
+
+    recorder = None
+    if telemetry is not None:
+        try:
+            from ..analysis.telemetry import TelemetryRecorder, telemetry_env_ids
+            recorder = TelemetryRecorder(
+                sim, envs=telemetry_env_ids(sim.num_envs, telemetry_envs))
+        except Exception as e:                    # noqa: BLE001
+            print(f"[telemetry] recorder unavailable ({e}); eval continues")
 
     use_cost = cost_budget is not None and hasattr(sim, "cost_buf")
     streams = {k: [] for k in ("reward", "done", "progress_delta", "offtrack")}
@@ -115,8 +136,16 @@ def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
             streams["done"].append(dones.clone())
             streams["progress_delta"].append(info["progress_delta"])
             streams["offtrack"].append(info["offtrack"] | info["flipped"])
+            if recorder is not None:
+                recorder.step(rew, dones, info["offtrack"] | info["flipped"],
+                              info["progress_delta"])
             if use_cost:
                 costs.append(sim.cost_buf.clone())
+    if recorder is not None:
+        try:
+            print(f"[telemetry] {recorder.flush(telemetry)}")
+        except Exception as e:                    # noqa: BLE001
+            print(f"[telemetry] flush failed ({e}); eval metrics unaffected")
 
     stacked = {k: torch.stack(v) for k, v in streams.items()}
     return aggregate_episodes(
@@ -227,14 +256,21 @@ def aggregate_episodes(
 # Out-of-loop per-track holdout evaluation (Part N.3)
 
 def build_single_track_sim(spec, track: str, num_envs: int, view: str = "none"):
-    """Build a fresh single-track sim for ``track`` from ``spec``.
+    """Build a fresh single-track sim for ``track`` under NOMINAL conditions.
 
     A fresh sim per track sidesteps the one-scene-per-process / camera
     superimpose constraint and yields clean per-track metrics. Camera mode
     should call this in its own process (one per track).
 
+    Every DR slice is stripped before building: holdout eval measures the
+    policy under nominal conditions, not one randomization draw (matching
+    ``visualize.rollout_video``). Before this, eval incoherently kept physics
+    DR while dropping image/action DR — holdout numbers from runs predating
+    the change are not directly comparable.
+
     Args:
-        spec: The experiment spec (its sim_cfg is reused, track overridden).
+        spec: The experiment spec (its sim_cfg is reused, track overridden,
+            DR stripped).
         track: The single track name to evaluate on.
         num_envs: Parallel envs for the eval rollout.
         view: view renderer for this eval sim (``"none"`` default). ``"gui"``
@@ -245,10 +281,14 @@ def build_single_track_sim(spec, track: str, num_envs: int, view: str = "none"):
     Returns:
         A built DeepRacerEnv on the spec's backend for exactly ``track``.
     """
+    from dataclasses import replace
+
     from .._gs import ensure_init
     from ..envs import DeepRacerEnv
     from .builder import Builder
+    from .spec import ActionDRSpec, ObsDRSpec
 
+    spec = replace(spec, obs_dr=ObsDRSpec(), action_dr=ActionDRSpec())
     cfg = Builder(spec).sim_cfg()
     cfg["sim"]["track"] = track
     cfg["sim"]["view"] = view
@@ -259,7 +299,7 @@ def build_single_track_sim(spec, track: str, num_envs: int, view: str = "none"):
 
 
 def evaluate_on_tracks(actor, tracks, *, sim_factory, obs_transform=None,
-                       cost_budget=None) -> dict:
+                       cost_budget=None, telemetry_dir=None) -> dict:
     """Evaluate ``actor`` on each track INDEPENDENTLY; return {track: metrics}.
 
     Args:
@@ -271,6 +311,8 @@ def evaluate_on_tracks(actor, tracks, *, sim_factory, obs_transform=None,
             a fresh scene.
         obs_transform: Optional obs transform applied before the policy.
         cost_budget: Per-episode cost budget (enables cost metrics).
+        telemetry_dir: Optional directory — records per-step trajectory
+            telemetry per track as ``holdout_<track>.parquet``.
 
     Returns:
         ``{track: metrics}`` — per-track metrics from :func:`evaluate_policy`,
@@ -279,6 +321,8 @@ def evaluate_on_tracks(actor, tracks, *, sim_factory, obs_transform=None,
     out = {}
     for track in tracks:
         sim = sim_factory(track)
+        path = (os.path.join(telemetry_dir, f"holdout_{track}.parquet")
+                if telemetry_dir else None)
         out[track] = evaluate_policy(sim, actor, obs_transform=obs_transform,
-                                     cost_budget=cost_budget)
+                                     cost_budget=cost_budget, telemetry=path)
     return out

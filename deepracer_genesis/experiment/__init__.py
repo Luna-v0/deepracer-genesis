@@ -37,6 +37,7 @@ from .stages import (
 )
 from .authoring import Experiment
 from .run import build, run
+from .visualize import rollout_video, view_zoo
 
 __all__ = [
     "ActionDRSpec", "AlgorithmSpec", "EncoderSpec", "EnvSpec", "ExperimentSpec",
@@ -53,4 +54,5 @@ __all__ = [
     "Evaluation", "EvalConfig",
     "Experiment",
     "build", "run",
+    "rollout_video", "view_zoo",
 ]

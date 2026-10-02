@@ -20,3 +20,17 @@ runs/sweep_tracks.json
 
 # mkdocs build output
 site/
+
+# Training artifacts: regenerable, and multi-GB. The run's PROVENANCE
+# (spec.json / eval_record.json / model_card.json) stays versioned; the bulk
+# does not. Committing these once put 3.1 GB in a single commit and pushed the
+# pack past GitHub's 2 GiB limit.
+runs/**/*.parquet
+runs/**/*.onnx
+runs/**/*.tar.gz
+runs/**/*.pt
+runs/**/events.out.tfevents.*
+logs/**/*.pt
+
+# jupyter collaboration store (rewritten constantly, ~50 MB)
+.jupyter_ystore.db

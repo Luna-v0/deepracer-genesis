@@ -15,6 +15,7 @@ dependencies = [
     "numpy",
     "pyarrow",
     "imageio[ffmpeg]",
+    "seaborn>=0.13.2",
 ]
 
 [project.urls]
@@ -31,6 +32,9 @@ vision = ["gs-madrona>=0.0.10"]
 nyx = ["gs-nyx>=0.1.4", "gs-nyx-plugin>=0.1.5"]
 tracking = ["mlflow"]
 hpo = ["optuna"]
+# telemetry DataFrames + trajectory plots (analysis/ package; not needed on
+# the car or for training itself)
+analysis = ["pandas", "matplotlib"]
 # CNN-perception dataset reader (deepracer_genesis.perception.dataset reads the
 # collected rollout parquets with pandas). Not needed on the car, and not needed
 # to run a policy through an already-trained CNN.
@@ -72,8 +76,11 @@ dev = [
     "lckr-jupyterlab-variableinspector>=3.2.4",
     "pycrdt>=0.13.1",
     "python-lsp-server[all]>=1.14.0",
-    # perception dataset + telemetry analysis (mirrors the [perception] extra)
+    # telemetry analysis + perception dataset (mirrors the [analysis] and
+    # [perception] extras for local work)
     "pandas>=2.0",
+    "optuna>=4.9.0",
+    "papermill>=2.7.0",
 ]
 # GPU renderers, synced by default for local `uv run` (camera/Nyx experiments)
 # so `uv run experiments/foo.py` "just works". These mirror the [vision]/[nyx]
@@ -83,3 +90,8 @@ renderers = ["gs-madrona>=0.0.10", "gs-nyx>=0.1.4", "gs-nyx-plugin>=0.1.5"]
 
 [tool.uv]
 default-groups = ["dev", "renderers"]
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: bounded end-to-end pre-flight that builds real (CPU) sims; deselect with -m 'not smoke'",
+]

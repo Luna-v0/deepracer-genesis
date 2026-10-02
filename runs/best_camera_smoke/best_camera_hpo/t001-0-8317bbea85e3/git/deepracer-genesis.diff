@@ -1,0 +1,103 @@
+--- git commit ---
+51ed807f8543472d7e0e383e5f5c92e88b2280af
+
+
+--- git status ---
+On branch dev
+Your branch is up to date with 'origin/dev'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   pyproject.toml
+	modified:   uv.lock
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	experiments/best_camera.ipynb
+	runs/best_camera_smoke/
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git c/pyproject.toml w/pyproject.toml
+index fb88d5d..941a3b3 100644
+--- c/pyproject.toml
++++ w/pyproject.toml
+@@ -73,6 +73,8 @@ dev = [
+     "python-lsp-server[all]>=1.14.0",
+     # telemetry analysis (mirrors the [analysis] extra for local work)
+     "pandas>=2.0",
++    "optuna>=4.9.0",
++    "papermill>=2.7.0",
+ ]
+ # GPU renderers, synced by default for local `uv run` (camera/Nyx experiments)
+ # so `uv run experiments/foo.py` "just works". These mirror the [vision]/[nyx]
+diff --git c/uv.lock w/uv.lock
+index cc8f21a..f55eac5 100644
+--- c/uv.lock
++++ w/uv.lock
+@@ -941,7 +941,9 @@ dev = [
+     { name = "jupyterlab-vim" },
+     { name = "jupytext" },
+     { name = "lckr-jupyterlab-variableinspector" },
++    { name = "optuna" },
+     { name = "pandas" },
++    { name = "papermill" },
+     { name = "pycrdt" },
+     { name = "pytest" },
+     { name = "python-lsp-server", extra = ["all"] },
+@@ -990,7 +992,9 @@ dev = [
+     { name = "jupyterlab-vim", specifier = ">=4.1.4" },
+     { name = "jupytext", specifier = ">=1.19.4" },
+     { name = "lckr-jupyterlab-variableinspector", specifier = ">=3.2.4" },
++    { name = "optuna", specifier = ">=4.9.0" },
+     { name = "pandas", specifier = ">=2.0" },
++    { name = "papermill", specifier = ">=2.7.0" },
+     { name = "pycrdt", specifier = ">=0.13.1" },
+     { name = "pytest", specifier = ">=8" },
+     { name = "python-lsp-server", extras = ["all"], specifier = ">=1.14.0" },
+@@ -1083,6 +1087,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/35/16/3c9cf0ef315de04ff2a8754685c14e58c04394077d10cf3f3a01ff9afe9e/dracopy-2.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:7f1991d0f0575d5096847ef2320d76b2c4a2cf1f88c741cb35dea75d3d682ff4", size = 5058707, upload-time = "2025-11-11T16:14:28.062Z" },
+ ]
+ 
++[[package]]
++name = "entrypoints"
++version = "0.4"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/ea/8d/a7121ffe5f402dc015277d2d31eb82d2187334503a011c18f2e78ecbb9b2/entrypoints-0.4.tar.gz", hash = "sha256:b706eddaa9218a19ebcd67b56818f05bb27589b1ca9e8d797b74affad4ccacd4", size = 13974, upload-time = "2022-02-02T21:30:28.172Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/35/a8/365059bbcd4572cbc41de17fd5b682be5868b218c3c5479071865cab9078/entrypoints-0.4-py3-none-any.whl", hash = "sha256:f174b5ff827504fd3cd97cc3f8649f3693f51538c7e4bdf3ef002c8429d42f9f", size = 5294, upload-time = "2022-02-02T21:30:26.024Z" },
++]
++
+ [[package]]
+ name = "etils"
+ version = "1.13.0"
+@@ -3868,6 +3881,26 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/ef/af/4fbc8cab944db5d21b7e2a5b8e9211a03a79852b1157e2c102fcc61ac440/pandocfilters-1.5.1-py2.py3-none-any.whl", hash = "sha256:93be382804a9cdb0a7267585f157e5d1731bbe5545a85b268d6f5fe6232de2bc", size = 8663, upload-time = "2024-01-18T20:08:11.28Z" },
+ ]
+ 
++[[package]]
++name = "papermill"
++version = "2.7.0"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "aiohttp", marker = "python_full_version >= '3.12'" },
++    { name = "click" },
++    { name = "entrypoints" },
++    { name = "nbclient" },
++    { name = "nbformat" },
++    { name = "pyyaml" },
++    { name = "requests" },
++    { name = "tenacity" },
++    { name = "tqdm" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/f8/b6/92d770c5ced66ed0134256f8de781e98c824d3a0662af1643a91fcc36663/papermill-2.7.0.tar.gz", hash = "sha256:ec10b37594a060662f57269e1ebd108c209d204450f00fdfeb70a1c7cfb7fbc8", size = 77961, upload-time = "2026-02-27T19:07:30.548Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/95/9f/f9fd57a727dcc89c54e84455d8317bff7db05ef21bb6d05b03705111f7c0/papermill-2.7.0-py3-none-any.whl", hash = "sha256:e1855e6670100a02bb4f8a6870484a5c10b84a8d2e49c49921c90209940c7514", size = 88858, upload-time = "2026-02-27T19:07:28.862Z" },
++]
++
+ [[package]]
+ name = "parso"
+ version = "0.8.7"

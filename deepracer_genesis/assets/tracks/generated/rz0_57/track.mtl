@@ -1,0 +1,25 @@
+newmtl road
+Kd 0.1490 0.1059 0.1255
+Ka 0 0 0
+Ks 0 0 0
+map_Kd road.png
+newmtl border
+Kd 0.7882 0.7333 0.8353
+Ka 0 0 0
+Ks 0 0 0
+map_Kd border.png
+newmtl centerline
+Kd 1.0000 0.6235 0.2118
+Ka 0 0 0
+Ks 0 0 0
+map_Kd centerline.png
+newmtl field
+Kd 0.3137 0.5137 0.3255
+Ka 0 0 0
+Ks 0 0 0
+map_Kd field.png
+newmtl wall
+Kd 0.8157 0.7804 0.7961
+Ka 0 0 0
+Ks 0 0 0
+map_Kd wall.png

@@ -39,7 +39,7 @@ class WatchLiveFeature(Experiment):
     seed = 0
     total_env_steps = 3_000_000
     eval_every_steps = 500_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "watch_live_feature"
 
     def pipeline(self):
@@ -70,7 +70,7 @@ class WatchLiveCamera(Experiment):
     seed = 0
     total_env_steps = 3_000_000
     eval_every_steps = 500_000
-    ablation_group = "examples"
+    group = "examples"
     variant = "watch_live_camera"
 
     def pipeline(self):

@@ -1,0 +1,172 @@
+{
+  "spec_id": "165b89add1a0",
+  "spec": {
+    "env": {
+      "modality": "camera",
+      "render": "madrona",
+      "backend": "gpu",
+      "view": "none",
+      "realtime_factor": 1.0,
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "frame_stack": 1,
+      "lookahead_k": 10,
+      "feature_set": null,
+      "feature_params": {},
+      "obs_routing": null,
+      "tracks": [
+        "reinvent_base"
+      ],
+      "num_envs": 128,
+      "random_start": true,
+      "random_direction": false,
+      "reward": null,
+      "reward_scales": {},
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {},
+      "camera_jitter": {},
+      "physics": {},
+      "appearance": {},
+      "pixel_noise": 0.0,
+      "env_map": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "camera"
+      ],
+      "critic_keys": [
+        "camera",
+        "state"
+      ],
+      "cnn": {
+        "channels": [
+          16,
+          32,
+          64
+        ],
+        "kernels": [
+          8,
+          4,
+          3
+        ],
+        "strides": [
+          4,
+          2,
+          1
+        ],
+        "activation": "relu"
+      },
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      },
+      "actions": null,
+      "distribution": {
+        "std_range": [
+          0.1,
+          1.0
+        ]
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.0,
+      "speed_noise": 0.0,
+      "delay_steps": 0
+    },
+    "algorithm": {
+      "cls": null,
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 8,
+        "gamma": 0.995,
+        "gae_lambda": 0.95,
+        "lr": 5.6088804037678196e-05,
+        "entropy_coef": 0.0005281728716293301,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "eval": {
+      "real_tracks": [],
+      "eval_num_envs": 64,
+      "eval_episodes": null,
+      "charts": true,
+      "gui": false
+    },
+    "total_env_steps": 1200000,
+    "eval_every_steps": 600000,
+    "seed": 0,
+    "ablation_group": "best_camera_hpo",
+    "variant": "t010"
+  },
+  "seed": 0,
+  "ablation_group": "best_camera_hpo",
+  "variant": "t010",
+  "metrics": {
+    "episodes": 1903,
+    "mean_return": 10.121465682983398,
+    "mean_progress_m": 1.7924271821975708,
+    "mean_episode_s": 2.3424065113067627,
+    "completion_rate": 0.0,
+    "mean_laps": 0.101214699447155,
+    "offtrack_rate": 1.0,
+    "lap_time_s": NaN,
+    "mean_speed_mps": 0.7168471813201904
+  },
+  "train": {
+    "wall_clock_s": 397.2,
+    "total_env_steps": 1198080,
+    "steps_per_s": 3016.5,
+    "checkpoint": "runs/best_camera/best_camera_hpo/t010-0-165b89add1a0/model.pt",
+    "backend": "rsl_rl"
+  },
+  "eval_history": [
+    {
+      "frames": 599040,
+      "episodes": 1871,
+      "mean_return": 12.158284187316895,
+      "mean_progress_m": 1.9936085939407349,
+      "mean_episode_s": 2.382554769515991,
+      "completion_rate": 0.0,
+      "mean_laps": 0.1125749871134758,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.7558788657188416
+    },
+    {
+      "frames": 1198080,
+      "episodes": 1916,
+      "mean_return": 9.857932090759277,
+      "mean_progress_m": 1.766721248626709,
+      "mean_episode_s": 2.3267433643341064,
+      "completion_rate": 0.0,
+      "mean_laps": 0.09976312518119812,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.7071645259857178
+    }
+  ],
+  "holdout": {},
+  "created_at": "2026-08-26T23:08:49"
+}

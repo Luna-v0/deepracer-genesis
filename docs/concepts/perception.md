@@ -32,10 +32,28 @@ Library code, importable and tested, in `deepracer_genesis.perception` (see the
 
 | module | what it is |
 |---|---|
-| `perception.model` | `PerceptionCNN` — 4 convs, 2 dense layers, 496 k parameters |
+| `perception.model` | `PerceptionCNN` — parameterized conv trunk + 2-layer head (defaults: 4 convs, 496 k parameters), plus `save_checkpoint`/`load_checkpoint` for arch-carrying checkpoints |
 | `perception.features` | `CNNPerceptionFeatures` (the frozen CNN in the env loop) and `NoisyPerceptionFeatures` (exact values plus noise the size of the CNN's error, no renderer) |
-| `perception.dataset` | `RolloutDataset` — frame stacks served from a flat memmap cache — plus the track split (`TRAINING_TRACKS`, `HOLDOUT_TRACKS`) |
-| `perception.augment` | camera jitter: exposure, gamma, contrast, white balance, noise |
+| `perception.dataset` | `RolloutDataset` — frame stacks served from per-track-set memmap caches, optionally at a chosen `resolution` from a raw uint8 cache — plus the track split (`TRAINING_TRACKS`, `HOLDOUT_TRACKS`) |
+| `perception.augment` | camera jitter: exposure, gamma, contrast, white balance, noise (photometric only, so it composes with any resolution) |
+
+### Architecture search (HPO) support
+
+Two mechanisms make searching the CNN feasible:
+
+- **Arch-carrying checkpoints.** `PerceptionCNN(channels=..., kernels=...,
+  strides=..., head=..., input_hw=...)` builds any strided-conv trunk;
+  `save_checkpoint(net, path)` stores `{"arch", "state_dict"}` so
+  `CNNPerceptionFeatures` and `export_perception_cnn` rebuild the exact
+  network from the file alone. Bare state dicts still load as the stock
+  architecture. Whatever the arch, the first conv is `features.0` and the
+  output layer is `head.3`.
+- **Per-resolution raw caches.** `RolloutDataset(resolution=(h, w))`
+  decodes + LANCZOS-resizes every frame ONCE into `raw_<h>x<w>.bin`; serving
+  is then a memmap byte-slice with no PNG decoder in the loop — the decode
+  cost that otherwise bounds HPO wall-clock disappears, and low-resolution
+  trials get genuinely cheaper. Upscaling past the collected size is refused:
+  collect once at the highest resolution you intend to search.
 
 Run drivers, under `experiments/perception/`. Every command below is run from
 the repository root:

@@ -1,38 +1,53 @@
 # Local install & run
 
-DeepRacer-Genesis runs on **Linux x86-64 with an NVIDIA GPU**. Python 3.10–3.12
+DeepRacer-Genesis runs on **Linux x86-64**. Everything trains CPU-only via
+`backend="cpu"` (feature-vector at useful speeds; camera through the CPU
+rasterizer at ~90 env-steps/s — debugging territory). An NVIDIA GPU makes
+camera training practical: Madrona is ~30× faster. Python 3.10–3.12
 (3.12 recommended).
 
-> Mental model in one sentence: `uv sync` installs Genesis + rsl-rl + TorchRL, then
-> you train by defining an `Experiment` subclass and running it (recommended), or via
-> the legacy flag-based `train.py` CLI.
+> Mental model in one sentence: `uv sync` installs Genesis + rsl-rl (plus the
+> GPU renderers), then you train by defining an `Experiment` subclass and
+> running it.
 
 ---
 
 ## Install
 
+### As a package (recommended)
+
+Install straight from git into your own project — track assets ship inside
+the package, so nothing else is needed:
+
+```bash
+uv add "deepracer-genesis[vision] @ git+https://github.com/Luna-v0/deepracer-genesis"
+```
+
+Extras: `[vision]` (Madrona batch renderer — needed for camera training),
+`[nyx]` (path tracer), `[analysis]` (telemetry DataFrames + trajectory
+plots), `[export]` (ONNX), `[hpo]` (optuna), `[tracking]` (mlflow).
+
+### From a clone (to work on the library)
+
 ```bash
 git clone https://github.com/Luna-v0/deepracer-genesis && cd deepracer-genesis
-uv venv --python 3.12 .venv && source .venv/bin/activate
-uv sync                       # base deps
+uv sync                       # base deps + GPU renderers (default groups)
 uv sync --extra tracking      # + mlflow (optional)
 uv sync --extra hpo           # + optuna (optional)
 ```
 
-Core dependencies (`pyproject.toml`): `genesis-world >= 1.2`, `rsl-rl-lib >= 5.4`,
-`torch >= 2.5`, `torchrl`, `tensordict`, plus `imageio[ffmpeg]`, `pillow`, `numpy`,
-`pyarrow`, `tensorboard`.
+Core dependencies (`pyproject.toml`): `genesis-world >= 1.2.3`, `rsl-rl-lib >= 5.4`,
+`torch >= 2.5`, `tensordict`, plus `imageio[ffmpeg]`, `pillow`, `numpy`,
+`pyarrow`, `tensorboard`. The GPU renderers (`gs-madrona`, `gs-nyx`) install
+via the default `renderers` group.
 
 ### CUDA 13 note (Madrona)
 
-The Madrona batch renderer links `libnvrtc.so.12`. On a CUDA-13 system, run:
-
-```bash
-bash scripts/fix_madrona_cuda13.sh
-```
-
-which installs `nvidia-cuda-nvrtc-cu12`, symlinks the `.so.12` into `gs_madrona/`,
-and patches the dlopen name. Feature-vector (no-camera) training does not need this.
+Historical: `gs-madrona >= 0.0.10` (what the default `renderers` group
+installs) pulls its own `nvidia-cuda-nvrtc-cu12 >= 12.8` and links the
+megakernel natively, so no fix is needed on CUDA-13 systems anymore.
+`scripts/fix_madrona_cuda13.sh` remains only for pinned older
+`gs-madrona 0.0.8` installs.
 
 ## Train
 
@@ -69,8 +84,9 @@ python -m deepracer_genesis.train -B 4096 --max_iterations 500 --exp_name teache
 ## Evaluate & inspect
 
 ```bash
-python -m deepracer_genesis.eval --checkpoint runs/.../best.pt --num_envs 24 --res 1280x960
+python -m deepracer_genesis.eval --checkpoint runs/.../model.pt --num_envs 24 --res 1280x960
 python -m deepracer_genesis.validation.camera_check --num_envs 4
+python -m deepracer_genesis.validation.dr_check --knobs world_color,brightness   # see the DR editor guide
 tensorboard --logdir runs/
 ```
 
@@ -78,9 +94,15 @@ tensorboard --logdir runs/
 
 ```
 runs/<group>/<variant>-<seed>-<id>/
-  best.pt           # actor + critic weights + spec
-  spec.json         # config record
-  eval_record.json  # final + periodic metrics
-  events.out.*      # TensorBoard
-  videos/           # rollout videos
+  model.pt           # final weights + optimizer (resumable; export/video default)
+  model_best.pt      # weights only, best periodic eval by EvalConfig.best_metric
+  model_last.pt      # only while running / when stopped early (HPO-pruned)
+  eval_record.json   # spec + final/periodic/holdout metrics + best checkpoint
+  telemetry/         # eval_<frames>.parquet (telemetry_envs subset), final, holdout_*
+  events.out.*       # TensorBoard
+  videos/            # rollout_video outputs
 ```
+
+`Evaluation(keep_checkpoints="all")` keeps rsl-rl's `model_<iter>.pt` files and
+`Evaluation(telemetry_envs=None)` records every env in periodic evals — both are
+off by default to keep run dirs small (ADR 0004).

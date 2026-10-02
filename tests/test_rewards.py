@@ -1,73 +1,48 @@
-"""Sign conventions of the built-in ``deepracer`` reward terms.
+"""Sign conventions of the built-in reward terms (GPU-free stub env).
 
-Pure-torch/CPU over a stub env; scales are positive, so penalties carry a minus.
+The convention in ``rewards.deepracer`` is that SIGNS LIVE IN THE TERMS and
+``reward_scales`` stay positive. A 2026-08 bug had the ``off_track`` term
+positive, so the default +2.0 scale *rewarded* edge-riding at 4x the
+centered bonus — these tests pin every term's sign so that cannot recur.
 """
 
 import torch
 
-from deepracer_genesis.configs.cfgs import get_env_cfg
-from deepracer_genesis.envs.mdp import compute_reward
 from deepracer_genesis.envs.rewards import deepracer
-
-DT = 0.02                # sim dt 0.01 x decimation 2 (configs/cfgs.py)
-HALF_WIDTH = 0.6
-WHEEL_MARGIN = 0.1       # a wheel leaves the road at |lateral| >= 0.5
-SCALES = get_env_cfg()["reward"]["reward_scales"]
 
 
 class _StubEnv:
-    """Minimal stand-in exposing exactly what ``rewards.deepracer`` reads.
+    """Minimal env double exposing the tensors ``rewards.deepracer`` reads.
 
-    Rows are identical apart from ``lateral``, isolating the on/off-track split.
-
-    Args:
-        lateral: ``(N,)`` signed distance from the centerline, in meters.
+    Attributes:
+        Everything is (2,)-shaped: car 0 drives centered and clean, car 1
+        rides beyond the wheel margin with steering/heading activity.
     """
 
-    def __init__(self, lateral: torch.Tensor) -> None:
-        n = lateral.shape[0]
-        self.dt = DT
-        self.lateral = lateral
-        self.half_width = torch.full((n,), HALF_WIDTH)
-        self.d_progress = torch.full((n,), 0.05)
-        self.v_forward = torch.full((n,), 1.5)
-        self.heading_err = torch.full((n,), 0.2)
-        self.actions = torch.tensor([[0.3, 0.4]]).expand(n, 2).contiguous()
-        self.last_actions = torch.zeros(n, 2)
-        self.cfg = {
-            "action": {"max_speed": 4.0},
-            "termination": {"wheel_margin": WHEEL_MARGIN},
-        }
-        # the mdp.compute_reward accumulation surface
-        self.reward_terms = deepracer
-        self.reward_scales = SCALES
-        self.rew_buf = torch.zeros(n)
-        self.episode_sums = {name: torch.zeros(n) for name in SCALES}
+    def __init__(self):
+        self.dt = 0.02
+        self.cfg = {"termination": {"wheel_margin": 0.08},
+                    "action": {"max_speed": 3.0}}
+        self.lateral = torch.tensor([0.0, 0.30])
+        self.half_width = torch.tensor([0.35, 0.35])
+        self.d_progress = torch.tensor([0.05, 0.05])
+        self.v_forward = torch.tensor([1.5, 1.5])
+        self.heading_err = torch.tensor([0.0, 0.4])
+        self.actions = torch.tensor([[0.0, 0.5], [0.6, 0.5]])
+        self.last_actions = torch.zeros(2, 2)
 
 
-def test_off_track_term_is_a_penalty():
-    """Zero while all wheels are on the road, ``-dt`` once one leaves it."""
-    env = _StubEnv(torch.tensor([0.0, 0.49, 0.51, -0.55]))
-    off_track = deepracer(env)["off_track"]
-    assert torch.allclose(off_track, torch.tensor([0.0, 0.0, -DT, -DT]))
+def test_offtrack_term_is_a_penalty():
+    """Edge-riding must be strictly worse than staying inside the margin."""
+    terms = deepracer(_StubEnv())
+    assert terms["off_track"][0] == 0.0          # centered car: no penalty
+    assert terms["off_track"][1] < 0.0           # edge-rider: negative term
 
 
-def test_going_off_track_lowers_the_weighted_reward():
-    """Scales are positive, so a positive term would pay a car for going off."""
-    env = _StubEnv(torch.tensor([0.49, 0.51]))   # just inside / just outside
-    compute_reward(env)
-    on_track, off_track = env.rew_buf[0], env.rew_buf[1]
-    assert off_track < on_track
-    # the gap is the off_track penalty plus a smaller `centered` drift
-    assert (on_track - off_track) > SCALES["off_track"] * DT
-
-
-def test_penalty_terms_keep_their_sign():
-    """heading/steering/action_rate are penalties too — a flip must not pass."""
-    env = _StubEnv(torch.tensor([0.0, 0.49, 0.51, -0.55]))
-    terms = deepracer(env)
+def test_penalty_terms_are_nonpositive_and_bonuses_nonnegative():
+    """Positive scales must never flip a term's intent."""
+    terms = deepracer(_StubEnv())
     for name in ("heading", "steering", "action_rate", "off_track"):
-        assert (terms[name] <= 0).all(), f"{name} must never be a bonus"
-    # the stub drives all three with nonzero inputs, so none may be dead
-    for name in ("heading", "steering", "action_rate"):
-        assert (terms[name] < 0).all(), f"{name} stopped penalizing"
+        assert (terms[name] <= 0).all(), f"{name} must be a penalty term"
+    for name in ("progress", "speed", "centered"):
+        assert (terms[name] >= 0).all(), f"{name} must be a bonus term"

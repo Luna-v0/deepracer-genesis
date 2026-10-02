@@ -127,7 +127,7 @@ def test_id_stable_and_config_sensitive():
 
 
 def test_to_dict_json_serializable_and_run_dir():
-    spec = env2_pipeline().build(seed=3, ablation_group="safety", variant="tight")
+    spec = env2_pipeline().build(seed=3, group="safety", variant="tight")
     json.dumps(spec.to_dict())                      # must not raise
     assert spec.run_dir() == f"runs/safety/tight-3-{spec.id()}"
 
@@ -180,14 +180,21 @@ def test_vector_policy_cannot_eat_raw_camera():
         (CameraEnvironment() >> VectorPolicy(keys=("camera",))).build()
 
 
-def test_nyx_heterogeneous_rejected():
-    # nyx cannot do heterogeneous tracks at all (repo constraint) -> hard error.
-    # madrona multi-track camera IS allowed now via Part O spatial tiling (it
-    # only warns) -- see test_appearance_dr_routes_and_validates.
-    with pytest.raises(SpecError):
-        (CameraEnvironment(render="nyx",
-                           tracks=("reinvent_base", "reInvent2019_track"))
-         >> AsymmetricCameraPolicy()).build()
+def test_nyx_tiled_multitrack_allowed():
+    # Tiled multi-track camera works under Nyx too (verified end to end by
+    # scripts/verify_nyx_tiling.py): tiled variants are plain meshes on
+    # separate world tiles, ordinary scene content for the path tracer. The
+    # old blanket spec rejection only ever applied to the heterogeneous
+    # (superimposed) path, which envs/scene.py still refuses at build time
+    # when tiling is explicitly disabled. Building only WARNS (tiling cost).
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        spec = (CameraEnvironment(render="nyx",
+                                  tracks=("reinvent_base", "reInvent2019_track"))
+                >> AsymmetricCameraPolicy()).build()
+    assert spec.env.render == "nyx" and len(spec.env.tracks) == 2
 
 
 def test_lagrangian_without_cost_env_rejected():
@@ -253,8 +260,8 @@ def test_id_ignores_bookkeeping_tags_and_is_cross_process_stable():
     import subprocess
     import sys
 
-    a = env1_pipeline().build(seed=0, ablation_group="g1", variant="v1")
-    b = env1_pipeline().build(seed=0, ablation_group="g2", variant="v2")
+    a = env1_pipeline().build(seed=0, group="g1", variant="v1")
+    b = env1_pipeline().build(seed=0, group="g2", variant="v2")
     assert a.id() == b.id()                     # tags are not configuration
     assert a.run_dir() != b.run_dir()           # but runs land separately
 

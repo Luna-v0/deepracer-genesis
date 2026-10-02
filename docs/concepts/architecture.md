@@ -12,29 +12,21 @@ actually live. Every claim here is anchored to a `file:line` you can open.
 
 ---
 
-## 1. The two training front-ends over one simulator
+## 1. One training front-end over one simulator
 
-The port is a single batched Genesis environment wrapped for two different
-training stacks:
+The port is a single batched Genesis environment driven by rsl-rl:
 
 ```
-rsl-rl PPO ─┐
-            ├─▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.step()
-TorchRL   ──┘        envs/deepracer_env.py:58
+rsl-rl PPO ──▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.step()
+                     envs/deepracer_env.py
 ```
 
-- `DeepRacerEnv` (`envs/deepracer_env.py:58`) speaks the **rsl-rl-lib 5.x
-  VecEnv contract** natively: there is no external `reset()` — done envs
-  respawn *inside* `step()` (`deepracer_env.py:417-420`).
-- `TorchRLDeepRacerEnv` (`envs/torchrl_env.py:21`) is a thin `EnvBase` adapter
-  over the *same* sim object. It sets `_torchrl_native_autoreset = True`
-  (`torchrl_env.py:55`) precisely because the sim already auto-resets.
-
-So TorchRL and rsl-rl are two faces on one simulator, not two simulators.
-Everything the sim exposes is `(N, …)` GPU tensors — N parallel cars stepping
-together. That batching is the essence of the port: Gazebo ran one car in a ROS
-process; here N cars are tensors and the ROS control + domain logic are
-reimplemented in torch.
+- `DeepRacerEnv` speaks the **rsl-rl-lib 5.x VecEnv contract** natively:
+  there is no external `reset()` — done envs respawn *inside* `step()`.
+- Everything the sim exposes is `(N, …)` GPU tensors — N parallel cars
+  stepping together. That batching is the essence of the port: Gazebo ran
+  one car in a ROS process; here N cars are tensors and the ROS control +
+  domain logic are reimplemented in torch.
 
 A single control step (`deepracer_env.py:374-431`):
 
@@ -44,31 +36,17 @@ A single control step (`deepracer_env.py:374-431`):
 4. `_post_physics` — refresh kinematics + localize on the track.
 5. `_compute_reward` → `_check_termination` → respawn done envs.
 
-### 1.1 The wrapper handshake (why you don't "see" them working together)
+### 1.1 The pre-reset snapshot (`step_info`)
 
-`TorchRLDeepRacerEnv` does not run *alongside* `DeepRacerEnv` — it **wraps** it,
-and only one front-end is live per run:
-
-- **rsl-rl** (`train.py`): `OnPolicyRunner` calls `DeepRacerEnv.step()` directly;
-  the wrapper is never imported.
-- **TorchRL** (`experiment/trainer.py`): the collector drives
-  `TorchRLDeepRacerEnv._step()`, which on `torchrl_env.py:65` calls
-  `self.sim.step()` — and `self.sim` **is** the `DeepRacerEnv` (injected in
-  `builder.py:151`). That one line is the entire coupling.
-
-Division of labour: `DeepRacerEnv.step` is the *real simulator* (controls →
-physics → reward → termination → **auto-reset of done envs**), returning the
-rsl-rl VecEnv tuple. `TorchRLDeepRacerEnv._step` is a *translation adapter*: it
-calls `sim.step`, then repackages the result into TorchRL's TensorDict.
-
-The subtle part is the **pre-reset snapshot**. Because `step` auto-resets done
-envs *inside itself* (overwriting their state), it first stashes `self.step_info`
-(`deepracer_env.py:406-413`) — `offtrack`/`flipped`/`time_out`/`terminal_state`
-for the step that just happened. The adapter reads `sim.step_info`
-(`torchrl_env.py:66-69`) to split `terminated` (crash/off-track → value
-bootstrap killed) from `truncated` (timeout → bootstrap kept), and
-`_torchrl_native_autoreset = True` (`torchrl_env.py:55`) tells TorchRL not to
-issue its own reset. **`step_info` is the whole contract between the two files.**
+Because `step` auto-resets done envs *inside itself* (overwriting their
+state), it first stashes `step_info` — `offtrack`/`flipped`/`time_out`/
+`terminal_state` for the step that just happened. Consumers that need the
+*pre-reset* truth (the evaluator's episode accounting, telemetry recording,
+terminated-vs-truncated bootstrapping) read that snapshot rather than the
+post-step buffers. This matters in practice: a done row's *pose* is already
+the respawn pose, which is why the analysis plots take an off-track exit's
+position from the step **before** the done flag (see
+`analysis/trackplots.py`).
 
 ---
 
@@ -109,8 +87,10 @@ Because the gains didn't port, they are re-authored in two places:
 
 So the URDF gives the *mechanism*; the *controller feel* (kp/kv, torque cap) is
 authored in this repo and tuned by comment-documented trial. Under domain
-randomization these gains are re-scaled per-env each episode
-(`randomization/domain_rand.py:41-56`).
+randomization these gains are re-scaled per-env **once per run**, from the env's
+`__init__` (`randomization/physics.py:61-66`; `domain_rand.py` is a back-compat
+shim) — not each episode: per-reset genesis setters sporadically crash even on
+genesis 1.2.3 (`base_env.py:326-337`), so DR bodies stay fixed for the run.
 
 ### 2.2 Wheels and steering are driven separately (and simplified)
 
@@ -187,9 +167,14 @@ Two things to internalize:
   "off track" is a *geometric* computation off the waypoints (§5), not a
   collision.
 - A *list* of morphs makes the entity heterogeneous (one variant per env). But
-  heterogeneous **camera** training is blocked (`deepracer_env.py:147-154`):
-  Genesis 1.2.1 does not feed `active_envs_mask` to Madrona, so all variants
-  render superimposed. Multi-track only works in feature (non-vision) mode.
+  heterogeneous **camera** training is blocked (`envs/scene.py:113-118`):
+  Genesis 1.2.1 did not feed `active_envs_mask` to Madrona, so all variants
+  render superimposed. Genesis 1.3.2 (installed) now passes it upstream as
+  `geom_env_mask` (`genesis/vis/batch_renderer.py:112-116`), but the repo still
+  routes camera multi-track through Part O **spatial tiling** (each variant on
+  its own world tile, `base_env.py:149-154`) — relaxing the heterogeneous-morph
+  guard is a separate follow-up. Feature (non-vision) multi-track uses the
+  heterogeneous morphs directly.
 
 ---
 
@@ -251,11 +236,22 @@ rew_buf  += (off | flipped) * crash_penalty                 # −10 terminal hit
 ```
 
 So going off track **does not push the car back** — the episode terminates,
-takes `crash_penalty = −10` (`cfgs.py:28`), and `reset_idx` respawns it at a
-fresh random waypoint. There is also an alternate **CMDP/constrained** framing
-(`deepracer_env.py:575-589`, gated by `emit_cost`): off-track becomes a *cost*
-signal instead of a termination+penalty; only flips or far-off-road terminate.
-This feeds the PPO-Lagrangian variant.
+takes `crash_penalty` (−10 default, overridable via
+`RewardShaping(crash_penalty=...)`, logged as `Episode/rew_crash_penalty`),
+and `reset_idx` respawns it at a fresh random waypoint. There is also an
+alternate **CMDP/constrained** framing (gated by `emit_cost`): off-track
+becomes a *cost* signal instead of a termination+penalty; only flips or
+far-off-road terminate. This feeds the PPO-Lagrangian variant.
+
+Two truncations end episodes without a penalty (both surfaced through
+`extras["time_outs"]` so PPO bootstraps instead of scoring them as
+failures): the **time cap** (`episode_length_s`, 30 s default — a spec knob
+since P3) and, when set, the **lap quota** `max_laps=N` (e.g.
+`FeatureEnvironment(max_laps=3)`), which ends the episode once the car has
+completed N laps from its spawn. With `max_laps=None` (the default) laps are
+bookkeeping only and a good policy loops until the clock runs out. The quota
+is deliberately a truncation, not a terminal state — a terminal end would
+pay the policy to hover short of the line and keep farming per-step bonuses.
 
 ### 5.3 Reward — `_compute_reward` (`deepracer_env.py:556-567`) + `envs/rewards.py`
 

@@ -151,6 +151,10 @@ class FeatureEnvironment(Stage):
         random_direction: Whether each episode randomizes CW/CCW travel.
         max_speed: Top of the speed action range in m/s, or None for the
             physics default.
+        episode_length_s: Episode time limit in seconds, or None for the
+            30 s default (long tracks need more to be completable).
+        max_laps: Truncate the episode after N completed laps (bootstrapped,
+            no penalty), or None for endless episodes.
         KIND: Stage category tag (environment).
     """
 
@@ -167,6 +171,8 @@ class FeatureEnvironment(Stage):
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
     max_speed: float | None = None     # action-cap speed in m/s
+    episode_length_s: float | None = None   # None -> the 30 s config default
+    max_laps: int | None = None        # truncate after N laps (None = endless)
 
     KIND = "environment"
 
@@ -181,6 +187,8 @@ class FeatureEnvironment(Stage):
             random_start=self.random_start,
             random_direction=self.random_direction,
             max_speed=self.max_speed,
+            episode_length_s=self.episode_length_s,
+            max_laps=self.max_laps,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -203,6 +211,10 @@ class CameraEnvironment(Stage):
         random_direction: Whether each episode randomizes CW/CCW travel.
         max_speed: Top of the speed action range in m/s, or None for the
             physics default.
+        episode_length_s: Episode time limit in seconds, or None for the
+            30 s default (long tracks need more to be completable).
+        max_laps: Truncate the episode after N completed laps (bootstrapped,
+            no penalty), or None for endless episodes.
         KIND: Stage category tag (environment).
     """
 
@@ -222,6 +234,8 @@ class CameraEnvironment(Stage):
     realtime_factor: float = 1.0       # viewer pacing (view="gui"); <=0 = uncapped
 
     max_speed: float | None = None     # action-cap speed in m/s
+    episode_length_s: float | None = None   # None -> the 30 s config default
+    max_laps: int | None = None        # truncate after N laps (None = endless)
 
     KIND = "environment"
 
@@ -237,6 +251,8 @@ class CameraEnvironment(Stage):
             num_envs=self.num_envs, random_start=self.random_start,
             random_direction=self.random_direction,
             max_speed=self.max_speed,
+            episode_length_s=self.episode_length_s,
+            max_laps=self.max_laps,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -302,22 +318,36 @@ def discrete_grid(steer_bins: int = 5, speed_bins: int = 2,
 @dataclass(frozen=True)
 class RewardShaping(Stage):
     """Set the reward callable (``None`` keeps built-in ``deepracer``) and/or
-    override entries of the default reward_scales dict.
+    its scales and params (contract: ``docs/concepts/rewards-actions.md``).
 
     Attributes:
-        fn: Custom reward callable, or None to keep the built-in reward.
-        scales: Overrides merged into the default reward-scales dict.
+        fn: Custom reward callable, or None to keep the built-in reward. May
+            return named terms weighted by ``scales``, or the reward itself
+            (a bare (N,) tensor, or a ``total`` term with no scales).
+        scales: Overrides merged into the default reward-scales dict; leave
+            empty for a fn that returns the reward verbatim.
+        params: Constants the fn reads via ``env.reward_params`` — part of the
+            spec's content hash, so searchable and recorded per run.
+        crash_penalty: Terminal off-track/flip penalty override; None keeps
+            the -10.0 default. Added AFTER the weighted terms (or the verbatim
+            reward) and logged as ``Episode/rew_crash_penalty``.
         KIND: Stage category tag (reward).
     """
 
     fn: Optional["RewardFn"] = None
     scales: Optional[dict] = None
+    params: Optional[dict] = None
+    crash_penalty: Optional[float] = None
 
     KIND = "reward"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
-        return replace(spec, env=replace(
-            spec.env, reward=self.fn, reward_scales=dict(self.scales or {})))
+        env = replace(
+            spec.env, reward=self.fn, reward_scales=dict(self.scales or {}),
+            reward_params=dict(self.params or {}))
+        if self.crash_penalty is not None:
+            env = replace(env, crash_penalty=self.crash_penalty)
+        return replace(spec, env=env)
 
 
 # ----------------------------------------------------------------------
@@ -719,6 +749,9 @@ class Evaluation(Stage):
         gui: open the interactive viewer during the out-of-loop holdout eval so
             you can watch the policy drive each real track (needs a display;
             keep eval_num_envs small).
+        telemetry_envs: envs recorded in periodic-eval telemetry (None = all).
+        keep_checkpoints: ``"best_last"`` (model.pt + last + best) or ``"all"``.
+        best_metric: higher-is-better eval metric that picks ``model_best.pt``.
         KIND: Stage category tag (eval).
     """
 
@@ -727,6 +760,9 @@ class Evaluation(Stage):
     eval_episodes: Optional[int] = None
     charts: bool = True
     gui: bool = False
+    telemetry_envs: Optional[int] = 64
+    keep_checkpoints: str = "best_last"
+    best_metric: str = "mean_progress_m"
 
     KIND = "eval"
 
@@ -736,7 +772,10 @@ class Evaluation(Stage):
             eval_num_envs=self.eval_num_envs,
             eval_episodes=self.eval_episodes,
             charts=self.charts,
-            gui=self.gui))
+            gui=self.gui,
+            telemetry_envs=self.telemetry_envs,
+            keep_checkpoints=self.keep_checkpoints,
+            best_metric=self.best_metric))
 
 
 # ----------------------------------------------------------------------

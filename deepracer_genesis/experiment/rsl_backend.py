@@ -6,12 +6,16 @@ Preallocated rollout storage avoids the crash; see MIGRATION_TORCHRL_TO_RSLRL.md
 from __future__ import annotations
 
 import logging
+import math
 import os
+import re
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 import torch
 
+from ..seeding import seed_everything
 from .evaluator import EvalRecord, evaluate_policy
 
 if TYPE_CHECKING:
@@ -56,24 +60,37 @@ def rsl_supported(spec: "ExperimentSpec") -> bool:
     )
 
 
-def _dr_extra_cfg(spec: "ExperimentSpec") -> dict:
-    """Env-side action/image DR pulled from the spec into the sim cfg.
+def _apply_mlp_cfg(cfg: dict, mlp: dict) -> None:
+    """Translate the spec's ``mlp`` dict onto the actor and critic configs.
+
+    Recognized keys (all optional — absent keys keep the cfg defaults, so
+    historical spec hashes are unaffected):
+
+    - ``hidden``: tuple of layer widths → ``hidden_dims`` (depth and width
+      of the MLP trunk/head).
+    - ``activation``: rsl-rl activation name (``"elu"``, ``"relu"``,
+      ``"tanh"``, ...) for both nets' MLP layers.
+    - ``rnn``: ``{"type": "lstm"|"gru", "hidden": int, "layers": int}`` —
+      switches both nets to rsl-rl's ``RNNModel`` (a recurrent trunk in
+      front of the MLP head). Feature/vector policies only: upstream
+      ``RNNModel`` has no CNN trunk, so ``spec.validate()`` refuses the
+      combination with a camera policy.
 
     Args:
-        spec: The validated experiment spec.
-
-    Returns:
-        A cfg fragment with ``action_dr`` and/or ``image_aug`` (empty if none).
+        cfg: The rsl-rl train config being assembled (mutated in place).
+        mlp: ``spec.policy.mlp``.
     """
-    extra: dict = {}
-    ad = spec.action_dr
-    if ad.delay_steps or ad.steer_noise or ad.speed_noise:
-        extra["action_dr"] = {"steer_noise": ad.steer_noise,
-                              "speed_noise": ad.speed_noise,
-                              "delay_steps": ad.delay_steps}
-    if spec.obs_dr.image_aug:
-        extra["image_aug"] = dict(spec.obs_dr.image_aug)
-    return extra
+    for net in ("actor", "critic"):
+        if mlp.get("hidden"):
+            cfg[net]["hidden_dims"] = list(mlp["hidden"])
+        if mlp.get("activation"):
+            cfg[net]["activation"] = mlp["activation"]
+        rnn = mlp.get("rnn")
+        if rnn is not None:                 # {} means "LSTM with defaults"
+            cfg[net]["class_name"] = "RNNModel"
+            cfg[net]["rnn_type"] = rnn.get("type", "lstm")
+            cfg[net]["rnn_hidden_dim"] = rnn.get("hidden", 256)
+            cfg[net]["rnn_num_layers"] = rnn.get("layers", 1)
 
 
 def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
@@ -94,10 +111,7 @@ def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
     cfg = get_train_cfg(vision=vision)
     cfg["obs_groups"] = {"actor": list(spec.policy.actor_keys),
                          "critic": list(spec.policy.critic_keys)}
-    hidden = spec.policy.mlp.get("hidden")
-    if hidden:
-        cfg["actor"]["hidden_dims"] = list(hidden)
-        cfg["critic"]["hidden_dims"] = list(hidden)
+    _apply_mlp_cfg(cfg, spec.policy.mlp or {})
     if vision and spec.policy.cnn:                    # map the spec's CNN trunk
         c = spec.policy.cnn
         cnn_cfg = {"output_channels": list(c["channels"]),
@@ -141,12 +155,58 @@ class _RslActor:
         return td
 
 
-def _eval(sim, policy):
+def _telemetry_path(run_dir: str, name: str) -> str:
+    """Path of one telemetry parquet inside a run directory.
+
+    Args:
+        run_dir: The run directory.
+        name: File name, e.g. ``final.parquet``.
+
+    Returns:
+        ``<run_dir>/telemetry/<name>``.
+    """
+    return os.path.join(run_dir, "telemetry", name)
+
+
+def _log_eval_figures(runner, parquet_path: str, frames: int,
+                      tag: str = "Eval/trajectories") -> None:
+    """Render an eval's telemetry into TensorBoard as trajectory figures.
+
+    Pushes one variant-grid figure (every track in the eval, lap lines
+    colored by speed) into the runner's writer at the eval's env-step, so
+    the Images tab shows driving behavior evolving over training. Fully
+    guarded: figure trouble (matplotlib missing, a wandb/neptune writer
+    without ``add_figure``, an unreadable parquet) never touches the run.
+
+    Args:
+        runner: The OnPolicyRunner whose ``writer`` receives the figure
+            (created lazily by ``learn()``; None before the first chunk).
+        parquet_path: Telemetry parquet written by the eval just finished.
+        frames: Env-step count used as the TensorBoard global step.
+        tag: Image tag in TensorBoard.
+    """
+    writer = getattr(runner, "writer", None)
+    if writer is None or not hasattr(writer, "add_figure"):
+        return
+    try:
+        from ..analysis.telemetry import load_telemetry
+        from ..analysis.trackplots import plot_variant_grid
+        fig = plot_variant_grid(load_telemetry(parquet_path),
+                                color_by="speed", cols=4)
+        writer.add_figure(tag, fig, global_step=frames)
+    except Exception as e:       # noqa: BLE001 - charts must never kill a run
+        print(f"[rsl] eval figures skipped ({type(e).__name__}: {e})")
+
+
+def _eval(sim, policy, telemetry=None, telemetry_envs=None):
     """Run the eval rollout under inference_mode (rsl-rl taints sim buffers).
 
     Args:
         sim: The DeepRacer sim to roll out.
         policy: The rsl-rl inference policy.
+        telemetry: Optional parquet path for per-step trajectory telemetry
+            (see ``analysis.telemetry``).
+        telemetry_envs: Envs recorded in that telemetry (None = all).
 
     Returns:
         The aggregated eval metrics.
@@ -154,7 +214,167 @@ def _eval(sim, policy):
     # rsl-rl collection runs under torch.inference_mode(), marking the sim's
     # mutable buffers as inference tensors; eval must too, to update them in place.
     with torch.inference_mode():
-        return evaluate_policy(sim, _RslActor(policy))
+        return evaluate_policy(sim, _RslActor(policy), telemetry=telemetry,
+                               telemetry_envs=telemetry_envs)
+
+
+#: rsl-rl's interval checkpoints (``model_<iter>.pt``); never our named ones
+_ITER_CKPT = re.compile(r"model_\d+\.pt")
+
+
+def _improves(value: Optional[float], best: Optional[float]) -> bool:
+    """Whether an eval value beats the best so far (higher wins, NaN never).
+
+    Args:
+        value: This eval's metric (None when the eval saw no episode).
+        best: Best value so far (None before the first finite one).
+
+    Returns:
+        True for a strict improvement; ties keep the earlier checkpoint.
+    """
+    if value is None or math.isnan(value):
+        return False
+    return best is None or value > best
+
+
+def _save_weights(runner, path: str, **meta) -> None:
+    """Save actor/critic weights only (no optimizer — a third of the size).
+
+    Loadable by ``runner.load`` with ``optimizer: False`` (``spec.resume``).
+
+    Args:
+        runner: The OnPolicyRunner holding the policy.
+        path: Destination ``.pt`` path.
+        **meta: Provenance stored under the ``best`` key.
+    """
+    full = runner.alg.save()
+    torch.save({"actor_state_dict": full["actor_state_dict"],
+                "critic_state_dict": full["critic_state_dict"],
+                "iter": runner.current_learning_iteration,
+                "infos": None, "best": meta}, path)
+
+
+def _sweep_iter_checkpoints(run_dir: str) -> int:
+    """Delete rsl-rl's ``model_<iter>.pt`` files from a run dir.
+
+    Args:
+        run_dir: The run directory.
+
+    Returns:
+        Number of files removed.
+    """
+    stale = [p for p in Path(run_dir).glob("model_*.pt")
+             if _ITER_CKPT.fullmatch(p.name)]
+    for p in stale:
+        p.unlink(missing_ok=True)
+    return len(stale)
+
+
+class _CheckpointKeeper:
+    """Retention policy for a run dir: ``model_best.pt`` + ``model_last.pt``.
+
+    Attributes:
+        run_dir: The run directory.
+        metric: Higher-is-better eval metric that picks the best checkpoint.
+        prune: Sweep ``model_<iter>.pt`` (``keep_checkpoints == "best_last"``).
+        best_value: Best metric value so far (None until a finite one).
+        best_frames: Env-steps at which the best checkpoint was taken.
+    """
+
+    BEST, LAST = "model_best.pt", "model_last.pt"
+
+    def __init__(self, run_dir: str, metric: str, prune: bool) -> None:
+        self.run_dir, self.metric, self.prune = run_dir, metric, prune
+        self.best_value: Optional[float] = None
+        self.best_frames: Optional[int] = None
+
+    def observe(self, runner, frames: int, metrics: dict) -> None:
+        """Save ``model_best.pt`` when this eval improves the metric.
+
+        Args:
+            runner: The runner whose current weights were just evaluated.
+            frames: Env-steps trained at this eval.
+            metrics: The eval's metrics dict.
+        """
+        value = metrics.get(self.metric)
+        if not _improves(value, self.best_value):
+            return
+        self.best_value, self.best_frames = float(value), frames
+        _save_weights(runner, os.path.join(self.run_dir, self.BEST),
+                      metric=self.metric, value=self.best_value, frames=frames)
+
+    def checkpoint(self, runner) -> None:
+        """Replace the interval checkpoints with one resumable ``model_last.pt``.
+
+        Args:
+            runner: The runner to save (full state, optimizer included).
+        """
+        if not self.prune:
+            return
+        runner.save(os.path.join(self.run_dir, self.LAST))
+        _sweep_iter_checkpoints(self.run_dir)
+
+    def finish(self, final_ckpt: str) -> None:
+        """Drop ``model_last.pt`` once ``model.pt`` holds the same full state.
+
+        Args:
+            final_ckpt: The saved ``model.pt`` path ("" if that save failed).
+        """
+        if self.prune and final_ckpt:
+            _sweep_iter_checkpoints(self.run_dir)
+            Path(self.run_dir, self.LAST).unlink(missing_ok=True)
+
+    def summary(self) -> dict:
+        """Best-checkpoint provenance for ``EvalRecord.train``.
+
+        Returns:
+            ``best_checkpoint`` ("" when none), ``best_metric``,
+            ``best_value`` and ``best_frames``.
+        """
+        path = os.path.join(self.run_dir, self.BEST)
+        return {"best_checkpoint": path if self.best_value is not None else "",
+                "best_metric": self.metric, "best_value": self.best_value,
+                "best_frames": self.best_frames}
+
+
+def _holdout_eval(spec: "ExperimentSpec", policy, runner, run_dir: str,
+                  frames: int) -> dict:
+    """Per-track no-DR holdout eval after training (Part N.3, opt-in).
+
+    Builds one clean single-track sim per ``spec.eval.real_tracks`` entry,
+    rolls the trained policy on it, records telemetry, and logs each
+    track's trajectory figure to TensorBoard. Guarded so a finished run is
+    never lost if a scene can't rebuild in-process.
+
+    Args:
+        spec: The trained experiment spec.
+        policy: The rsl-rl inference policy.
+        runner: The runner whose TensorBoard writer receives the figures.
+        run_dir: The run directory (telemetry lands under it).
+        frames: Env-steps trained; the figures' global step.
+
+    Returns:
+        Per-track holdout metrics (empty when disabled or on failure).
+    """
+    if not spec.eval.real_tracks:
+        return {}
+    try:
+        from .evaluator import build_single_track_sim, evaluate_on_tracks
+        with torch.inference_mode():
+            view = "gui" if spec.eval.gui else "none"
+            holdout = evaluate_on_tracks(
+                _RslActor(policy), spec.eval.real_tracks,
+                sim_factory=lambda t: build_single_track_sim(
+                    spec, t, spec.eval.eval_num_envs, view=view),
+                telemetry_dir=os.path.join(run_dir, "telemetry"))
+        for track in spec.eval.real_tracks:
+            _log_eval_figures(
+                runner, _telemetry_path(run_dir, f"holdout_{track}.parquet"),
+                frames, tag=f"Holdout/{track}")
+        return holdout
+    except Exception as e:       # noqa: BLE001 - a lost holdout beats a lost run
+        print(f"[rsl] holdout eval skipped ({type(e).__name__}: {e})")
+        return {}
 
 
 def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRecord:
@@ -176,8 +396,13 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
     from .builder import Builder
 
     assert spec.env is not None and spec.algorithm is not None
-    # reuse all sim_cfg logic (incl. physics DR); inject env-side action/image DR
-    sim = Builder(spec).sim(extra_cfg=_dr_extra_cfg(spec) or None)
+    # P14: apply the recorded seed BEFORE the sim exists — spawn draws, DR
+    # draws, and net init all flow from these RNGs. DR_DETERMINISTIC=1 also
+    # requests deterministic torch kernels (the P5 investigation knob).
+    seed_everything(spec.seed,
+                    deterministic=bool(os.environ.get("DR_DETERMINISTIC")))
+    # sim_cfg carries the FULL DR stack (physics + env-side action/image)
+    sim = Builder(spec).sim()
     device = str(sim.device)
     run_dir = spec.run_dir(root)
     os.makedirs(run_dir, exist_ok=True)
@@ -200,6 +425,8 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
                     train_cfg["algorithm"]["learning_rate"],
                     train_cfg["algorithm"]["schedule"])
 
+    keeper = _CheckpointKeeper(run_dir, spec.eval.best_metric,
+                               prune=spec.eval.keep_checkpoints == "best_last")
     eval_history: list[dict] = []
     t0 = time.perf_counter()
     done_iters = 0
@@ -212,43 +439,40 @@ def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRec
         frames = done_iters * per_iter
         if eval_iters:
             policy = runner.get_inference_policy(device=device)
-            metrics = _eval(sim, policy)
+            tel = _telemetry_path(run_dir, f"eval_{frames:010d}.parquet")
+            metrics = _eval(sim, policy, telemetry=tel,
+                            telemetry_envs=spec.eval.telemetry_envs)
+            _log_eval_figures(runner, tel, frames)
             eval_history.append({"frames": frames, **metrics})
+            keeper.observe(runner, frames, metrics)
+            keeper.checkpoint(runner)        # before on_eval: pruned trials too
             if on_eval is not None:
                 on_eval(frames, metrics)     # may raise to prune (HPO)
 
     wall = time.perf_counter() - t0
+    frames = done_iters * per_iter
     policy = runner.get_inference_policy(device=device)
-    metrics = _eval(sim, policy)
+    tel = _telemetry_path(run_dir, "final.parquet")
+    metrics = _eval(sim, policy, telemetry=tel)
+    _log_eval_figures(runner, tel, frames)
+    keeper.observe(runner, frames, metrics)
     ckpt = os.path.join(run_dir, "model.pt")
     try:
         runner.save(ckpt)
     except Exception:            # noqa: BLE001 - never lose the run over a save
         ckpt = ""
+    keeper.finish(ckpt)
 
-    # Part N.3: out-of-loop per-track holdout eval (opt-in: real_tracks set).
-    # Guarded so a finished run is never lost if a scene can't rebuild in-process.
-    holdout = {}
-    if spec.eval.real_tracks:
-        try:
-            from .evaluator import build_single_track_sim, evaluate_on_tracks
-            with torch.inference_mode():
-                view = "gui" if spec.eval.gui else "none"
-                holdout = evaluate_on_tracks(
-                    _RslActor(policy), spec.eval.real_tracks,
-                    sim_factory=lambda t: build_single_track_sim(
-                        spec, t, spec.eval.eval_num_envs, view=view))
-        except Exception as e:   # noqa: BLE001
-            print(f"[rsl] holdout eval skipped ({type(e).__name__}: {e})")
+    holdout = _holdout_eval(spec, policy, runner, run_dir, frames)
 
     record = EvalRecord(
         spec_id=spec.id(), spec=spec.to_dict(), seed=spec.seed,
-        ablation_group=spec.ablation_group, variant=spec.variant,
+        group=spec.group, variant=spec.variant,
         metrics=metrics, eval_history=eval_history, holdout=holdout,
         train={"wall_clock_s": round(wall, 1),
                "total_env_steps": done_iters * per_iter,
                "steps_per_s": round(done_iters * per_iter / max(wall, 1e-9), 1),
-               "checkpoint": ckpt, "backend": "rsl_rl"},
+               "checkpoint": ckpt, "backend": "rsl_rl", **keeper.summary()},
     )
     record.save(run_dir)
 

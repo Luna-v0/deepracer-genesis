@@ -1,0 +1,221 @@
+{
+  "spec_id": "11fe7c21f324",
+  "spec": {
+    "env": {
+      "modality": "camera",
+      "render": "madrona",
+      "backend": "gpu",
+      "view": "none",
+      "realtime_factor": 1.0,
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "frame_stack": 1,
+      "lookahead_k": 10,
+      "feature_set": null,
+      "feature_params": {},
+      "obs_routing": null,
+      "tracks": [
+        "reinvent_base",
+        "Oval_track",
+        "Mexico_track",
+        "China_track",
+        "reInvent2019_track",
+        "2022_summit_speedway",
+        "caecer_loop"
+      ],
+      "num_envs": 128,
+      "random_start": true,
+      "random_direction": true,
+      "reward": null,
+      "reward_scales": {
+        "progress": 10.0,
+        "speed": 0.026406942985185436,
+        "centered": 3.254388650889785,
+        "heading": 0.5,
+        "steering": 0.3,
+        "action_rate": 0.05,
+        "off_track": 4.656635482493205
+      },
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {
+        "brightness": [
+          0.7,
+          1.3
+        ],
+        "hue": 0.05,
+        "blur": 0.3
+      },
+      "camera_jitter": {
+        "pitch_deg": 2.0,
+        "pos_m": 0.005
+      },
+      "physics": {
+        "friction_range": [
+          0.6,
+          1.4
+        ],
+        "mass_shift_kg": 0.2,
+        "com_shift_m": 0.01,
+        "steer_kp_scale": [
+          0.8,
+          1.2
+        ],
+        "wheel_kv_scale": [
+          0.8,
+          1.2
+        ],
+        "armature_range": [
+          0.0,
+          0.01
+        ],
+        "track_width_scale": [
+          1.0,
+          1.0
+        ]
+      },
+      "appearance": {
+        "world_color": 0.6
+      },
+      "pixel_noise": 0.0,
+      "env_map": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "camera"
+      ],
+      "critic_keys": [
+        "camera",
+        "state"
+      ],
+      "cnn": {
+        "channels": [
+          16,
+          32,
+          64
+        ],
+        "kernels": [
+          8,
+          4,
+          3
+        ],
+        "strides": [
+          4,
+          2,
+          1
+        ],
+        "activation": "relu"
+      },
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      },
+      "actions": null,
+      "distribution": {
+        "std_range": [
+          0.1,
+          1.0
+        ]
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.02,
+      "speed_noise": 0.05,
+      "delay_steps": 1
+    },
+    "algorithm": {
+      "cls": null,
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 5,
+        "minibatches": 4,
+        "gamma": 0.995,
+        "gae_lambda": 0.95,
+        "lr": 0.00015529021289627495,
+        "entropy_coef": 0.00368356162276608,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "eval": {
+      "real_tracks": [],
+      "eval_num_envs": 64,
+      "eval_episodes": null,
+      "charts": true,
+      "gui": false
+    },
+    "total_env_steps": 4000000,
+    "eval_every_steps": 2000000,
+    "seed": 0,
+    "ablation_group": "best_camera_completion_hpo",
+    "variant": "t004r1"
+  },
+  "seed": 0,
+  "ablation_group": "best_camera_completion_hpo",
+  "variant": "t004r1",
+  "metrics": {
+    "episodes": 3220,
+    "mean_return": 9.269652366638184,
+    "mean_progress_m": 1.6460145711898804,
+    "mean_episode_s": 1.4008445739746094,
+    "completion_rate": 0.0,
+    "mean_laps": 0.07251206785440445,
+    "offtrack_rate": 1.0,
+    "lap_time_s": NaN,
+    "mean_speed_mps": 1.0763623714447021
+  },
+  "train": {
+    "wall_clock_s": 1509.6,
+    "total_env_steps": 3999744,
+    "steps_per_s": 2649.5,
+    "checkpoint": "runs/best_camera_completion/best_camera_completion_hpo/t004r1-0-11fe7c21f324/model.pt",
+    "backend": "rsl_rl"
+  },
+  "eval_history": [
+    {
+      "frames": 1999872,
+      "episodes": 4423,
+      "mean_return": -3.2357406616210938,
+      "mean_progress_m": 0.5289863348007202,
+      "mean_episode_s": 1.026235580444336,
+      "completion_rate": 0.0,
+      "mean_laps": 0.023973939940333366,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.4935222566127777
+    },
+    {
+      "frames": 3999744,
+      "episodes": 3184,
+      "mean_return": 9.893542289733887,
+      "mean_progress_m": 1.7048349380493164,
+      "mean_episode_s": 1.415376901626587,
+      "completion_rate": 0.0,
+      "mean_laps": 0.07526850700378418,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 1.1000648736953735
+    }
+  ],
+  "holdout": {},
+  "created_at": "2026-08-28T00:09:33"
+}

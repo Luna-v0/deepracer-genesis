@@ -18,8 +18,8 @@ class Experiment:
         seed: Random seed for reproducibility.
         total_env_steps: Number of environment steps to train for.
         eval_every_steps: Evaluation interval in steps (0 disables periodic eval).
+        group: Optional run-grouping tag (names the runs/<group>/ folder).
         resume: Checkpoint the policy starts from, or None to train from scratch.
-        ablation_group: Optional grouping label for ablation studies.
         variant: Optional variant label, defaulting to the subclass name.
     """
 
@@ -27,8 +27,8 @@ class Experiment:
     seed: int = 0
     total_env_steps: int = 5_000_000
     eval_every_steps: int = 0
+    group: str | None = None
     resume: str | None = None
-    ablation_group: str | None = None
     variant: str | None = None
 
     def __init__(self, **overrides):
@@ -73,8 +73,8 @@ class Experiment:
             seed=self.seed,
             total_env_steps=self.total_env_steps,
             eval_every_steps=self.eval_every_steps,
+            group=self.group,
             resume=self.resume,
-            ablation_group=self.ablation_group,
             variant=self.variant or type(self).__name__,
         )
 

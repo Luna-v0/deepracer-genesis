@@ -17,7 +17,7 @@ from deepracer_genesis.experiment import (
     VectorPolicy,
 )
 from deepracer_genesis.experiment.evaluator import EvalRecord
-from deepracer_genesis.experiment.report import delta_rows, grouped_rows, spec_axes
+from deepracer_genesis.experiment.report import grouped_rows, spec_axes
 
 
 def _camera_full_dr():
@@ -51,7 +51,7 @@ def _feature():
 
 def _rec(spec, variant, group, seed=0, **metrics):
     return EvalRecord(spec_id=spec.id(), spec=spec.to_dict(), seed=seed,
-                      ablation_group=group, variant=variant, metrics=metrics)
+                      group=group, variant=variant, metrics=metrics)
 
 
 def test_spec_axes_derivation():
@@ -76,19 +76,3 @@ def test_grouped_rows_aggregate_over_seeds():
     mean, std = rows[0]["completion_rate"]
     assert abs(mean - 0.91) < 1e-9 and std > 0
     assert rows[0]["n_runs"] == 2
-
-
-def test_delta_rows_pick_baseline_and_diff():
-    recs = [
-        _rec(_camera_no_dr(), "no_dr", "dr_effect", completion_rate=0.5),
-        _rec(_camera_full_dr(), "full_dr", "dr_effect", completion_rate=0.8),
-    ]
-    d = delta_rows(recs)
-    assert d["dr_effect"]["baseline"] == "no_dr"
-    delta, _ = d["dr_effect"]["deltas"]["full_dr"]["completion_rate"]
-    assert abs(delta - 0.3) < 1e-9
-
-
-def test_single_variant_groups_skipped():
-    recs = [_rec(_feature(), "feature", "baselines", completion_rate=1.0)]
-    assert delta_rows(recs) == {}

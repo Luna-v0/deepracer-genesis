@@ -1,0 +1,11 @@
+{
+  "dr": {
+    "image_aug": {
+      "contrast": [
+        0.8,
+        1.25
+      ]
+    }
+  },
+  "name": "demo_dr"
+}

@@ -113,8 +113,9 @@ def test_privileged_critic_asymmetry_is_silent_at_build():
         _spec(env, policy).validate()
 
 
-def test_undeclared_custom_reward_skips_check():
-    """A custom reward with no declared reads emits no learnability warning."""
+def test_undeclared_custom_reward_warns_that_check_is_skipped():
+    """A custom reward with no declared reads warns loudly (P12.d): an opaque
+    reward is exactly the case K.5 should check, so skipping is never silent."""
     def custom(env):
         return {"x": env.d_progress}
 
@@ -122,8 +123,7 @@ def test_undeclared_custom_reward_skips_check():
                   reward_scales={"x": 1.0})
     policy = PolicySpec(actor_keys=("camera",), critic_keys=("camera",),
                         cnn={"channels": (32,)})
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
+    with pytest.warns(UserWarning, match="declares no signal reads"):
         _spec(env, policy).validate()
 
 

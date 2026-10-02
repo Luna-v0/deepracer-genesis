@@ -1,0 +1,225 @@
+{
+  "spec_id": "3adb6311f061",
+  "spec": {
+    "env": {
+      "modality": "camera",
+      "render": "madrona",
+      "backend": "gpu",
+      "view": "none",
+      "realtime_factor": 1.0,
+      "resolution": [
+        160,
+        120
+      ],
+      "fov": 90.0,
+      "frame_stack": 4,
+      "lookahead_k": 10,
+      "feature_set": null,
+      "feature_params": {},
+      "obs_routing": null,
+      "tracks": [
+        "reinvent_base",
+        "Oval_track",
+        "Mexico_track",
+        "China_track",
+        "reInvent2019_track",
+        "2022_summit_speedway",
+        "caecer_loop"
+      ],
+      "num_envs": 128,
+      "random_start": true,
+      "random_direction": true,
+      "reward": null,
+      "reward_scales": {},
+      "emits_cost": false,
+      "cost_fn": null,
+      "cost_budget": null
+    },
+    "obs_dr": {
+      "image_aug": {
+        "brightness": [
+          0.7,
+          1.3
+        ],
+        "hue": 0.05,
+        "blur": 0.3
+      },
+      "camera_jitter": {
+        "pitch_deg": 2.0,
+        "pos_m": 0.005
+      },
+      "physics": {
+        "friction_range": [
+          0.6,
+          1.4
+        ],
+        "mass_shift_kg": 0.2,
+        "com_shift_m": 0.01,
+        "steer_kp_scale": [
+          0.8,
+          1.2
+        ],
+        "wheel_kv_scale": [
+          0.8,
+          1.2
+        ],
+        "armature_range": [
+          0.0,
+          0.01
+        ],
+        "track_width_scale": [
+          1.0,
+          1.0
+        ]
+      },
+      "appearance": {
+        "world_color": 0.6
+      },
+      "pixel_noise": 0.0,
+      "env_map": {}
+    },
+    "encoder": {
+      "kind": "none",
+      "checkpoint": null,
+      "output_dim": null,
+      "layer": null,
+      "out_key": "encoded"
+    },
+    "policy": {
+      "actor_keys": [
+        "camera"
+      ],
+      "critic_keys": [
+        "camera",
+        "state"
+      ],
+      "cnn": {
+        "channels": [
+          16,
+          32,
+          64
+        ],
+        "kernels": [
+          8,
+          4,
+          3
+        ],
+        "strides": [
+          4,
+          2,
+          1
+        ],
+        "activation": "relu"
+      },
+      "mlp": {
+        "hidden": [
+          256,
+          128,
+          64
+        ],
+        "activation": "elu"
+      },
+      "actions": null,
+      "distribution": {
+        "std_range": [
+          0.1,
+          1.0
+        ]
+      }
+    },
+    "action_dr": {
+      "steer_noise": 0.02,
+      "speed_noise": 0.05,
+      "delay_steps": 1
+    },
+    "algorithm": {
+      "cls": null,
+      "ppo": {
+        "clip": 0.2,
+        "epochs": 3,
+        "minibatches": 8,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+        "lr": 4.300318141098345e-05,
+        "entropy_coef": 0.0010405284269738267,
+        "max_grad_norm": 1.0,
+        "horizon": 24
+      },
+      "lagrangian": {},
+      "params": {}
+    },
+    "eval": {
+      "real_tracks": [],
+      "eval_num_envs": 64,
+      "eval_episodes": null,
+      "charts": true,
+      "gui": false
+    },
+    "total_env_steps": 2400000,
+    "eval_every_steps": 1200000,
+    "seed": 0,
+    "ablation_group": "best_camera_diverse_hpo",
+    "variant": "t009"
+  },
+  "seed": 0,
+  "ablation_group": "best_camera_diverse_hpo",
+  "variant": "t009",
+  "metrics": {
+    "episodes": 592,
+    "mean_return": -4.756602764129639,
+    "mean_progress_m": 0.3678659498691559,
+    "mean_episode_s": 6.793513298034668,
+    "completion_rate": 0.0,
+    "mean_laps": 0.017185283824801445,
+    "offtrack_rate": 0.9983108639717102,
+    "lap_time_s": NaN,
+    "mean_speed_mps": 0.05562127009034157
+  },
+  "train": {
+    "wall_clock_s": 1225.2,
+    "total_env_steps": 2399232,
+    "steps_per_s": 1958.2,
+    "checkpoint": "runs/best_camera_diverse/best_camera_diverse_hpo/t009-0-3adb6311f061/model.pt",
+    "backend": "rsl_rl"
+  },
+  "eval_history": [
+    {
+      "frames": 1198080,
+      "episodes": 3196,
+      "mean_return": 8.620545387268066,
+      "mean_progress_m": 1.6997458934783936,
+      "mean_episode_s": 1.4101877212524414,
+      "completion_rate": 0.0,
+      "mean_laps": 0.07526053488254547,
+      "offtrack_rate": 1.0,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 1.1001306772232056
+    },
+    {
+      "frames": 2396160,
+      "episodes": 606,
+      "mean_return": -4.885374069213867,
+      "mean_progress_m": 0.35334646701812744,
+      "mean_episode_s": 6.722970485687256,
+      "completion_rate": 0.0,
+      "mean_laps": 0.01650387980043888,
+      "offtrack_rate": 0.9933993816375732,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.05457822233438492
+    },
+    {
+      "frames": 2399232,
+      "episodes": 598,
+      "mean_return": -5.132134914398193,
+      "mean_progress_m": 0.33652254939079285,
+      "mean_episode_s": 6.703845977783203,
+      "completion_rate": 0.0,
+      "mean_laps": 0.01580057293176651,
+      "offtrack_rate": 0.9983277320861816,
+      "lap_time_s": NaN,
+      "mean_speed_mps": 0.05188838019967079
+    }
+  ],
+  "holdout": {},
+  "created_at": "2026-08-27T10:52:14"
+}

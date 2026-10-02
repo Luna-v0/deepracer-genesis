@@ -57,13 +57,14 @@ class TerminationConfig(TypedDict):
     wheel_margin: float
     crash_penalty: float
     overspeed_limit: float
+    max_laps: Optional[int]   # truncate the episode after N laps (None = endless)
 
 
 class ObsConfig(TypedDict):
     """State-vector / feature-set observation settings."""
 
     lookahead_k: int
-    lookahead_stride: int
+    lookahead_spacing_m: float   # meters between arclength lookahead samples (P1)
     lookahead_scale: float
     obs_noise: float
     feature_set: Optional[type]   # a FeatureSet subclass, or None -> ClassicFeatures
@@ -102,6 +103,7 @@ class RewardConfig(TypedDict):
     reward: "Optional[RewardFn]"   # None -> the built-in `deepracer` default
     reward_scales: dict
     reward_scale_overrides: dict
+    reward_params: dict            # constants exposed as env.reward_params
     emit_cost: bool
     cost_fn: Optional[str]
 

@@ -431,7 +431,10 @@ class MadronaRenderer(_CameraRenderer):
                 centers.append(c)
                 heights.append(extent * 1.2)
             ev = env.track.variant_idx
-            self._top_center = torch.stack(centers)[ev]          # (N, 2)
+            # Part O tiling: each variant's mesh lives on its own world tile, so
+            # the bird's-eye centers must follow the tile offsets (zero when off)
+            self._top_center = (torch.stack(centers)
+                                + env.track.variant_offset)[ev]  # (N, 2)
             self._top_height = torch.stack(heights)[ev]          # (N,)
             c0 = centers[0].cpu().numpy()
             self.top_cam = env.scene.add_camera(
@@ -537,8 +540,8 @@ class RasterizerObsRenderer(_CameraRenderer):
     # Madrona and Nyx are GPU-only, so the CPU backend renders the policy camera
     # with the same Rasterizer that already backs the spectator/top-down debug
     # views, reusing _CameraRenderer's device-agnostic post-processing verbatim.
-    # randomize_mount (camera_jitter DR) is a no-op here: per-env mount jitter is
-    # Madrona-only. Image-space DR still applies, being renderer-agnostic.
+    # randomize_mount IS supported: a batched camera carries a per-env attach
+    # offset, the same mechanism Madrona uses. Image-space DR applies too.
     merge_fixed_links = True
     _scene_batch_renderer = False    # plain Rasterizer, not a BatchRenderer
     _spectator_debug = False         # no batch pipeline, so no debug camera needed
@@ -565,12 +568,21 @@ class RasterizerObsRenderer(_CameraRenderer):
         self.cam = env.scene.add_camera(res=res, fov=fov, GUI=False)
         self.top_cam = None
         if vision_cfg.get("topdown_camera", False):
-            # camera obs on this path is single-track, so one pose fits every env
-            c, extent = _track_extent(env.track.tracks[0])
-            c = c.cpu().numpy()
+            # per-env bird's-eye pose over each env's own track variant, tile
+            # offset included — a batched camera takes per-env poses via set_pose
+            centers, heights = [], []
+            for t in env.track.tracks:
+                c, extent = _track_extent(t)
+                centers.append(c)
+                heights.append(extent * 1.2)
+            ev = env.track.variant_idx
+            self._top_center = (torch.stack(centers)
+                                + env.track.variant_offset)[ev]  # (N, 2)
+            self._top_height = torch.stack(heights)[ev]          # (N,)
+            c0 = centers[0].cpu().numpy()
             self.top_cam = env.scene.add_camera(
-                res=res, pos=(float(c[0]), float(c[1]), float(extent) * 1.2),
-                lookat=(float(c[0]), float(c[1]), 0.0),
+                res=res, pos=(float(c0[0]), float(c0[1]), float(heights[0])),
+                lookat=(float(c0[0]), float(c0[1]), 0.0),
                 up=(0.0, 1.0, 0.0), fov=60, GUI=False)
 
     def finalize(self, env: "DeepRacerEnv", vision_cfg: dict) -> None:
@@ -585,6 +597,35 @@ class RasterizerObsRenderer(_CameraRenderer):
         super().finalize(env, vision_cfg)
         self.cam_offset_T = camera_offset_T(vision_cfg.get("camera_pitch_deg", 0.0))
         self.cam.attach(env.car.get_link("camera_link"), self.cam_offset_T)
+        if self.top_cam is not None:
+            pos = torch.cat([self._top_center, self._top_height[:, None]], dim=1)
+            lookat = torch.cat([self._top_center,
+                                torch.zeros(env.num_envs, 1, device=env.device)], dim=1)
+            up = torch.tensor([[0.0, 1.0, 0.0]], device=env.device).expand(env.num_envs, 3)
+            self.top_cam.set_pose(pos=pos, lookat=lookat, up=up)
+
+    def randomize_mount(self, env: "DeepRacerEnv", env_ids: torch.Tensor) -> None:
+        """Re-randomize the camera mount pitch and position for the given envs.
+
+        A batched camera still carries a per-env attach offset, so mount jitter
+        works here exactly as it does on the Madrona path.
+
+        Args:
+            env: The env owning the attached camera; ``cfg['rand']`` supplies
+                ``camera_pitch_jitter_deg`` and ``camera_pos_jitter_m``.
+            env_ids: Indices of the envs whose camera mounts are re-randomized.
+        """
+        cfg = env.cfg["rand"]
+        jitter_deg = cfg.get("camera_pitch_jitter_deg", 0.0)
+        jitter_pos = cfg.get("camera_pos_jitter_m", 0.0)
+        if jitter_deg <= 0 and jitter_pos <= 0:
+            return
+        cam = self.cam
+        base = torch.as_tensor(self.cam_offset_T, dtype=torch.float32, device=env.device)
+        if cam._attached_offset_T.dim() == 2:
+            cam._attached_offset_T = base.expand(env.num_envs, 4, 4).clone()
+        cam._attached_offset_T[env_ids] = sample_mount_transforms(
+            self.cam_offset_T, jitter_deg, jitter_pos, len(env_ids), env.device)
 
     def _acquire_rgb(self, env: "DeepRacerEnv") -> torch.Tensor:
         """Move the batched camera into place and render every env's frame.

@@ -1,0 +1,1235 @@
+--- git commit ---
+51ed807f8543472d7e0e383e5f5c92e88b2280af
+
+
+--- git status ---
+On branch dev
+Your branch is up to date with 'origin/dev'.
+
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   .jupyter/collaboration_sessions.json
+	modified:   .jupyter_ystore.db
+	deleted:    .virtual_documents/notebooks/track_designer.ipynb
+	modified:   deepracer_genesis/analysis/trackplots.py
+	modified:   deepracer_genesis/envs/rewards.py
+	modified:   deepracer_genesis/experiment/__init__.py
+	modified:   deepracer_genesis/experiment/rsl_backend.py
+	modified:   deepracer_genesis/experiment/spec.py
+	modified:   deepracer_genesis/experiment/visualize.py
+	modified:   docs/concepts/architecture.md
+	modified:   docs/concepts/renderers.md
+	modified:   docs/concepts/rewards-actions.md
+	modified:   docs/guides/deployment.md
+	modified:   docs/index.md
+	modified:   docs/tutorial.md
+	modified:   docs/usage/local.md
+	modified:   examples/__init__.py
+	deleted:    examples/safe_rl.py
+	modified:   mkdocs.yml
+	modified:   pyproject.toml
+	modified:   tests/test_examples.py
+	modified:   tests/test_telemetry.py
+	modified:   uv.lock
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.virtual_documents/experiments/
+	docs/assets/
+	docs/quickstart.md
+	docs/reference/
+	experiments/.ipynb_checkpoints/
+	experiments/_stages_best_camera.py
+	experiments/_stages_best_camera_completion.py
+	experiments/_stages_best_camera_diverse.py
+	experiments/ablation_individual.ipynb
+	experiments/best_camera.ipynb
+	experiments/best_camera_completion.ipynb
+	experiments/best_camera_diverse.ipynb
+	runs/arch_smoke/
+	runs/best_camera/
+	runs/best_camera_completion/
+	runs/best_camera_completion_smoke/
+	runs/best_camera_diverse/
+	runs/best_camera_diverse_smoke/
+	runs/best_camera_smoke/
+	site/
+	tests/test_policy_arch.py
+	tests/test_rewards.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git c/.jupyter/collaboration_sessions.json w/.jupyter/collaboration_sessions.json
+index de6b225..50ac4f7 100644
+--- c/.jupyter/collaboration_sessions.json
++++ w/.jupyter/collaboration_sessions.json
+@@ -18,5 +18,15 @@
+     "version": "2.4.1",
+     "created_at": "2026-08-01T01:02:26.978986+00:00",
+     "document_version": "2.0.0"
++  },
++  "fdd9cf6b-c719-4f1f-b1ad-40337b8b9853": {
++    "version": "2.4.1",
++    "created_at": "2026-08-28T22:56:28.887198+00:00",
++    "document_version": "1.0.0"
++  },
++  "fbf864c8-6242-48a7-8847-945b9f9b4615": {
++    "version": "2.4.1",
++    "created_at": "2026-08-29T13:01:43.028812+00:00",
++    "document_version": "1.0.0"
+   }
+ }
+\ No newline at end of file
+diff --git c/.jupyter_ystore.db w/.jupyter_ystore.db
+index 2dbbba0..259d454 100644
+Binary files c/.jupyter_ystore.db and w/.jupyter_ystore.db differ
+diff --git c/.virtual_documents/notebooks/track_designer.ipynb w/.virtual_documents/notebooks/track_designer.ipynb
+deleted file mode 100644
+index f4814b9..0000000
+--- c/.virtual_documents/notebooks/track_designer.ipynb
++++ /dev/null
+@@ -1,79 +0,0 @@
+-
+-
+-
+-get_ipython().run_line_magic("matplotlib", " inline")
+-import numpy as np
+-import matplotlib.pyplot as plt
+-from deepracer_genesis.tools.track_builder import (
+-    stadium, route_from_waypoints, build_route, build_track_mesh,
+-    plot_track, plot_wireframe, install_track, fetch_official_track,
+-    track_metrics,
+-)
+-
+-
+-
+-
+-
+-# A "pill" (stretched oval) sized for a 3.6 x 1.8 m room, ~5 cm wall margin.
+-waypoints = stadium(straight=1.80, radius=0.50)
+-width = 0.7                                       # road width in meters
+-
+-route = route_from_waypoints(waypoints, width, n_waypoints=160)  # smooth arcs
+-
+-# prefer sketching rough corners and letting the tool round them?
+-# route = build_route(waypoints, half_width=width / 2, smooth_passes=3)
+-
+-# clean printable layout: grass, white edge strips, dashed centerline, no axes
+-fig, _ = plot_track(route, out_path="my_track_print.png")
+-fig.savefig("my_track_print.pdf", facecolor=fig.get_facecolor(),
+-            bbox_inches="tight", pad_inches=0)   # vector, for scaled printing
+-
+-# wireframe: borders, waypoints, start marker + driving direction, room bounds
+-plot_wireframe(route, waypoints, room=(3.6, 1.8), out_path="my_track_wireframe.png")
+-
+-metrics = track_metrics(route)
+-print(metrics)   # everything you need to lay the track out physically
+-
+-
+-
+-
+-
+-install_track("my_track", route)
+-from deepracer_genesis.envs.track import TRACKS
+-print(sorted(TRACKS))
+-
+-
+-
+-
+-
+-import torch, genesis as gs
+-import imageio.v2 as imageio
+-gs.init(backend=gs.cuda, logging_level="warning")
+-from deepracer_genesis.configs.cfgs import get_env_cfg
+-from deepracer_genesis.envs import DeepRacerEnv
+-
+-cfg = get_env_cfg(vision=False, track="my_track")
+-cfg.update(spectator=True, spectator_res=(960, 720))
+-env = DeepRacerEnv(num_envs=4, env_cfg=cfg)
+-prog = torch.zeros(4, device=env.device)
+-for _ in range(300):
+-    lat = env.lateral * env.dir_sign / env.half_width.clamp(min=0.1)
+-    steer = (-(1.1 * lat + 0.9 * torch.sin(env.heading_err))).clamp(-1, 1)
+-    env.step(torch.stack([steer, torch.full_like(steer, -0.3)], dim=1))
+-    prog += env.d_progress
+-imageio.imwrite("/tmp/my_track_topdown.png", env.render_spectator())
+-print("mean progress:", round(prog.mean().item(), 1), "m in 10 s |",
+-      "offtrack events:", int(env.offtrack_buf.sum().item()))
+-del env    # scenes CAN be rebuilt in-process — re-run after editing the track
+-
+-
+-from IPython.display import Image
+-Image("/tmp/my_track_topdown.png", width=720)
+-
+-
+-
+-
+-
+-from deepracer_genesis import tracks
+-
+-tracks.names()
+diff --git c/deepracer_genesis/analysis/trackplots.py w/deepracer_genesis/analysis/trackplots.py
+index 01b8b8e..1e5b5dc 100644
+--- c/deepracer_genesis/analysis/trackplots.py
++++ w/deepracer_genesis/analysis/trackplots.py
+@@ -247,7 +247,9 @@ def plot_waypoint_heat(df, track: Optional[str] = None, *,
+         The matplotlib figure.
+     """
+     track = _resolve_track(df, track)
+-    d = df[df["track"] == track]
++    # done rows carry the post-respawn pose (see _crash_positions) — they
++    # would smear each episode's final sample onto the spawn waypoint
++    d = df[(df["track"] == track) & ~df["done"]]
+     route = _route(track)
+     center = route[:, 0:2]
+     wp = _nearest_waypoints(d[["x", "y"]].to_numpy(), center)
+@@ -265,6 +267,27 @@ def plot_waypoint_heat(df, track: Optional[str] = None, *,
+     return fig
+ 
+ 
++def _crash_positions(d):
++    """The last on-track pose before each off-track exit.
++
++    An off-track row's own ``x``/``y`` is already the RESPAWN pose (the env
++    auto-resets inside ``step()``), which is why naive plotting puts every
++    "crash" back inside the corridor. The closest recorded pose to the real
++    exit point is the same car's previous step, so each off-track row takes
++    the pose one row earlier within its (env, episode); a crash on an
++    episode's very first recorded step has no prior pose and is dropped.
++
++    Args:
++        d: Telemetry DataFrame filtered to one track.
++
++    Returns:
++        ``(K, 2)`` array of crash positions.
++    """
++    d = d.sort_values(["env", "episode", "step"])
++    prev = d.groupby(["env", "episode"], observed=True)[["x", "y"]].shift(1)
++    return prev[d["off_track"].to_numpy()].dropna().to_numpy()
++
++
+ def plot_offtrack_hotspots(df, track: Optional[str] = None):
+     """Where cars leave the track — the actionable sim2real view.
+ 
+@@ -273,14 +296,16 @@ def plot_offtrack_hotspots(df, track: Optional[str] = None):
+         track: Track name to plot.
+ 
+     Returns:
+-        The matplotlib figure (off-track points as red crosses, count in
+-        the title).
++        The matplotlib figure (off-track exit points as red crosses, count
++        in the title).
+     """
+     track = _resolve_track(df, track)
+-    d = df[(df["track"] == track) & df["off_track"]]
++    pts = _crash_positions(df[df["track"] == track])
+     fig, ax = _fig_ax(None)
+     _outline(ax, _route(track))
+-    ax.plot(d["x"], d["y"], "x", color="crimson", ms=5, mew=1.4, zorder=3)
+-    ax.set_title(f"{track} — {len(d)} off-track points")
++    if len(pts):
++        ax.plot(pts[:, 0], pts[:, 1], "x", color="crimson", ms=5, mew=1.4,
++                zorder=3)
++    ax.set_title(f"{track} — {len(pts)} off-track exits")
+     fig.tight_layout()
+     return fig
+diff --git c/deepracer_genesis/envs/rewards.py w/deepracer_genesis/envs/rewards.py
+index a728336..e96802b 100644
+--- c/deepracer_genesis/envs/rewards.py
++++ w/deepracer_genesis/envs/rewards.py
+@@ -99,5 +99,8 @@ def deepracer(env: "DeepRacerEnv") -> dict[str, torch.Tensor]:
+         "heading": -env.heading_err.abs() * env.dt,
+         "steering": -env.actions[:, 0].abs() * env.dt,
+         "action_rate": -((env.actions - env.last_actions) ** 2).sum(dim=1) * env.dt,
+-        "off_track": (~on_track).float() * env.dt,
++        # negative like heading/steering: signs live in the TERM, scales stay
++        # positive. (This was +1*dt until 2026-08: a positive scale *rewarded*
++        # edge-riding at 4x the centered bonus — pinned by test_rewards.)
++        "off_track": -(~on_track).float() * env.dt,
+     }
+diff --git c/deepracer_genesis/experiment/__init__.py w/deepracer_genesis/experiment/__init__.py
+index a936ab2..cd4c470 100644
+--- c/deepracer_genesis/experiment/__init__.py
++++ w/deepracer_genesis/experiment/__init__.py
+@@ -37,6 +37,7 @@ from .stages import (
+ )
+ from .authoring import Experiment
+ from .run import build, run
++from .visualize import rollout_video, view_zoo
+ 
+ __all__ = [
+     "ActionDRSpec", "AlgorithmSpec", "EncoderSpec", "EnvSpec", "ExperimentSpec",
+@@ -53,4 +54,5 @@ __all__ = [
+     "Evaluation", "EvalConfig",
+     "Experiment",
+     "build", "run",
++    "rollout_video", "view_zoo",
+ ]
+diff --git c/deepracer_genesis/experiment/rsl_backend.py w/deepracer_genesis/experiment/rsl_backend.py
+index 0466295..b007818 100644
+--- c/deepracer_genesis/experiment/rsl_backend.py
++++ w/deepracer_genesis/experiment/rsl_backend.py
+@@ -51,6 +51,39 @@ def rsl_supported(spec: "ExperimentSpec") -> bool:
+     )
+ 
+ 
++def _apply_mlp_cfg(cfg: dict, mlp: dict) -> None:
++    """Translate the spec's ``mlp`` dict onto the actor and critic configs.
++
++    Recognized keys (all optional — absent keys keep the cfg defaults, so
++    historical spec hashes are unaffected):
++
++    - ``hidden``: tuple of layer widths → ``hidden_dims`` (depth and width
++      of the MLP trunk/head).
++    - ``activation``: rsl-rl activation name (``"elu"``, ``"relu"``,
++      ``"tanh"``, ...) for both nets' MLP layers.
++    - ``rnn``: ``{"type": "lstm"|"gru", "hidden": int, "layers": int}`` —
++      switches both nets to rsl-rl's ``RNNModel`` (a recurrent trunk in
++      front of the MLP head). Feature/vector policies only: upstream
++      ``RNNModel`` has no CNN trunk, so ``spec.validate()`` refuses the
++      combination with a camera policy.
++
++    Args:
++        cfg: The rsl-rl train config being assembled (mutated in place).
++        mlp: ``spec.policy.mlp``.
++    """
++    for net in ("actor", "critic"):
++        if mlp.get("hidden"):
++            cfg[net]["hidden_dims"] = list(mlp["hidden"])
++        if mlp.get("activation"):
++            cfg[net]["activation"] = mlp["activation"]
++        rnn = mlp.get("rnn")
++        if rnn is not None:                 # {} means "LSTM with defaults"
++            cfg[net]["class_name"] = "RNNModel"
++            cfg[net]["rnn_type"] = rnn.get("type", "lstm")
++            cfg[net]["rnn_hidden_dim"] = rnn.get("hidden", 256)
++            cfg[net]["rnn_num_layers"] = rnn.get("layers", 1)
++
++
+ def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
+     """Translate an ExperimentSpec into an rsl-rl OnPolicyRunner train cfg.
+ 
+@@ -66,10 +99,7 @@ def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
+     cfg = get_train_cfg(vision=vision)
+     cfg["obs_groups"] = {"actor": list(spec.policy.actor_keys),
+                          "critic": list(spec.policy.critic_keys)}
+-    hidden = spec.policy.mlp.get("hidden")
+-    if hidden:
+-        cfg["actor"]["hidden_dims"] = list(hidden)
+-        cfg["critic"]["hidden_dims"] = list(hidden)
++    _apply_mlp_cfg(cfg, spec.policy.mlp or {})
+     if vision and spec.policy.cnn:                    # map the spec's CNN trunk
+         c = spec.policy.cnn
+         cnn_cfg = {"output_channels": list(c["channels"]),
+diff --git c/deepracer_genesis/experiment/spec.py w/deepracer_genesis/experiment/spec.py
+index 0a2bdf3..bd62af0 100644
+--- c/deepracer_genesis/experiment/spec.py
++++ w/deepracer_genesis/experiment/spec.py
+@@ -432,6 +432,7 @@ class ExperimentSpec:
+         self._validate_environment()
+         self._validate_obs_routing()
+         self._validate_key_routing()
++        self._validate_policy_arch()
+         self._validate_encoder()
+         self._validate_obs_dr()
+         self._validate_action_dr()
+@@ -533,6 +534,26 @@ class ExperimentSpec:
+                 "obs_routing critic must see >= the actor's blocks (privileged "
+                 "critic); actor-only blocks %s" % sorted(actor_only))
+ 
++    def _validate_policy_arch(self) -> None:
++        """Check the policy's mlp dict (recurrence support, rnn shape).
++
++        Raises:
++            SpecError: If a camera (CNN) policy requests recurrence —
++                rsl-rl's ``RNNModel`` has no CNN trunk — or the rnn config
++                names an unsupported cell type.
++        """
++        rnn = (self.policy.mlp or {}).get("rnn")
++        if rnn is None:
++            return
++        if self.policy.cnn is not None:
++            raise SpecError(
++                "mlp={'rnn': ...} needs a vector policy: rsl-rl's RNNModel "
++                "has no CNN trunk, so camera policies cannot be recurrent "
++                "(drop the rnn config or switch to a feature environment)")
++        cell = rnn.get("type", "lstm")
++        if cell not in ("lstm", "gru"):
++            raise SpecError(f"rnn type must be 'lstm' or 'gru', got {cell!r}")
++
+     def _validate_key_routing(self) -> None:
+         """Check actor/critic obs keys, discrete actions, and camera routing.
+ 
+diff --git c/deepracer_genesis/experiment/visualize.py w/deepracer_genesis/experiment/visualize.py
+index cdcb988..733e17e 100644
+--- c/deepracer_genesis/experiment/visualize.py
++++ w/deepracer_genesis/experiment/visualize.py
+@@ -189,3 +189,116 @@ def dr_preview_video(target="cam_baseline", *, steps: int = 300,
+                     np.stack(spectator), fps=50)
+     print(f"[visualize] DR preview written to {out}/")
+     return onboard_path
++
++
++def view_zoo(target, *, root: str = "runs", num_envs: Optional[int] = None,
++             steps: int = 40, upscale: int = 1, save: Optional[str] = None,
++             **overrides) -> list:
++    """Capture each car's onboard camera view across the experiment's tracks.
++
++    Builds the experiment's sim, drives a short seeded warmup with the
++    centerline follower so every car sits somewhere sensible on its track,
++    and grabs the newest RGB frame of each env's camera observation — at
++    the exact resolution the policy (and the physical car) sees. With a
++    zoo/multi-track spec this is the fastest way to eyeball what the cars
++    see on every variant. (For the bird's-eye view of the tiled zoo itself,
++    use ``tools.zoo.view_zoo`` — this is the onboard counterpart.)
++
++    Args:
++        target: Any experiment handle accepted by ``run.build`` (an
++            Experiment class, a pipeline, a spec, ...). Must be a camera
++            modality.
++        root: Runs directory (only used to resolve the spec, not written).
++        num_envs: Override the number of cars (default: one per track when
++            the spec has several tracks, else the spec's own count capped
++            at 8).
++        steps: Seeded warmup control steps before the snapshot.
++        upscale: Integer nearest-neighbour upscale of the returned images
++            (1 = the camera's native resolution).
++        save: Optional path for a track-labelled contact-sheet PNG of all
++            views.
++        **overrides: Keyword overrides forwarded to ``build(target)``.
++
++    Returns:
++        One ``PIL.Image`` per env, in env order (track order for the
++        one-car-per-track default). PIL images render inline in Jupyter.
++
++    Raises:
++        SpecError: If the target is not a camera-modality experiment.
++    """
++    import numpy as np
++    from PIL import Image
++
++    from .builder import Builder
++    from .spec import SpecError
++
++    spec = build(target, **overrides)
++    if spec.env.modality != "camera":
++        raise SpecError("view_zoo needs a camera-modality experiment "
++                        f"(got {spec.env.modality!r})")
++    if num_envs is None:
++        num_envs = (len(spec.env.tracks) if len(spec.env.tracks) > 1
++                    else min(spec.env.num_envs, 8))
++    spec = replace(spec, env=replace(spec.env, num_envs=num_envs))
++
++    sim = Builder(spec).sim()
++    with torch.inference_mode():
++        for _ in range(steps):
++            sim.step(_CONTROLLER.act(sim))
++        cam = sim.get_observations()["camera"].float().cpu().numpy()
++
++    rgb = np.clip(cam[:, -3:].transpose(0, 2, 3, 1) * 255, 0, 255).astype("uint8")
++    images = [Image.fromarray(frame) for frame in rgb]
++    if upscale > 1:
++        images = [im.resize((im.width * upscale, im.height * upscale),
++                            Image.NEAREST) for im in images]
++    if save:
++        _save_contact_sheet(images, _env_track_names(sim), save)
++    return images
++
++
++def _env_track_names(sim) -> list:
++    """Per-env track names, or empty strings when the sim has no variants.
++
++    Args:
++        sim: The built DeepRacerEnv.
++
++    Returns:
++        One name per env.
++    """
++    try:
++        idx = sim.track.variant_idx.tolist()
++        return [sim.track.names[i] for i in idx]
++    except AttributeError:
++        return [""] * sim.num_envs
++
++
++def _save_contact_sheet(images: list, labels: list, path: str) -> None:
++    """Write a labelled grid PNG of the onboard views.
++
++    Args:
++        images: The per-env PIL images.
++        labels: One caption per image (track names).
++        path: Destination PNG path (parents are created).
++    """
++    import math
++
++    import matplotlib
++    matplotlib.use("Agg")
++    import matplotlib.pyplot as plt
++
++    cols = min(4, len(images))
++    rows = math.ceil(len(images) / cols)
++    fig, axes = plt.subplots(rows, cols, figsize=(3.4 * cols, 2.9 * rows),
++                             squeeze=False)
++    for ax in axes.flat[len(images):]:
++        ax.axis("off")
++    for image, label, ax in zip(images, labels, axes.flat):
++        ax.imshow(image)
++        ax.set_title(label, fontsize=8)
++        ax.axis("off")
++    fig.tight_layout()
++    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
++    fig.savefig(path, dpi=110, bbox_inches="tight")
++    plt.close(fig)
++    print(f"[visualize] onboard contact sheet written to {path}")
+diff --git c/docs/concepts/architecture.md w/docs/concepts/architecture.md
+index 7a6c371..4877ca6 100644
+--- c/docs/concepts/architecture.md
++++ w/docs/concepts/architecture.md
+@@ -12,29 +12,21 @@ actually live. Every claim here is anchored to a `file:line` you can open.
+ 
+ ---
+ 
+-## 1. The two training front-ends over one simulator
++## 1. One training front-end over one simulator
+ 
+-The port is a single batched Genesis environment wrapped for two different
+-training stacks:
++The port is a single batched Genesis environment driven by rsl-rl:
+ 
+ ```
+-rsl-rl PPO ─┐
+-            ├─▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.step()
+-TorchRL   ──┘        envs/deepracer_env.py:58
++rsl-rl PPO ──▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.step()
++                     envs/deepracer_env.py
+ ```
+ 
+-- `DeepRacerEnv` (`envs/deepracer_env.py:58`) speaks the **rsl-rl-lib 5.x
+-  VecEnv contract** natively: there is no external `reset()` — done envs
+-  respawn *inside* `step()` (`deepracer_env.py:417-420`).
+-- `TorchRLDeepRacerEnv` (`envs/torchrl_env.py:21`) is a thin `EnvBase` adapter
+-  over the *same* sim object. It sets `_torchrl_native_autoreset = True`
+-  (`torchrl_env.py:55`) precisely because the sim already auto-resets.
+-
+-So TorchRL and rsl-rl are two faces on one simulator, not two simulators.
+-Everything the sim exposes is `(N, …)` GPU tensors — N parallel cars stepping
+-together. That batching is the essence of the port: Gazebo ran one car in a ROS
+-process; here N cars are tensors and the ROS control + domain logic are
+-reimplemented in torch.
++- `DeepRacerEnv` speaks the **rsl-rl-lib 5.x VecEnv contract** natively:
++  there is no external `reset()` — done envs respawn *inside* `step()`.
++- Everything the sim exposes is `(N, …)` GPU tensors — N parallel cars
++  stepping together. That batching is the essence of the port: Gazebo ran
++  one car in a ROS process; here N cars are tensors and the ROS control +
++  domain logic are reimplemented in torch.
+ 
+ A single control step (`deepracer_env.py:374-431`):
+ 
+@@ -44,31 +36,17 @@ A single control step (`deepracer_env.py:374-431`):
+ 4. `_post_physics` — refresh kinematics + localize on the track.
+ 5. `_compute_reward` → `_check_termination` → respawn done envs.
+ 
+-### 1.1 The wrapper handshake (why you don't "see" them working together)
++### 1.1 The pre-reset snapshot (`step_info`)
+ 
+-`TorchRLDeepRacerEnv` does not run *alongside* `DeepRacerEnv` — it **wraps** it,
+-and only one front-end is live per run:
+-
+-- **rsl-rl** (`train.py`): `OnPolicyRunner` calls `DeepRacerEnv.step()` directly;
+-  the wrapper is never imported.
+-- **TorchRL** (`experiment/trainer.py`): the collector drives
+-  `TorchRLDeepRacerEnv._step()`, which on `torchrl_env.py:65` calls
+-  `self.sim.step()` — and `self.sim` **is** the `DeepRacerEnv` (injected in
+-  `builder.py:151`). That one line is the entire coupling.
+-
+-Division of labour: `DeepRacerEnv.step` is the *real simulator* (controls →
+-physics → reward → termination → **auto-reset of done envs**), returning the
+-rsl-rl VecEnv tuple. `TorchRLDeepRacerEnv._step` is a *translation adapter*: it
+-calls `sim.step`, then repackages the result into TorchRL's TensorDict.
+-
+-The subtle part is the **pre-reset snapshot**. Because `step` auto-resets done
+-envs *inside itself* (overwriting their state), it first stashes `self.step_info`
+-(`deepracer_env.py:406-413`) — `offtrack`/`flipped`/`time_out`/`terminal_state`
+-for the step that just happened. The adapter reads `sim.step_info`
+-(`torchrl_env.py:66-69`) to split `terminated` (crash/off-track → value
+-bootstrap killed) from `truncated` (timeout → bootstrap kept), and
+-`_torchrl_native_autoreset = True` (`torchrl_env.py:55`) tells TorchRL not to
+-issue its own reset. **`step_info` is the whole contract between the two files.**
++Because `step` auto-resets done envs *inside itself* (overwriting their
++state), it first stashes `step_info` — `offtrack`/`flipped`/`time_out`/
++`terminal_state` for the step that just happened. Consumers that need the
++*pre-reset* truth (the evaluator's episode accounting, telemetry recording,
++terminated-vs-truncated bootstrapping) read that snapshot rather than the
++post-step buffers. This matters in practice: a done row's *pose* is already
++the respawn pose, which is why the analysis plots take an off-track exit's
++position from the step **before** the done flag (see
++`analysis/trackplots.py`).
+ 
+ ---
+ 
+@@ -277,7 +255,7 @@ The default `deepracer` reward (`rewards.py:58-70`) returns:
+ | `heading`     | `-|heading_err|·dt`                     | 0.5 |
+ | `steering`    | `-|steer|·dt`                           | 0.3 |
+ | `action_rate` | `-Δaction²·dt`                          | 0.05 |
+-| `off_track`   | `(wheel off road)·dt`                   | 2.0 |
++| `off_track`   | `-(wheel off road)·dt`                  | 2.0 |
+ 
+ Every term is a batched `(N,)` tensor summed with its scale
+ (`deepracer_env.py:559-566`) and accumulated per-episode for logging
+diff --git c/docs/concepts/renderers.md w/docs/concepts/renderers.md
+index 2873f10..3284e32 100644
+--- c/docs/concepts/renderers.md
++++ w/docs/concepts/renderers.md
+@@ -1,58 +1,88 @@
+ # Renderers
+ 
+-Rendering is a **strategy**: the env holds one `Renderer` chosen from config, and
+-the strategy owns every vision decision. Feature-vector training uses no renderer;
+-camera training uses a batched GPU renderer.
++Camera training needs pixels, and there are three ways to make them. The
++same scene, same track, same camera, three renderers:
+ 
+-> Mental model in one sentence: `make_renderer(vision_cfg)` picks `NullRenderer`
+-> (no camera), `MadronaRenderer` (fast batched rasterizer), or `NyxRenderer` (path
+-> tracer) — and the same strategy also owns the world-color DR and the debug views.
++| Madrona (default) | Nyx (path tracer) | CPU rasterizer |
++|---|---|---|
++| ![Madrona sample](../assets/renderers/madrona.png) | ![Nyx sample](../assets/renderers/nyx.png) | ![Rasterizer sample](../assets/renderers/rasterizer.png) |
+ 
+----
++*(Onboard camera at native 160×120, upscaled 3× nearest-neighbour. Madrona
++is flat-shaded and fast; Nyx ray-traces real lighting and shadows; the CPU
++rasterizer is the no-GPU fallback.)*
+ 
+-## Choosing a renderer
++## Comparison
+ 
+-`make_renderer` (`envs/renderers.py`) dispatches on config:
++| | **Madrona** | **Nyx** | **CPU rasterizer** |
++|---|---|---|---|
++| What it is | batched GPU rasterizer (one megakernel renders all envs) | GPU path tracer (ray-traced light transport) | one CPU camera per env |
++| Select with | `CameraEnvironment(render="madrona")` — the default | `CameraEnvironment(render="nyx")` | `CameraEnvironment(backend="cpu")` (wins over `render`) |
++| Measured rollout throughput¹ | ~9.5k–18k env-steps/s | ~1.5k env-steps/s (**≈11× slower**) | far slower still — debug scale |
++| Visual fidelity | flat-shaded, no shadows | ray-traced lighting, shadows, true texture colors | flat-shaded |
++| Multi-track zoo tiling | yes | yes (all K meshes load into every env — watch memory, see the build warning) | yes |
++| World-color DR | yes | yes | yes |
++| Camera-mount jitter DR | yes (batched attach offsets) | **no** — one shared sensor, no per-env mounts | yes (per-env cameras) |
++| Per-env sky (`env_map_*` DR) | no (lights are replicated identically) | **yes** (Nyx-only `EnvironmentMapAsset`s) | no |
++| Role | camera **training** | photorealism / sim2real studies, small-N | no-GPU debugging and CI |
+ 
+-- `vision=False` → **`NullRenderer`** — state observations only; `obs()` returns None.
+-- `vision=True`, `vision_renderer="batch"` → **`MadronaRenderer`** — Genesis
+-  `BatchRenderer`, a camera attached to the car's `camera_link`. Fast; the default
+-  for camera training.
+-- `vision=True`, `vision_renderer="nyx"` → **`NyxRenderer`** — Nyx path-tracer
+-  sensors, true texture colors, slower.
++¹ 64–128 envs at 160×120 on an RTX 4060 Ti, constant-action rollout
++(recorded by the `best_camera` notebook's bench stage). PPO training runs
++several times slower than rollout on every renderer; the *ratio* between
++renderers is what transfers. In practice the 11× gap is why the
++`best_camera` experiments train on Madrona: at Nyx speed, one 10M-step run
++consumes the GPU-hours that otherwise fund an entire HPO study.
+ 
+-The camera is DeepRacer-native `(160, 120)` RGB by default, pitched down for a
+-forward-looking view (`camera_offset_T`).
++The [DR catalog](../reference/dr-catalog.md) carries this compatibility
++matrix as data, and `ExperimentSpec.validate()` enforces it — a spec that
++asks Nyx for camera-mount jitter, or Madrona for `env_map` sky DR, refuses
++to build instead of silently sampling nothing.
++
++## How the strategy is wired
++
++The env holds one `Renderer` chosen from config (`envs/renderers.py`), and
++the strategy owns every vision decision:
++
++- **`NullRenderer`** — feature-vector training; no camera at all.
++- **`MadronaRenderer`** — Genesis `BatchRenderer`, a camera attached to the
++  car's `camera_link`, one batched render for all envs.
++- **`NyxRenderer`** — Nyx path-tracer sensors. Sets
++  `merge_fixed_links = False` (the Nyx exporter rejects merged links).
++- **Rasterizer** — per-env Genesis cameras on the CPU backend.
++
++The camera is DeepRacer-native `(160, 120)` RGB, pitched down for a
++forward-looking view. To eyeball what any experiment's cars see — before
++training — use [`experiment.view_zoo`](../api/experiment/visualize.md):
++
++```python
++from deepracer_genesis.experiment import view_zoo
++
++images = view_zoo(MyExperiment)          # PIL images, render inline in Jupyter
++view_zoo(MyExperiment, save="sheet.png") # track-labelled contact sheet
++```
+ 
+ ## World-color domain randomization
+ 
+-Both camera renderers keep a per-env color transform (`color_mat` `(N,3,3)` +
+-`color_bias`) and apply it to each frame. `resample_appearance()` redraws it every
+-reset via `sample_world_color()` (in `randomization/visual.py`) — a hue rotation
+-plus saturation/value scaling in YIQ chroma space. See
++Both GPU renderers keep a per-env color transform (`color_mat` `(N,3,3)` +
++`color_bias`) applied to each frame; `resample_appearance()` redraws it on
++reset via `sample_world_color()` — a hue rotation plus saturation/value
++scaling in YIQ chroma space. See
+ [Domain randomization](domain-randomization.md).
+ 
+ ## Camera-mount jitter (Madrona + rasterizer)
+ 
+ `randomize_mount()` perturbs each env's camera pitch and position
+-(`camera_pitch_jitter_deg`, `camera_pos_jitter_m`) via
+-`sample_mount_transforms()` — applied **once per run**, from the env's
+-`__init__` alongside the physics DR, not per episode. It works on Madrona
+-(batched attach offsets) and on the rasterizer path (`RasterizerObsRenderer`
+-holds one camera per env, so each attach offset is rewritten individually).
+-Nyx is excluded: a single batched sensor with one shared offset, so there are
+-no per-env mounts to jitter.
++(`camera_pitch_jitter_deg`, `camera_pos_jitter_m`) — applied **once per
++run** from the env's `__init__`, alongside the physics DR. Madrona jitters
++batched attach offsets; the rasterizer rewrites each per-env camera. Nyx is
++excluded: a single batched sensor with one shared offset has no per-env
++mounts to jitter.
+ 
+ ## Debug views (independent of the obs renderer)
+ 
+-Two human-facing views work even in a `NullRenderer` (feature-only) env, because
+-they use their own cameras:
++Two human-facing views work even in a feature-only env, because they use
++their own cameras:
+ 
+-- **Spectator** (`render_spectator()`) — one high-resolution bird's-eye image of the
+-  whole track with every car, from a single static camera.
+-- **Top-down** (`render_topdown()`) — an optional per-env bird's-eye view for
+-  validation. Madrona poses it per track variant and returns `(N, H, W, 3)`; Nyx
+-  shares one pose across envs.
+-
+-`NyxRenderer` sets `merge_fixed_links = False` (the Nyx exporter rejects merged
+-links); Madrona merges them.
++- **Spectator** (`render_spectator()`) — one high-resolution bird's-eye
++  image of the whole scene with every car.
++- **Top-down** (`render_topdown()`) — optional per-env bird's-eye views for
++  validation. Madrona poses it per track variant; Nyx shares one pose.
+diff --git c/docs/concepts/rewards-actions.md w/docs/concepts/rewards-actions.md
+index 34b1c11..21a77b9 100644
+--- c/docs/concepts/rewards-actions.md
++++ w/docs/concepts/rewards-actions.md
+@@ -60,10 +60,37 @@ It maps the env to named `(N,)` per-step terms; the env weights them by
+ | `heading` | `−|heading_err|·dt` | align with track tangent |
+ | `steering` | `−|steer_action|·dt` | discourage needless steering |
+ | `action_rate` | `−‖aₜ − aₜ₋₁‖²·dt` | smooth control |
+-| `off_track` | `(lateral outside half_width − wheel_margin)·dt` | penalize leaving the road |
++| `off_track` | `−(lateral outside half_width − wheel_margin)·dt` | penalize edge-riding |
+ 
+ All terms scale by control `dt`, so weights are timestep-independent. Per-term sums
+-are tracked for logging.
++are tracked for logging. The full term/scale table with defaults lives in the
++[reward parameters reference](../reference/reward-parameters.md).
++
++!!! note "Signs live in the terms"
++    Penalty terms are negative and `reward_scales` stay positive. This is
++    load-bearing: until 2026-08 the `off_track` term was accidentally
++    positive, so the default reward *paid* +2·dt per step for riding the
++    track edge — 4× the centering bonus — and camera policies dutifully
++    learned to crash. `tests/test_rewards.py` pins every term's sign.
++
++### What the reward taught us (a short story)
++
++Three generations of camera policy, same network, same PPO settings:
++
++1. **Progress + "faster is better" speed bonus** — fast, crash-prone
++   driving: ~1.0 off-track rate, under 40% lap completion even on training
++   tracks.
++2. **Progress gated on-track, no speed term** — reward-hacked itself: with
++   nothing paying for motion, standing still on the centerline farms the
++   `centered` bonus forever. The cars parked.
++3. **Target-pace speed term** (`−|v − 1.6 m/s|·dt`) — the winner of a
++   reward-design search scored on ground-truth lap completion. Roughly
++   doubled completion everywhere, including 78% on a track the policy had
++   never seen.
++
++Moral: the reward is the strongest lever in this repo, it is searchable
++(functions are parameters), and it must be *evaluated* on a metric it
++cannot inflate.
+ 
+ ### Custom rewards
+ 
+@@ -80,6 +107,6 @@ def my_reward(env):
+ The env fields available to a reward (`v_forward`, `lateral`, `half_width`,
+ `heading_err`, `d_progress`, `actions`, `last_actions`, ...) are the same ones the
+ feature vector reads — see [Feature vectors](features.md) for the full palette, and
+-`REFACTOR_PLAN.md` Part K for the planned shared **signal bus** that unifies
++`envs/signals.py` for the shared **signal bus** that unifies
+ features, reward, and cost over one vocabulary (e.g. `off_track` as a reward term in
+ plain RL and a cost term under safe RL).
+diff --git c/docs/guides/deployment.md w/docs/guides/deployment.md
+index 602ff39..85a758c 100644
+--- c/docs/guides/deployment.md
++++ w/docs/guides/deployment.md
+@@ -5,8 +5,17 @@ physical DeepRacer or any ONNX runtime. The exporter is
+ `deepracer_genesis/deploy/onnx.py`.
+ 
+ > Mental model in one sentence: `export_policy` rebuilds the actor on CPU from a
+-> checkpoint, traces it to ONNX with the exact observation keys as named inputs, and
+-> records the normalized→physical action mapping in a model card.
++> checkpoint, traces it to ONNX with the exact observation keys as named inputs
++> (`FRONT_FACING_CAMERA` for camera actors — the name the car's inference
++> stack expects), and writes the car bundle: `policy.onnx` +
++> `model_metadata.json` + `model_card.json` + a `<name>.tar.gz` to upload.
++
++!!! warning "Run the export in a genesis-free process"
++    genesis and onnxruntime bundle clashing LLVM symbols and crash the
++    process when both are loaded. `export_policy` refuses to run if genesis
++    was already imported — call it from a fresh process (its own script or
++    subprocess), never from a session that built a sim. The `best_camera`
++    notebooks show the subprocess pattern.
+ 
+ ---
+ 
+@@ -15,19 +24,23 @@ physical DeepRacer or any ONNX runtime. The exporter is
+ ```python
+ from deepracer_genesis.deploy.onnx import export_policy
+ 
+-# pass your Experiment subclass (uses run_dir/best.pt):
++# pass your Experiment subclass (uses the run dir's model.pt):
+ export_policy(FeatureBaseline)
+ 
+ # or an explicit chain + checkpoint:
+ export_policy(
+     FeatureEnvironment(num_envs=64) >> VectorPolicy() >> PPO(),
+-    ckpt="runs/feature_ppo_abc123/best.pt",
+-    out="export/my_model", opset=17)
++    ckpt="runs/feature_ppo_abc123/model.pt",
++    out="export/my_model")
+ ```
+ 
++The default `opset=11` is deliberate: it is the newest opset the physical
++car's OpenVINO 2021.1 ONNX importer is known to accept. Raise it only for
++non-car runtimes.
++
+ `export_policy(target, *, root, ckpt, out, opset, **overrides)`:
+ 
+-1. builds the spec, loads `best.pt` (or an explicit `ckpt`),
++1. builds the spec, loads the run dir's `model.pt` (or an explicit `ckpt`),
+ 2. rebuilds the actor on CPU mirroring `Builder.actor()` (CNN + MLP) with the loaded
+    weights,
+ 3. creates dummy inputs from `spec.policy.actor_keys`,
+diff --git c/docs/index.md w/docs/index.md
+index ea89caf..ae95ccf 100644
+--- c/docs/index.md
++++ w/docs/index.md
+@@ -1,8 +1,9 @@
+ # DeepRacer-Genesis
+ 
+-AWS DeepRacer reinforcement learning on [Genesis](https://genesis-world.readthedocs.io/) —
+-GPU-batched physics, TorchRL PPO, config-as-code experiments, domain
+-randomization, and a sim2real dataset pipeline.
++AWS DeepRacer reinforcement learning rebuilt on
++[Genesis](https://genesis-world.readthedocs.io/): GPU-batched physics,
++rsl-rl PPO, config-as-code experiments, a domain-randomization catalog, a
++multi-track zoo, and an ONNX pipeline back onto the physical car.
+ 
+ ```python
+ from deepracer_genesis.experiment import Experiment, FeatureEnvironment, VectorPolicy, run
+@@ -15,5 +16,52 @@ class MyFirst(Experiment):
+ run(MyFirst)        # ~90 s on an RTX 4060 Ti
+ ```
+ 
+-Start with the [tutorial](tutorial.md); the README in the repo holds the
+-operational notes (renderer quirks, benchmarks, CUDA 13 fix).
++## The learning path
++
++The docs follow the same road the project drove. Each step is a working
++experiment before the next one makes it harder:
++
++1. **[Quick start](quickstart.md)** — install, train a state-vector policy
++   in ~90 seconds, watch it drive. This is the "everything works" baseline:
++   feature-vector PPO completes 100% of laps.
++2. **[Tutorial](tutorial.md)** — the experiment idiom in full: stages, the
++   `>>` DSL, specs, run directories, evaluation records.
++3. **See before you train** — cameras change everything. Preview exactly
++   what the cars will see with
++   [`view_zoo`](concepts/renderers.md) (onboard, at the car's native
++   160×120) and the [track zoo](guides/track-zoo.md) viewers (bird's-eye),
++   and pick a renderer with the
++   [renderer comparison](concepts/renderers.md) — measured numbers, not
++   vibes: the path tracer is beautiful and ≈11× slower.
++4. **Randomize** — the [DR concepts page](concepts/domain-randomization.md)
++   explains the layers; the [DR catalog](reference/dr-catalog.md) is the
++   full table of all 31 knobs with ranges and the compatibility matrix the
++   build validates against.
++5. **Shape the reward** — the
++   [reward parameters](reference/reward-parameters.md) reference lists
++   every term and scale, and
++   [Rewards & actions](concepts/rewards-actions.md) tells the cautionary
++   tale: the difference between a policy that finishes 8% of laps and one
++   that finishes 78% on a never-seen track was mostly the reward design,
++   not the network.
++6. **Scale the search** — [HPO](guides/hpo.md) with Optuna over
++   hyperparameters, and — because reward functions are ordinary values
++   here — over reward *designs* too.
++7. **Deploy** — [export to ONNX](guides/deployment.md) (opset 11,
++   OpenVINO-2021.1-compatible) and put the bundle on the car.
++
++## Reference shelves
++
++When you know what you are looking for:
++
++- [Reward parameters](reference/reward-parameters.md) — every term,
++  formula, sign, and default scale.
++- [DR catalog](reference/dr-catalog.md) — all randomization knobs in one
++  table.
++- [Renderer comparison](concepts/renderers.md) — Madrona vs Nyx vs the CPU
++  rasterizer, with rendered samples and measured throughput.
++- [API reference](api/experiment/index.md) — generated from the
++  Google-style docstrings.
++
++Operational notes (renderer quirks, benchmarks, CUDA fixes) live in the
++repo README.
+diff --git c/docs/tutorial.md w/docs/tutorial.md
+index 741cb3c..7295d1f 100644
+--- c/docs/tutorial.md
++++ w/docs/tutorial.md
+@@ -9,8 +9,7 @@ feature-vector parts — see `notebooks/deepracer_genesis_colab.ipynb`).
+ ```bash
+ git clone https://github.com/Luna-v0/deepracer-genesis && cd deepracer-genesis
+ uv venv --python 3.12 .venv && source .venv/bin/activate
+-uv sync            # or: uv pip install -e . torchrl tensordict
+-# CUDA 13 system toolkit only: bash scripts/fix_madrona_cuda13.sh
++uv sync            # base deps + the GPU renderers (default groups)
+ ```
+ 
+ ## 2. Train your first policy (2 minutes)
+diff --git c/docs/usage/local.md w/docs/usage/local.md
+index 8ceaed5..4994e68 100644
+--- c/docs/usage/local.md
++++ w/docs/usage/local.md
+@@ -3,9 +3,9 @@
+ DeepRacer-Genesis runs on **Linux x86-64 with an NVIDIA GPU**. Python 3.10–3.12
+ (3.12 recommended).
+ 
+-> Mental model in one sentence: `uv sync` installs Genesis + rsl-rl + TorchRL, then
+-> you train by defining an `Experiment` subclass and running it (recommended), or via
+-> the legacy flag-based `train.py` CLI.
++> Mental model in one sentence: `uv sync` installs Genesis + rsl-rl (plus the
++> GPU renderers), then you train by defining an `Experiment` subclass and
++> running it.
+ 
+ ---
+ 
+@@ -19,20 +19,18 @@ uv sync --extra tracking      # + mlflow (optional)
+ uv sync --extra hpo           # + optuna (optional)
+ ```
+ 
+-Core dependencies (`pyproject.toml`): `genesis-world >= 1.2`, `rsl-rl-lib >= 5.4`,
+-`torch >= 2.5`, `torchrl`, `tensordict`, plus `imageio[ffmpeg]`, `pillow`, `numpy`,
+-`pyarrow`, `tensorboard`.
++Core dependencies (`pyproject.toml`): `genesis-world >= 1.2.3`, `rsl-rl-lib >= 5.4`,
++`torch >= 2.5`, `tensordict`, plus `imageio[ffmpeg]`, `pillow`, `numpy`,
++`pyarrow`, `tensorboard`. The GPU renderers (`gs-madrona`, `gs-nyx`) install
++via the default `renderers` group.
+ 
+ ### CUDA 13 note (Madrona)
+ 
+-The Madrona batch renderer links `libnvrtc.so.12`. On a CUDA-13 system, run:
+-
+-```bash
+-bash scripts/fix_madrona_cuda13.sh
+-```
+-
+-which installs `nvidia-cuda-nvrtc-cu12`, symlinks the `.so.12` into `gs_madrona/`,
+-and patches the dlopen name. Feature-vector (no-camera) training does not need this.
++Historical: `gs-madrona >= 0.0.10` (what the default `renderers` group
++installs) pulls its own `nvidia-cuda-nvrtc-cu12 >= 12.8` and links the
++megakernel natively, so no fix is needed on CUDA-13 systems anymore.
++`scripts/fix_madrona_cuda13.sh` remains only for pinned older
++`gs-madrona 0.0.8` installs.
+ 
+ ## Train
+ 
+diff --git c/examples/__init__.py w/examples/__init__.py
+index 5ec8911..5a0df79 100644
+--- c/examples/__init__.py
++++ w/examples/__init__.py
+@@ -9,7 +9,6 @@ study (``hpo.py``). They blend the axes so you can see each combination:
+     FeatureGpuDr        feature vector, GPU, physics DR via Space types   (Part H)
+     CameraMadronaDr     camera, Madrona renderer, full DR, asymmetric
+     CameraNyx           camera, Nyx path tracer, light DR
+-    SafeTransfer        safe-RL camera -> frozen-CNN -> vector, Lagrangian
+     WatchLiveFeature    feature vector with the interactive viewer + eval (Parts M/N)
+     WatchLiveCamera     camera(render="madrona") with the interactive viewer + eval
+ 
+@@ -20,17 +19,15 @@ path from the CLI. ``examples/hpo.py`` is a study, run as a script.
+ 
+ from .camera import CameraMadronaDr, CameraNyx
+ from .feature_vector import FeatureCpu, FeatureGpuDr
+-from .safe_rl import SafeTransfer, SafeTransferTight
+ from .watch_live import WatchLive, WatchLiveCamera, WatchLiveFeature
+ 
+ #: the reference experiment classes (for convenience / iteration)
+ EXAMPLES = (
+     FeatureCpu, FeatureGpuDr, CameraMadronaDr, CameraNyx,
+-    SafeTransfer, SafeTransferTight, WatchLiveFeature, WatchLiveCamera,
++    WatchLiveFeature, WatchLiveCamera,
+ )
+ 
+ __all__ = [
+     "FeatureCpu", "FeatureGpuDr", "CameraMadronaDr", "CameraNyx",
+-    "SafeTransfer", "SafeTransferTight",
+     "WatchLive", "WatchLiveFeature", "WatchLiveCamera", "EXAMPLES",
+ ]
+diff --git c/examples/safe_rl.py w/examples/safe_rl.py
+deleted file mode 100644
+index 6186080..0000000
+--- c/examples/safe_rl.py
++++ /dev/null
+@@ -1,56 +0,0 @@
+-"""Safe-RL example: representation transfer + a constrained (CMDP) objective.
+-
+-Blends the most stages: a camera env that ALSO emits a cost signal, DR, a
+-frozen-CNN encoder mapping pixels to a feature vector, a downstream vector
+-policy, and PPO-Lagrangian (inferred automatically from the cost signal). Shown
+-in the class-authoring style so per-run knobs are overridable attributes.
+-"""
+-
+-from deepracer_genesis.experiment import (
+-    DomainRandomizationActions,
+-    DomainRandomizationCamera,
+-    Experiment,
+-    FrozenCNNToFeatureVector,
+-    SafeRLCameraEnvironment,
+-    VectorPolicy,
+-)
+-
+-
+-class SafeTransfer(Experiment):
+-    """Safe-RL camera env -> frozen-CNN features -> vector policy, PPO-Lagrangian.
+-
+-    Attributes:
+-        render: camera renderer ("madrona" or "nyx").
+-        budget: per-episode cost budget for the safety constraint.
+-        ckpt: a pretrained camera checkpoint the frozen CNN loads from.
+-    """
+-
+-    render = "madrona"
+-    budget = 25.0
+-    ckpt = "runs/examples/camera_madrona_dr-0/best.pt"   # a camera checkpoint
+-    seed = 0
+-    total_env_steps = 10_000_000
+-    eval_every_steps = 2_000_000
+-    ablation_group = "examples"
+-
+-    def spec(self):
+-        return (
+-            SafeRLCameraEnvironment(render=self.render,
+-                                    cost="offtrack_or_overspeed", budget=self.budget)
+-            >> DomainRandomizationCamera(brightness=(0.7, 1.3))
+-            >> FrozenCNNToFeatureVector(checkpoint=self.ckpt, output_dim=256)
+-            >> VectorPolicy(keys=("encoded", "state"))
+-            >> DomainRandomizationActions(steer_noise=0.02)
+-        ).build(seed=self.seed, total_env_steps=self.total_env_steps,
+-                eval_every_steps=self.eval_every_steps,
+-                ablation_group=self.ablation_group,
+-                variant=f"safe_transfer_{self.render}")
+-
+-
+-class SafeTransferTight(SafeTransfer):
+-    """Same transfer setup under a tighter cost budget."""
+-    budget = 10.0
+-
+-
+-if __name__ == "__main__":
+-    SafeTransfer().run()
+diff --git c/mkdocs.yml w/mkdocs.yml
+index b5aaef5..3bf5148 100644
+--- c/mkdocs.yml
++++ w/mkdocs.yml
+@@ -47,11 +47,20 @@ plugins:
+ 
+ nav:
+   - Home: index.md
++  - Quick start: quickstart.md
+   - Tutorial: tutorial.md
++  - Setup:
++      - Local install: usage/local.md
++      - Google Colab (CLI): usage/google_colab_cli.md
++      - Google Colab (UI): usage/google_colab_ui.md
++  - Reference:
++      - Reward parameters: reference/reward-parameters.md
++      - DR catalog: reference/dr-catalog.md
+   - Concepts:
+       - Architecture (how it's wired): concepts/architecture.md
+       - Experiments & the >> DSL: concepts/experiments.md
+       - Domain randomization: concepts/domain-randomization.md
++      - Feature vectors: concepts/features.md
+       - Renderers: concepts/renderers.md
+       - Tracks: concepts/tracks.md
+       - Rewards & actions: concepts/rewards-actions.md
+diff --git c/pyproject.toml w/pyproject.toml
+index fb88d5d..921d8fc 100644
+--- c/pyproject.toml
++++ w/pyproject.toml
+@@ -15,6 +15,7 @@ dependencies = [
+     "numpy",
+     "pyarrow",
+     "imageio[ffmpeg]",
++    "seaborn>=0.13.2",
+ ]
+ 
+ [project.urls]
+@@ -73,6 +74,8 @@ dev = [
+     "python-lsp-server[all]>=1.14.0",
+     # telemetry analysis (mirrors the [analysis] extra for local work)
+     "pandas>=2.0",
++    "optuna>=4.9.0",
++    "papermill>=2.7.0",
+ ]
+ # GPU renderers, synced by default for local `uv run` (camera/Nyx experiments)
+ # so `uv run experiments/foo.py` "just works". These mirror the [vision]/[nyx]
+diff --git c/tests/test_examples.py w/tests/test_examples.py
+index cd67c70..34477ea 100644
+--- c/tests/test_examples.py
++++ w/tests/test_examples.py
+@@ -36,5 +36,8 @@ def test_examples_blend_the_axes():
+     assert {"cpu", "gpu"} <= backends
+     assert {"feature", "camera"} <= modalities
+     assert {"madrona", "nyx"} <= renders
+-    assert {"PPO", "PPOLagrangian"} <= algos
++    # PPOLagrangian left the set with the safe_rl examples (their TorchRL
++    # backend was removed); the reference set is plain PPO until the
++    # rsl-rl Lagrangian lands
++    assert {"PPO"} <= algos
+     assert "gui" in views
+diff --git c/tests/test_telemetry.py w/tests/test_telemetry.py
+index 76030ad..9bb5835 100644
+--- c/tests/test_telemetry.py
++++ w/tests/test_telemetry.py
+@@ -106,6 +106,23 @@ def test_trackplots_render_all_views(tmp_path, _route_registry):
+                for n in ("traj.png", "grid.png", "heat.png", "hot.png"))
+ 
+ 
++def test_crash_positions_use_pre_respawn_pose():
++    """Off-track rows carry the RESPAWN pose; crashes must plot the pose
++    one step earlier in the same (env, episode)."""
++    from deepracer_genesis.analysis.trackplots import _crash_positions
++
++    df = _synthetic()
++    crash = df[df["off_track"]]
++    assert len(crash) == 1
++    pts = _crash_positions(df)
++    assert len(pts) == 1
++    c = crash.iloc[0]
++    prev = df[(df["env"] == c["env"]) & (df["episode"] == c["episode"])
++              & (df["step"] == c["step"] - 1)].iloc[0]
++    assert pts[0] == pytest.approx([prev["x"], prev["y"]])
++    assert list(pts[0]) != pytest.approx([c["x"], c["y"]])
++
++
+ def test_plot_trajectories_requires_track_when_ambiguous(_route_registry):
+     """A multi-track DataFrame without track= is refused, not guessed."""
+     from deepracer_genesis.analysis import trackplots as tp
+diff --git c/uv.lock w/uv.lock
+index cc8f21a..6884770 100644
+--- c/uv.lock
++++ w/uv.lock
+@@ -894,6 +894,7 @@ dependencies = [
+     { name = "pillow" },
+     { name = "pyarrow" },
+     { name = "rsl-rl-lib" },
++    { name = "seaborn" },
+     { name = "tensorboard" },
+     { name = "tensordict" },
+     { name = "torch" },
+@@ -941,7 +942,9 @@ dev = [
+     { name = "jupyterlab-vim" },
+     { name = "jupytext" },
+     { name = "lckr-jupyterlab-variableinspector" },
++    { name = "optuna" },
+     { name = "pandas" },
++    { name = "papermill" },
+     { name = "pycrdt" },
+     { name = "pytest" },
+     { name = "python-lsp-server", extra = ["all"] },
+@@ -971,6 +974,7 @@ requires-dist = [
+     { name = "pillow" },
+     { name = "pyarrow" },
+     { name = "rsl-rl-lib", specifier = ">=5.4.0" },
++    { name = "seaborn", specifier = ">=0.13.2" },
+     { name = "tensorboard" },
+     { name = "tensordict", specifier = ">=0.7" },
+     { name = "torch", specifier = ">=2.5" },
+@@ -990,7 +994,9 @@ dev = [
+     { name = "jupyterlab-vim", specifier = ">=4.1.4" },
+     { name = "jupytext", specifier = ">=1.19.4" },
+     { name = "lckr-jupyterlab-variableinspector", specifier = ">=3.2.4" },
++    { name = "optuna", specifier = ">=4.9.0" },
+     { name = "pandas", specifier = ">=2.0" },
++    { name = "papermill", specifier = ">=2.7.0" },
+     { name = "pycrdt", specifier = ">=0.13.1" },
+     { name = "pytest", specifier = ">=8" },
+     { name = "python-lsp-server", extras = ["all"], specifier = ">=1.14.0" },
+@@ -1083,6 +1089,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/35/16/3c9cf0ef315de04ff2a8754685c14e58c04394077d10cf3f3a01ff9afe9e/dracopy-2.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:7f1991d0f0575d5096847ef2320d76b2c4a2cf1f88c741cb35dea75d3d682ff4", size = 5058707, upload-time = "2025-11-11T16:14:28.062Z" },
+ ]
+ 
++[[package]]
++name = "entrypoints"
++version = "0.4"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/ea/8d/a7121ffe5f402dc015277d2d31eb82d2187334503a011c18f2e78ecbb9b2/entrypoints-0.4.tar.gz", hash = "sha256:b706eddaa9218a19ebcd67b56818f05bb27589b1ca9e8d797b74affad4ccacd4", size = 13974, upload-time = "2022-02-02T21:30:28.172Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/35/a8/365059bbcd4572cbc41de17fd5b682be5868b218c3c5479071865cab9078/entrypoints-0.4-py3-none-any.whl", hash = "sha256:f174b5ff827504fd3cd97cc3f8649f3693f51538c7e4bdf3ef002c8429d42f9f", size = 5294, upload-time = "2022-02-02T21:30:26.024Z" },
++]
++
+ [[package]]
+ name = "etils"
+ version = "1.13.0"
+@@ -3868,6 +3883,26 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/ef/af/4fbc8cab944db5d21b7e2a5b8e9211a03a79852b1157e2c102fcc61ac440/pandocfilters-1.5.1-py2.py3-none-any.whl", hash = "sha256:93be382804a9cdb0a7267585f157e5d1731bbe5545a85b268d6f5fe6232de2bc", size = 8663, upload-time = "2024-01-18T20:08:11.28Z" },
+ ]
+ 
++[[package]]
++name = "papermill"
++version = "2.7.0"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "aiohttp", marker = "python_full_version >= '3.12'" },
++    { name = "click" },
++    { name = "entrypoints" },
++    { name = "nbclient" },
++    { name = "nbformat" },
++    { name = "pyyaml" },
++    { name = "requests" },
++    { name = "tenacity" },
++    { name = "tqdm" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/f8/b6/92d770c5ced66ed0134256f8de781e98c824d3a0662af1643a91fcc36663/papermill-2.7.0.tar.gz", hash = "sha256:ec10b37594a060662f57269e1ebd108c209d204450f00fdfeb70a1c7cfb7fbc8", size = 77961, upload-time = "2026-02-27T19:07:30.548Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/95/9f/f9fd57a727dcc89c54e84455d8317bff7db05ef21bb6d05b03705111f7c0/papermill-2.7.0-py3-none-any.whl", hash = "sha256:e1855e6670100a02bb4f8a6870484a5c10b84a8d2e49c49921c90209940c7514", size = 88858, upload-time = "2026-02-27T19:07:28.862Z" },
++]
++
+ [[package]]
+ name = "parso"
+ version = "0.8.7"
+@@ -5354,6 +5389,21 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/99/0e/33f32a2a58987e26aec0f7df252cbbad1e90ae77bdbc76f40dd4ed0cf0ea/scipy-1.18.0-cp312-cp312-win_arm64.whl", hash = "sha256:d88363fd9d8fbd3511bd273f1a49efb2a540773ddf92a91d57498ce7dd7f3e76", size = 24351481, upload-time = "2026-06-19T15:00:11.103Z" },
+ ]
+ 
++[[package]]
++name = "seaborn"
++version = "0.13.2"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
++    { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
++    { name = "numpy" },
++    { name = "pandas" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/86/59/a451d7420a77ab0b98f7affa3a1d78a313d2f7281a57afb1a34bae8ab412/seaborn-0.13.2.tar.gz", hash = "sha256:93e60a40988f4d65e9f4885df477e2fdaff6b73a9ded434c1ab356dd57eefff7", size = 1457696, upload-time = "2024-01-25T13:21:52.551Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/83/11/00d3c3dfc25ad54e731d91449895a79e4bf2384dc3ac01809010ba88f6d5/seaborn-0.13.2-py3-none-any.whl", hash = "sha256:636f8336facf092165e27924f223d3c62ca560b1f2bb5dff7ab7fad265361987", size = 294914, upload-time = "2024-01-25T13:21:49.598Z" },
++]
++
+ [[package]]
+ name = "send2trash"
+ version = "2.1.0"

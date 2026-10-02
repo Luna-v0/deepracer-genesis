@@ -36,7 +36,7 @@ class TightOval(Experiment):
 
     total_env_steps = 2_000_000
     eval_every_steps = 500_000
-    ablation_group = "tight_oval"
+    group = "tight_oval"
     variant = "tight_oval_fwd"
 
     def pipeline(self):
@@ -68,7 +68,7 @@ class TightOvalLive(Experiment):
     num_envs = 512
     total_env_steps = 10_000_000
     eval_every_steps = 1_000_000
-    ablation_group = "tight_oval"
+    group = "tight_oval"
     variant = "tight_oval_live"
 
     def pipeline(self):

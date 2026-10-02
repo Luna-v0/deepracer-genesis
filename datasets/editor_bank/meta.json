@@ -1,0 +1,27 @@
+{
+  "raw": true,
+  "track": "reinvent_base",
+  "renderer": "batch",
+  "camera_res": [
+    160,
+    120
+  ],
+  "num_envs": 6,
+  "poses": [
+    [
+      0,
+      0.0,
+      0.0
+    ],
+    [
+      5,
+      0.0,
+      0.0
+    ],
+    [
+      10,
+      0.0,
+      0.0
+    ]
+  ]
+}

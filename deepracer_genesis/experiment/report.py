@@ -1,5 +1,5 @@
 """Reporter (plan section 5.4): grouped combination table + before/after
-delta tables, regenerated from stored eval_record.json files — no re-training.
+tables regenerated from stored eval_record.json files — no re-training.
 """
 
 from __future__ import annotations
@@ -13,10 +13,6 @@ from collections import defaultdict
 
 from .evaluator import EvalRecord
 
-# Within an ablation_group, the baseline variant is the first one matching a
-# hint (plan section 5.3 pairings); lexicographic first otherwise.
-BASELINE_HINTS = ("no_dr", "none", "baseline", "end2end", "reward_penalty",
-                  "feature", "madrona")
 
 TABLE_METRICS = ("completion_rate", "lap_time_s", "mean_progress_m",
                  "offtrack_rate", "mean_return", "mean_cost",
@@ -94,44 +90,9 @@ def grouped_rows(records: list[EvalRecord]) -> list[dict]:
     return rows
 
 
-def delta_rows(records: list[EvalRecord]) -> dict[str, dict]:
-    """Per ablation_group: baseline pick + (treatment - baseline) deltas."""
-    groups: dict[str, dict[str, list[EvalRecord]]] = defaultdict(lambda: defaultdict(list))
-    for r in records:
-        if r.ablation_group and r.variant:
-            groups[r.ablation_group][r.variant].append(r)
-
-    out = {}
-    for group, variants in sorted(groups.items()):
-        if len(variants) < 2:
-            continue
-        names = sorted(variants)
-        baseline = next((v for h in BASELINE_HINTS for v in names if h in v), names[0])
-        base_metrics = {m: _agg([r.metrics[m] for r in variants[baseline]
-                                 if m in r.metrics and not math.isnan(r.metrics[m])])
-                        for m in TABLE_METRICS
-                        if any(m in r.metrics for r in variants[baseline])}
-        deltas = {}
-        for v in names:
-            if v == baseline:
-                continue
-            d = {}
-            for m, (bmean, _) in base_metrics.items():
-                vals = [r.metrics[m] for r in variants[v]
-                        if m in r.metrics and not math.isnan(r.metrics[m])]
-                if vals:
-                    vmean, vstd = _agg(vals)
-                    d[m] = (vmean - bmean, vstd)
-            deltas[v] = d
-        out[group] = {"baseline": baseline, "base_metrics": base_metrics,
-                      "deltas": deltas,
-                      "n": {v: len(rs) for v, rs in variants.items()}}
-    return out
-
-
 def build_report(root: str = "runs", out_md: str | None = None,
                  out_csv: str | None = None) -> str:
-    """Regenerate the markdown + CSV report (combination table + ablation deltas)
+    """Regenerate the markdown + CSV report (the combination table)
     from stored eval_record.json files, no re-training.
 
     Args:
@@ -158,19 +119,7 @@ def build_report(root: str = "runs", out_md: str | None = None,
         cells = [str(row[a]) for a in axes] + [str(row["n_runs"])]
         cells += [_fmt(*row[m]) if m in row else "-" for m in present]
         lines.append("| " + " | ".join(cells) + " |")
-
-    lines += ["", "## Before/after (ablation pairs)", ""]
-    for group, info in delta_rows(records).items():
-        lines.append(f"### {group}  (baseline: `{info['baseline']}`)")
-        lines.append("")
-        metrics = sorted(info["base_metrics"])
-        lines.append("| variant | " + " | ".join(f"Δ {m}" for m in metrics) + " |")
-        lines.append("|" + "---|" * (len(metrics) + 1))
-        for v, d in sorted(info["deltas"].items()):
-            cells = [f"{d[m][0]:+.3g} ± {d[m][1]:.2g}" if m in d else "-"
-                     for m in metrics]
-            lines.append(f"| {v} | " + " | ".join(cells) + " |")
-        lines.append("")
+    lines.append("")
 
     md = "\n".join(lines) + "\n"
     os.makedirs(os.path.dirname(out_md) or ".", exist_ok=True)

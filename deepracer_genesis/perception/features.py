@@ -12,16 +12,14 @@ from typing import TYPE_CHECKING
 import torch
 
 from deepracer_genesis.envs.features import PerceptionFeatures
-from deepracer_genesis.perception.model import PerceptionCNN
+from deepracer_genesis.perception.model import (CHANNEL_NAMES, SIGMA,
+                                                load_checkpoint)
 
 if TYPE_CHECKING:
     from deepracer_genesis.envs.deepracer_env import DeepRacerEnv
 
-CHANNEL_NAMES = ("lateral", "heading", "speed", "yaw_rate", "beta",
-                 "curv@1m", "curv@3m")
-
-# root of each channel's validation MSE, measured on the held-out tracks
-SIGMA = (0.125, 0.064, 0.060, 0.065, 0.083, 0.122, 0.224)
+__all__ = ["CHANNEL_NAMES", "SIGMA", "CNNPerceptionFeatures",
+           "NoisyPerceptionFeatures"]
 
 
 def _frame_stack_of(env: "DeepRacerEnv") -> int:
@@ -71,9 +69,10 @@ class CNNPerceptionFeatures(PerceptionFeatures):
 
         self.device = (torch.device(params["cnn_device"]) if "cnn_device" in params
                        else env.device)
-        state = torch.load(Path(checkpoint), map_location=self.device,
-                           weights_only=True)
-        in_channels = state["features.0.weight"].shape[1]
+        # arch-carrying payloads rebuild their own (possibly searched)
+        # architecture; bare state dicts fall back to the stock PerceptionCNN
+        net = load_checkpoint(Path(checkpoint), map_location=str(self.device))
+        in_channels = net.arch["in_channels"]
         expected = 3 * _frame_stack_of(env)
         if in_channels != expected:
             raise ValueError(
@@ -82,15 +81,13 @@ class CNNPerceptionFeatures(PerceptionFeatures):
                 "Retrain the CNN or set frame_stack to match.")
 
         lo, hi = self.cnn_target_slice
-        n_targets = state["head.3.weight"].shape[0]
+        n_targets = net.arch["n_targets"]
         if n_targets != hi - lo:
             raise ValueError(
                 f"checkpoint {checkpoint} predicts {n_targets} channels but the "
                 f"feature set's cnn_target_slice spans {hi - lo}")
 
-        self.net = PerceptionCNN(in_channels=in_channels,
-                                 n_targets=n_targets).to(self.device).eval()
-        self.net.load_state_dict(state)
+        self.net = net.to(self.device)
         for p in self.net.parameters():
             p.requires_grad_(False)
 

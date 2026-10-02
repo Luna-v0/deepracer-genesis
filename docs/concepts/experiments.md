@@ -52,6 +52,26 @@ critic can read richer observation keys than the actor (e.g. `critic_keys=("came
 `schedule` is `"adaptive"` (retune `lr` from the measured KL, steering toward
 `desired_kl`) or `"fixed"` (keep `lr`).
 
+### Policy architecture (`mlp` / `cnn`)
+
+The `mlp` dict shapes both nets; every key is optional (absent keys keep the
+defaults, so existing spec hashes are unaffected):
+
+```python
+VectorPolicy(mlp={
+    "hidden": (512, 256, 128),                       # layer widths (depth + width)
+    "activation": "relu",                            # rsl-rl activation name
+    "rnn": {"type": "gru", "hidden": 256, "layers": 1},  # recurrent trunk
+})
+```
+
+`rnn` switches actor and critic to rsl-rl's `RNNModel` (LSTM or GRU in front
+of the MLP head) — **vector policies only**: upstream `RNNModel` has no CNN
+trunk, so `spec.validate()` refuses recurrence on a camera policy. Camera
+policies shape their CNN trunk via `cnn={"channels": ..., "kernels": ...,
+"strides": ...}` and can override the action distribution via
+`distribution={"std_range": (0.1, 1.0), ...}`.
+
 ## Authoring an experiment
 
 Author each experiment as an **`Experiment` subclass**: training config as class
@@ -74,7 +94,7 @@ class FeatureBaselineSmall(FeatureBaseline):     # a variant
     num_envs = 256
 
 class FeatureBaselineFineTune(FeatureBaseline):  # start from trained weights
-    resume = "runs/.../model_1500.pt"
+    resume = "runs/.../model_best.pt"  # or model.pt
 
 run(FeatureBaseline)
 ```
@@ -112,3 +132,13 @@ instead of `pipeline()`.
 from deepracer_genesis.experiment import run
 run(FeatureBaseline, root="runs")
 ```
+
+### Seeding
+
+`run()` applies `spec.seed` process-wide (python / numpy / torch CPU + CUDA,
+via `deepracer_genesis.seeding.seed_everything`) *before* the sim is built, so
+spawn draws, DR draws, and network init all flow from it. On the CPU backend
+this makes a run bit-reproducible (pinned by `tests/test_seeding.py`); on the
+GPU, kernel nondeterminism still adds variance — set `DR_DETERMINISTIC=1` to
+also request deterministic torch algorithms (`warn_only`) when investigating.
+The seed names the run dir and is recorded in `eval_record.json`.
