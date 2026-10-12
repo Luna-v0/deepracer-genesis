@@ -8,15 +8,14 @@ from __future__ import annotations
 import math
 import os
 
+import genesis as gs
 import torch
 from tensordict import TensorDict
 
-import genesis as gs
-
+from ..randomization.physics import randomize_armature, randomize_physics
 from . import mdp, rules
 from .scene import build_scene
 from .track import MultiTrack
-from ..randomization.physics import randomize_armature, randomize_physics
 
 
 class DeepRacerEnv:
@@ -178,18 +177,14 @@ class DeepRacerEnv:
             env_cfg: Environment config dict (camera resolution, etc.).
         """
 
-    def _observe_camera(self) -> None:
+    def _observe_camera(self, env_ids: torch.Tensor | None = None) -> None:
         """Refresh the camera observation (subclass hook, vision only).
 
-        No-op on the base env; vision subclasses render the current frame here.
-        """
+        No-op on the base env; vision subclasses render and advance their history.
 
-    def _finalize_obs(self) -> None:
-        """Apply once-per-step observation transforms (subclass hook).
-
-        No-op on the base env. Called exactly once per :meth:`step`, after any
-        auto-reset re-render, so vision subclasses can apply stateful obs DR
-        (camera latency / frame drop) without double-advancing on reset steps.
+        Args:
+            env_ids: Envs just respawned, the only ones a re-render restarts;
+                ``None`` advances every env by one control step.
         """
 
     def _reset_obs_dr(self, env_ids: torch.Tensor) -> None:
@@ -228,7 +223,7 @@ class DeepRacerEnv:
         return self.renderer.spec_cam
 
     @property
-    def camera_stack(self) -> "torch.Tensor | None":
+    def camera_stack(self) -> torch.Tensor | None:
         """Return the stacked camera frames the policy observes, or ``None``.
 
         Always ``None`` here; vision envs that stack frames override it.
@@ -422,7 +417,6 @@ class DeepRacerEnv:
             self._post_physics(env_ids)
 
         self.last_actions[:] = self.actions
-        self._finalize_obs()   # once-per-step obs hook (e.g. camera latency DR)
         self.extras["time_outs"] = self.time_out_buf
         # No genesis<->torch stream fence needed: quadrants and torch both run on
         # the legacy NULL stream (stream 0), so allocator reuse is stream-ordered
@@ -438,8 +432,9 @@ class DeepRacerEnv:
 
         Args:
             env_ids: Envs that were just reset this step; their ``d_progress`` is
-                zeroed so a respawn does not register as forward progress. ``None``
-                updates all envs without that correction.
+                zeroed so a respawn does not register as forward progress, and
+                only they restart their camera history. ``None`` updates all envs
+                without that correction and advances every camera one step.
         """
         self.signals.invalidate()   # new step: drop the per-step signal cache
         pos, quat, vel, ang = self.car.kinematics()
@@ -478,6 +473,11 @@ class DeepRacerEnv:
         self.laps += (crossed & (self.d_progress > 0)).float()
         self.progress_m = new_progress
 
+        # Camera before features (B-001): a set that reads the frame stack
+        # (CNNPerceptionFeatures) must see this step's frame, as its CNN was
+        # trained; latency_steps stays the only camera delay.
+        self._observe_camera(env_ids)
+
         # ---- state obs (assembled by the selected feature set) ----
         obs_noise = self.cfg["obs"]["obs_noise"]
         if self._routed:
@@ -494,8 +494,6 @@ class DeepRacerEnv:
             self.state_buf = self.feature_set.compute()
             if obs_noise > 0:
                 self.state_buf += torch.randn_like(self.state_buf) * obs_noise
-
-        self._observe_camera()
 
     # ------------------------------------------------------------------ reset
     def reset_idx(self, env_ids: torch.Tensor) -> None:

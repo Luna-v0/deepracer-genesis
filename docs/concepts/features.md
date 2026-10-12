@@ -35,6 +35,10 @@ exclusive alternatives**, never joined — the env uses exactly one, and its
 `compute()` return *is* the whole state vector. (Composing/joining vectors is a
 planned extension — see the signal bus, `REFACTOR_PLAN.md` Part K.)
 
+On a camera env the frame is rendered, delayed by `latency_steps` and pushed
+onto the frame stack *before* this call, so a feature set that reads
+`env.camera_stack` sees this step's frames, like every other channel.
+
 Right after, optional Gaussian sensor noise is added to the actor's copy
 (`base_env.py:361-362`); this is the *weakest* form of actor/critic asymmetry —
 the stronger form (critic reads a richer signal set) is Part K.3.
@@ -166,7 +170,10 @@ Classic. Two blocks:
 - **Policy-only error/history channels** (`features.py:226-239+`) — action-
   conditioned residuals vs a fixed nominal bicycle model (`speed_err`,
   `steer_err`, `yaw_err`) plus rolled histories of previous actions/errors, using
-  the buffers allocated in `__init__` (`features.py:177-180`).
+  the buffers allocated in `__init__` (`features.py:177-180`). The residuals are
+  built from the speed and yaw rate of the target block: the true values here,
+  and in `CNNPerceptionFeatures` / `NoisyPerceptionFeatures` the estimated ones
+  (`PerceptionFeatures._with_errors`), since the car has only its estimates.
 
 `cnn_target_slice` (`features.py:209`) marks the leading `(0, targets)` range — the
 "pixel-observable subset." This is exactly the overlap the signal bus (Part K)

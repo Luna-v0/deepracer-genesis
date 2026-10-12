@@ -81,7 +81,9 @@ declaration *sites* stay separate.
   the Part P.2 sensor block (gamma, white_balance, vignette, distortion, crop,
   shot_noise) — per step per sub-env; the stateful temporal knobs
   (latency_steps, frame_drop) live in `FrameLatency`
-  (`randomization/latency.py`), advanced once per control step.
+  (`randomization/latency.py`), advanced once per control step, before the
+  feature vector is built: the policy, and any feature set reading the frame
+  stack, sees a frame exactly `latency_steps` steps old.
 
 ## Compatibility matrix
 

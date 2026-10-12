@@ -13,9 +13,17 @@ import torch
 #: is physics/limits.py; re-exported here so `from ...features import MAX_SPEED`
 #: (etc.) keeps working. NOMINAL_WHEELBASE is now the exact URDF wheelbase
 #: (0.163974, was a rounded 0.164).
-from ..physics.limits import (  # noqa: E402
-    A_LAT_NORM, BETA_NORM, CURVATURE_NORM, MAX_SPEED, MAX_STEER_RAD, MIN_SPEED,
-    YAW_RATE_NORM, WHEELBASE_M as NOMINAL_WHEELBASE,
+from ..physics.limits import (
+    A_LAT_NORM,
+    BETA_NORM,
+    CURVATURE_NORM,
+    MAX_SPEED,
+    MAX_STEER_RAD,
+    MIN_SPEED,  # noqa: F401  (re-export, see comment above)
+    YAW_RATE_NORM,
+)
+from ..physics.limits import (
+    WHEELBASE_M as NOMINAL_WHEELBASE,
 )
 
 
@@ -192,6 +200,8 @@ class PerceptionFeatures(FeatureSet):
         self._speed_err = torch.zeros(n, self.k_speed, device=dev)
         self._steer_err = torch.zeros(n, self.k_steer, device=dev)
         self._yaw_err = torch.zeros(n, self.k_steer, device=dev)
+        # env step each row's histories last rolled at (-1 = never)
+        self._rolled_at = torch.full((n,), -1, dtype=torch.long, device=dev)
 
     # ---- static shape info -------------------------------------------
     @staticmethod
@@ -233,19 +243,42 @@ class PerceptionFeatures(FeatureSet):
     # ---- per-step ------------------------------------------------------
     def compute(self) -> torch.Tensor:
         env = self.env
-        v_forward = _read(env, "v_forward")
-        yaw_rate_raw = _read(env, "yaw_rate")
-        actions = _read(env, "actions")
+        return self._with_errors(self._targets(), _read(env, "v_forward"),
+                                 _read(env, "yaw_rate"))
 
+    def _targets(self) -> torch.Tensor:
+        """Return the camera-recoverable channels, from the simulator's true state."""
+        env = self.env
+        v_forward = _read(env, "v_forward")
         # -- CNN targets: what a camera could tell you ------------------
         lateral = _read(env, "lateral") * env.dir_sign / _read(env, "half_width").clamp(min=0.1)
         heading = _read(env, "heading_err") / math.pi
         speed = v_forward / MAX_SPEED
-        yaw_rate = yaw_rate_raw / YAW_RATE_NORM
+        yaw_rate = _read(env, "yaw_rate") / YAW_RATE_NORM
         beta = torch.atan2(_read(env, "v_lateral"),
                            v_forward.clamp(min=0.05)) / BETA_NORM
         kappa = env.track.curvature_ahead(
             env.progress_m, self.horizons, env.dir_sign) / CURVATURE_NORM
+        return torch.cat([lateral.unsqueeze(1), heading.unsqueeze(1),
+                          speed.unsqueeze(1), yaw_rate.unsqueeze(1),
+                          beta.unsqueeze(1), kappa], dim=1)
+
+    def _with_errors(self, targets: torch.Tensor, v_forward: torch.Tensor,
+                     yaw_rate_raw: torch.Tensor) -> torch.Tensor:
+        """Append the action history and error channels, rolling the histories.
+
+        A set whose targets are estimates must pass the estimated speed and yaw rate.
+
+        Args:
+            targets: ``(N, n_targets)`` camera-recoverable channels.
+            v_forward: Forward speed in m/s the errors are built from.
+            yaw_rate_raw: Yaw rate in rad/s the errors are built from.
+
+        Returns:
+            The full ``(N, dim)`` feature vector.
+        """
+        env = self.env
+        actions = _read(env, "actions")
 
         # -- error channels vs the FIXED nominal bicycle ----------------
         act = env.cfg["action"]
@@ -262,21 +295,18 @@ class PerceptionFeatures(FeatureSet):
         steer_err = ((a_lat_expected - a_lat_actual) / A_LAT_NORM).clamp(-2, 2)
         yaw_err = ((yaw_expected - yaw_rate_raw) / YAW_RATE_NORM).clamp(-2, 2)
 
-        # -- roll the histories (newest first) --------------------------
-        self._prev_actions = torch.cat(
-            [actions.unsqueeze(1), self._prev_actions[:, :-1]], dim=1)
-        self._speed_err = torch.cat(
-            [speed_err.unsqueeze(1), self._speed_err[:, :-1]], dim=1)
-        self._steer_err = torch.cat(
-            [steer_err.unsqueeze(1), self._steer_err[:, :-1]], dim=1)
-        self._yaw_err = torch.cat(
-            [yaw_err.unsqueeze(1), self._yaw_err[:, :-1]], dim=1)
+        # -- roll the histories (newest first), once per control step: the
+        # auto-reset pass recomputes every env, and rolling again there would
+        # duplicate the newest entry of each env that did not respawn
+        fresh = self._fresh_rows()
+        self._prev_actions = _push(self._prev_actions, actions, fresh)
+        self._speed_err = _push(self._speed_err, speed_err, fresh)
+        self._steer_err = _push(self._steer_err, steer_err, fresh)
+        self._yaw_err = _push(self._yaw_err, yaw_err, fresh)
 
         return torch.cat(
             [
-                lateral.unsqueeze(1), heading.unsqueeze(1),
-                speed.unsqueeze(1), yaw_rate.unsqueeze(1), beta.unsqueeze(1),
-                kappa,
+                targets,
                 self._prev_actions.reshape(env.num_envs, -1),
                 self._speed_err,
                 self._steer_err,
@@ -290,6 +320,25 @@ class PerceptionFeatures(FeatureSet):
         self._speed_err[env_ids] = 0.0
         self._steer_err[env_ids] = 0.0
         self._yaw_err[env_ids] = 0.0
+        self._rolled_at[env_ids] = -1
+
+    def _fresh_rows(self) -> torch.Tensor:
+        """Return which envs have not rolled their histories at this env step."""
+        step = getattr(self.env, "episode_length_buf", None)
+        if step is None:            # a bare env without step bookkeeping
+            return torch.ones_like(self._rolled_at, dtype=torch.bool)
+        fresh = step != self._rolled_at
+        self._rolled_at = step.clone()
+        return fresh
+
+
+def _push(history: torch.Tensor, newest: torch.Tensor,
+          fresh: torch.Tensor) -> torch.Tensor:
+    """Prepend ``newest`` on fresh rows; elsewhere overwrite the newest entry."""
+    rolled = torch.cat([newest.unsqueeze(1), history[:, :-1]], dim=1)
+    kept = torch.cat([newest.unsqueeze(1), history[:, 1:]], dim=1)
+    mask = fresh.view(-1, *([1] * (history.dim() - 1)))
+    return torch.where(mask, rolled, kept)
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +349,8 @@ class PerceptionFeatures(FeatureSet):
 # live env state ClassicFeatures does, so selecting every block in order
 # reproduces the classic vector exactly.
 
-from dataclasses import dataclass          # noqa: E402
-from typing import Callable, Union         # noqa: E402
+from collections.abc import Callable
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -328,8 +377,8 @@ class FeatureBlock:
             env attributes the block touches.
     """
 
-    width: Union[int, Callable[[int], int]]
-    compute: Callable[["object"], torch.Tensor]
+    width: int | Callable[[int], int]
+    compute: Callable[[object], torch.Tensor]
     layout: str
     reads: tuple[str, ...] = ()
 
@@ -460,7 +509,7 @@ class SelectFeatures(FeatureSet):
                           for n in self._names(self.params)], dim=1)
 
 
-def blocks_signal_set(names: "tuple[str, ...]") -> "set[str]":
+def blocks_signal_set(names: tuple[str, ...]) -> set[str]:
     """Union of the signals the given feature blocks read (Part K.3/K.5).
 
     Args:
@@ -500,7 +549,7 @@ class RoutedFeatures(FeatureSet):
         self._critic = self._resolve(params.get("critic", ("*",)), base)
 
     @staticmethod
-    def _resolve(sel: "tuple[str, ...]", base: "tuple[str, ...]") -> "tuple[str, ...]":
+    def _resolve(sel: tuple[str, ...], base: tuple[str, ...]) -> tuple[str, ...]:
         """Resolve a selection to base order; ``("*",)`` = the whole base list."""
         sel = tuple(sel)
         if sel == ("*",):
@@ -508,7 +557,7 @@ class RoutedFeatures(FeatureSet):
         chosen = set(sel)
         return tuple(n for n in base if n in chosen)   # base order, de-duplicated
 
-    def _widths(self, names: "tuple[str, ...]") -> int:
+    def _widths(self, names: tuple[str, ...]) -> int:
         return sum(_block_width(FEATURE_BLOCKS[n].width, self.env.lookahead_k)
                    for n in names)
 

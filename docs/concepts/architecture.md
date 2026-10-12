@@ -33,7 +33,9 @@ A single control step (`deepracer_env.py:374-431`):
 1. Map normalized action `[steer, throttle] ∈ [-1,1]` to physical commands.
 2. Push commands to the Genesis DOF controllers.
 3. Step physics `decimation` times.
-4. `_post_physics` — refresh kinematics + localize on the track.
+4. `_post_physics` — refresh kinematics + localize on the track, refresh the
+   camera (render → image DR → latency → frame stack), then build the state
+   vector, so camera-reading features see this step's frame.
 5. `_compute_reward` → `_check_termination` → respawn done envs.
 
 ### 1.1 The pre-reset snapshot (`step_info`)

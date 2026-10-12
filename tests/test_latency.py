@@ -38,6 +38,16 @@ def test_reset_clears_cross_episode_bleed():
     assert out[1, 0, 0, 0].item() == 1.0   # env 1 still 1 step behind
 
 
+def test_reseed_restarts_only_the_given_envs():
+    """A respawn re-render mid-step must not advance the other envs again."""
+    fl = FrameLatency(2, latency=1, drop=0.0, device="cpu")
+    fl.advance(_frame(1))
+    fl.reseed(torch.tensor([0]), _frame(2))
+    out = fl.advance(_frame(3))
+    assert out[0, 0, 0, 0].item() == 2.0   # one step behind its fresh frame
+    assert out[1, 0, 0, 0].item() == 1.0   # one step behind, not two
+
+
 def test_frame_drop_repeats_previous():
     torch.manual_seed(0)
     fl = FrameLatency(2, latency=0, drop=1.0, device="cpu")   # always drop

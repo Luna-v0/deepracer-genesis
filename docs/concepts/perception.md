@@ -6,8 +6,10 @@ Driving the policy from a camera instead of the simulator's exact state.
 the car is and what is ahead — the ones a real DeepRacer has no sensor for. A CNN
 is trained to recover those seven from the camera, frozen, and put in the loop,
 so the policy is driven by estimates instead of ground truth. The remaining 22
-channels (past actions, command deltas) stay computed onboard, exactly as they
-would be on the car.
+channels (past actions, and the speed, steer and yaw errors against the commanded
+action) are computed onboard exactly as the car computes them: from the action
+history and the CNN's own speed and yaw-rate estimates, never from the
+simulator's true state.
 
 > Mental model in one sentence: train `PerceptionCNN` on camera frames paired
 > with the seven privileged channels, freeze it, then swap `PerceptionFeatures`
@@ -23,7 +25,8 @@ The repo has a `FrozenCNNToFeatureVector` stage
 embedding under an `encoded` key. This is not that, and does not use it. The CNN
 here predicts seven named physical quantities, so the observation vector keeps
 its exact layout. That is what makes the comparison possible: swap where the
-seven numbers come from, change nothing else.
+seven numbers come from (and so the error channels derived from them), change
+nothing else.
 
 ## Where the code lives
 
@@ -140,13 +143,26 @@ where the CNN runs; by default it follows the env's device.
 `NoisyPerceptionFeatures` is the same swap without a renderer: it perturbs the
 same slice with Gaussian noise scaled to the CNN's measured per-channel error
 (`SIGMA`), at `feature_params["noise"]` strength, optionally restricted to named
-`noise_channels`. It trains at feature-env speed, which is what makes the
+`noise_channels`, and builds the error channels from the noised speed and yaw
+rate, as the CNN path does. It trains at feature-env speed, which is what makes the
 ablation affordable — the caveat being that its noise is white, where the real
 CNN's error is time-correlated.
 
 ```bash
 uv run python -m experiments.perception.train_policy_with_noise
 ```
+
+### When the CNN sees a frame
+
+Within a control step the env renders the camera, applies image DR and
+`latency_steps`, pushes the frame onto the stack, and only then builds the
+feature vector. So `CNNPerceptionFeatures` reads the stack ending at the same
+step as everything else in the vector, the reward and the termination, which is
+how the CNN was trained (`datasets/rollout.py` records frame and state of one
+step together). `DomainRandomizationCamera(latency_steps=k)` is the only camera
+delay: features lag the render by exactly `k` steps. A respawned car's stack
+holds its first frame repeated, so its first state uses no frame from the
+previous episode.
 
 ## Evaluation
 
@@ -205,6 +221,11 @@ which is the path taken because Madrona needs CUDA.
 
 Three things were expected to matter and were measured instead. All numbers come
 from the ten held-out tracks or from `evaluation/compare_perception.py`.
+
+These predate two fixes (October 2026): the CNN in the loop read the previous
+step's frames, and the error channels were built from the true speed and yaw
+rate. Every number measured with the CNN (or the noise) in the loop needs a
+rerun before it is quoted; the jitter row is offline CNN validation and stands.
 
 | change | expected | measured |
 |---|---|---|

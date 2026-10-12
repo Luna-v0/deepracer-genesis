@@ -65,34 +65,47 @@ class VisionDeepRacerEnv(DeepRacerEnv):
         """
         return self._stack_buf
 
-    def _observe_camera(self) -> None:
-        """Refresh the camera buffers from the renderer for the current state.
+    def _observe_camera(self, env_ids: torch.Tensor | None = None) -> None:
+        """Render the current frame, then advance camera latency and the stack.
 
-        Applies image-space DR to the observed frame; image_buf stays un-augmented.
+        Image-space DR applies to the observed frame; image_buf stays un-augmented.
+
+        Args:
+            env_ids: Envs just respawned, the only ones a re-render restarts;
+                ``None`` advances every env by one control step.
         """
-        self.image_buf, self.obs_image_buf = self.renderer.render(self)
+        self.image_buf, frame = self.renderer.render(self)
         if self.image_aug:
             from ..randomization.image_aug import apply_image_aug
-            self.obs_image_buf = apply_image_aug(self.obs_image_buf, self.image_aug)
+            frame = apply_image_aug(frame, self.image_aug)
+        if env_ids is None:
+            # Once per control step, before the feature set reads the stack
+            # (B-001). Latency first, then the push, so the stack holds the
+            # (possibly delayed) frames the policy observes — as on the car.
+            if self._frame_latency is not None:
+                frame = self._frame_latency.advance(frame)
+            if self._stack_buf is not None:
+                self._stack_buf = torch.cat([self._stack_buf[:, 3:], frame], dim=1)
+            self.obs_image_buf = frame
+        else:
+            # Re-render after a respawn: every other env already advanced
+            # this step, so only the respawned rows take the new frame.
+            if self._frame_latency is not None:
+                self._frame_latency.reseed(env_ids, frame)
+            obs = self.obs_image_buf.clone()
+            obs[env_ids] = frame[env_ids]
+            self.obs_image_buf = obs
+            if self._stack_buf is not None:
+                self._stack_prime[env_ids] = True
+        self._prime_stack()
 
-    def _finalize_obs(self) -> None:
-        """Advance the camera-latency buffer once for the step's final frame.
-
-        Runs after any auto-reset re-render, so the delayed frame the policy
-        sees reflects the buffer state exactly one step forward. The frame
-        stack is pushed AFTER latency so the stack holds the (possibly
-        delayed) frames the policy actually observes — same as the car, where
-        the stack is filled from arriving (already-latent) camera messages.
-        """
-        if self._frame_latency is not None:
-            self.obs_image_buf = self._frame_latency.advance(self.obs_image_buf)
-        if self._stack_buf is not None:
-            f = self.obs_image_buf
-            self._stack_buf = torch.cat([self._stack_buf[:, 3:], f], dim=1)
-            if self._stack_prime.any():
-                idx = self._stack_prime
-                self._stack_buf[idx] = f[idx].repeat(1, self._frame_stack, 1, 1)
-                self._stack_prime[idx] = False
+    def _prime_stack(self) -> None:
+        """Fill respawned envs' stacks with their current frame, repeated."""
+        if self._stack_buf is not None and self._stack_prime.any():
+            idx = self._stack_prime
+            self._stack_buf[idx] = self.obs_image_buf[idx].repeat(
+                1, self._frame_stack, 1, 1)
+            self._stack_prime[idx] = False
 
     def _reset_obs_dr(self, env_ids: torch.Tensor) -> None:
         """Drop camera-latency and frame-stack history for respawned envs."""
@@ -111,13 +124,9 @@ class VisionDeepRacerEnv(DeepRacerEnv):
         """
         groups = super()._obs_groups()
         if self._stack_buf is not None:
-            # Initial observation before the first _finalize_obs: prime the
-            # stack in place (no shift) so it never exposes zero frames.
-            if self._stack_prime.any():
-                idx = self._stack_prime
-                self._stack_buf[idx] = self.obs_image_buf[idx].repeat(
-                    1, self._frame_stack, 1, 1)
-                self._stack_prime[idx] = False
+            # _observe_camera already primed; this covers a reset_idx that
+            # was not followed by a re-render, so zeros are never exposed.
+            self._prime_stack()
             groups["camera"] = self._stack_buf
         else:
             groups["camera"] = self.obs_image_buf

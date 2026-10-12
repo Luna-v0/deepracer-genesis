@@ -95,6 +95,25 @@ class FrameLatency:
         self._last = out.clone()
         return out
 
+    def reseed(self, env_ids: torch.Tensor, frame: torch.Tensor) -> None:
+        """Restart ``env_ids`` from ``frame`` without advancing any other env.
+
+        A respawned env then observes ``frame`` until ``latency`` steps pass.
+
+        Args:
+            env_ids: Indices of envs that were just respawned.
+            frame: Current rendered frames ``(N, C, H, W)``.
+        """
+        if len(env_ids) == 0:
+            return
+        if not self._initialized:
+            self.advance(frame)        # no history yet: seeds every row
+            return
+        if self._hist is not None:
+            self._hist[env_ids] = frame[env_ids].unsqueeze(1)
+        self._last[env_ids] = frame[env_ids]
+        self._reinit[env_ids] = False
+
     def _delay(self, frame: torch.Tensor) -> torch.Tensor:
         """Ring-buffer step: emit the oldest frame, push the newest."""
         out = self._hist[:, -1].clone()

@@ -90,8 +90,7 @@ def export_perception_cnn(checkpoint: str, out_dir: str, *,
     _require_genesis_free()
     import torch
 
-    from deepracer_genesis.perception.model import (CHANNEL_NAMES, SIGMA,
-                                                    load_checkpoint)
+    from deepracer_genesis.perception.model import CHANNEL_NAMES, SIGMA, load_checkpoint
 
     state = torch.load(checkpoint, map_location="cpu", weights_only=True)
     if "state_dict" not in state:
@@ -210,7 +209,7 @@ def export_feature_actor(checkpoint: str, out_dir: str, *,
             self.head = (m.distribution.as_deterministic_output_module()
                          if m.distribution is not None else nn.Identity())
 
-        def forward(self, state: "torch.Tensor") -> "torch.Tensor":
+        def forward(self, state: torch.Tensor) -> torch.Tensor:
             return self.head(self.mlp(self.normalizer(state)))
 
     actor = _ExportActor(model).eval()
@@ -258,7 +257,8 @@ def export_feature_actor(checkpoint: str, out_dir: str, *,
         "onnx_vs_torch_max_abs_diff": diff,
         "notes": "Only 7 of the input channels come from the camera (via "
                  "perception.onnx); the other 22 are computed onboard from the "
-                 "action history, so this graph is not a stock-AWS drop-in.",
+                 "action history and perception.onnx's speed and yaw_rate "
+                 "outputs, so this graph is not a stock-AWS drop-in.",
     }
     with open(os.path.join(out_dir, "actor_card.json"), "w") as f:
         json.dump(card, f, indent=2)
