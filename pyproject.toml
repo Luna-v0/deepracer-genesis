@@ -81,6 +81,7 @@ dev = [
     "pandas>=2.0",
     "optuna>=4.9.0",
     "papermill>=2.7.0",
+    "ruff>=0.17.0",
 ]
 # GPU renderers, synced by default for local `uv run` (camera/Nyx experiments)
 # so `uv run experiments/foo.py` "just works". These mirror the [vision]/[nyx]
@@ -88,10 +89,22 @@ dev = [
 # uses); the group is dev-only and never ships in the wheel or the git install.
 renderers = ["gs-madrona>=0.0.10", "gs-nyx>=0.1.4", "gs-nyx-plugin>=0.1.5"]
 
+[tool.ruff]
+target-version = "py310"
+extend-exclude = [
+    "runs",
+    "logs",
+    "notebooks",
+    "experiments/.ipynb_checkpoints",
+    "*.ipynb",
+]
+
 [tool.uv]
 default-groups = ["dev", "renderers"]
 
 [tool.pytest.ini_options]
+# repo root on sys.path so tests can import the top-level `examples` package
+pythonpath = ["."]
 markers = [
     "smoke: bounded end-to-end pre-flight that builds real (CPU) sims; deselect with -m 'not smoke'",
 ]

@@ -4,8 +4,8 @@ Build-time only — nothing here runs per-step.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Optional
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..envs.features import FeatureSet
@@ -19,7 +19,6 @@ from .spec import (
     EnvSpec,
     EvalConfig,
     ExperimentSpec,
-    ObsDRSpec,
     PolicySpec,
     SpecError,
 )
@@ -158,9 +157,9 @@ class FeatureEnvironment(Stage):
         KIND: Stage category tag (environment).
     """
 
-    feature_set: "type[FeatureSet] | None" = None   # None -> ClassicFeatures
-    feature_params: Optional[dict] = None
-    obs_routing: Optional[dict] = None              # Part K.3 (feature mode only)
+    feature_set: type[FeatureSet] | None = None   # None -> ClassicFeatures
+    feature_params: dict | None = None
+    obs_routing: dict | None = None              # Part K.3 (feature mode only)
     lookahead_k: int = 10
     tracks: tuple[str, ...] = ("reinvent_base",)   # >1 => heterogeneous per-env
     num_envs: int = 512
@@ -223,8 +222,8 @@ class CameraEnvironment(Stage):
     fov: float = 90.0
     frame_stack: int = 4               # frames stacked along channels (contract default)
     lookahead_k: int = 10
-    feature_set: "type[FeatureSet] | None" = None
-    feature_params: Optional[dict] = None
+    feature_set: type[FeatureSet] | None = None
+    feature_params: dict | None = None
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 128
     random_start: bool = True
@@ -334,10 +333,10 @@ class RewardShaping(Stage):
         KIND: Stage category tag (reward).
     """
 
-    fn: Optional["RewardFn"] = None
-    scales: Optional[dict] = None
-    params: Optional[dict] = None
-    crash_penalty: Optional[float] = None
+    fn: RewardFn | None = None
+    scales: dict | None = None
+    params: dict | None = None
+    crash_penalty: float | None = None
 
     KIND = "reward"
 
@@ -366,8 +365,8 @@ class DomainRandomizationTrackAppearance(Stage):
     """
 
     strength: float = 0.6
-    env_map_tint: Optional[tuple[float, float]] = None
-    env_map_multiplier: Optional[tuple[float, float]] = None
+    env_map_tint: tuple[float, float] | None = None
+    env_map_multiplier: tuple[float, float] | None = None
 
     KIND = "obs_dr_appearance"
 
@@ -411,14 +410,14 @@ class DomainRandomizationCamera(Stage):
         KIND: Stage category tag (obs_dr_camera).
     """
 
-    brightness: Optional[tuple[float, float]] = None
-    contrast: Optional[tuple[float, float]] = None
-    saturation: Optional[tuple[float, float]] = None
+    brightness: tuple[float, float] | None = None
+    contrast: tuple[float, float] | None = None
+    saturation: tuple[float, float] | None = None
     hue: float = 0.0
     blur: float = 0.0
     cutout: float = 0.0            # probability of a cutout patch per frame
     noise: float = 0.0             # additive gaussian sigma
-    gamma: Optional[tuple[float, float]] = None
+    gamma: tuple[float, float] | None = None
     white_balance: float = 0.0     # per-channel gain magnitude
     vignette: float = 0.0          # max corner-darkening strength
     distortion: float = 0.0        # max |radial| barrel coefficient
@@ -478,12 +477,12 @@ class DomainRandomizationPhysics(Stage):
 
     # each field accepts a shared Space (FloatRange/SymRange — Part H) or a
     # raw tuple/scalar; normalized to the cfg shape at build via _dr_cfg_value.
-    friction: "Space | tuple[float, float]" = (0.6, 1.4)
-    mass: "Space | float" = 0.2              # +- kg per link
-    com: "Space | float" = 0.01              # +- m per link
-    gains: "Space | tuple[float, float]" = (0.8, 1.2)
-    armature: "Space | tuple[float, float]" = (0.0, 0.01)
-    track_width: "Space | tuple[float, float]" = (1.0, 1.0)  # off by default
+    friction: Space | tuple[float, float] = (0.6, 1.4)
+    mass: Space | float = 0.2              # +- kg per link
+    com: Space | float = 0.01              # +- m per link
+    gains: Space | tuple[float, float] = (0.8, 1.2)
+    armature: Space | tuple[float, float] = (0.0, 0.01)
+    track_width: Space | tuple[float, float] = (1.0, 1.0)  # off by default
 
     KIND = "obs_dr_physics"
 
@@ -516,7 +515,7 @@ class FrozenCNNToFeatureVector(Stage):
 
     checkpoint: str = ""
     output_dim: int = 256
-    layer: Optional[str] = None
+    layer: str | None = None
     out_key: str = "encoded"
 
     KIND = "encoder"
@@ -545,10 +544,10 @@ class AsymmetricCameraPolicy(Stage):
 
     actor_keys: tuple[str, ...] = ("camera",)
     critic_keys: tuple[str, ...] = ("camera", "state")
-    cnn: Optional[dict] = None
-    mlp: Optional[dict] = None
-    actions: Optional[tuple] = None       # (steer, speed) pairs => discrete
-    distribution: Optional[dict] = None   # rsl-rl distribution_cfg overrides
+    cnn: dict | None = None
+    mlp: dict | None = None
+    actions: tuple | None = None       # (steer, speed) pairs => discrete
+    distribution: dict | None = None   # rsl-rl distribution_cfg overrides
 
     KIND = "policy"
 
@@ -573,8 +572,8 @@ class VectorPolicy(Stage):
     """
 
     keys: tuple[str, ...] = ("state",)
-    mlp: Optional[dict] = None
-    actions: Optional[tuple] = None       # (steer, speed) pairs => discrete
+    mlp: dict | None = None
+    actions: tuple | None = None       # (steer, speed) pairs => discrete
 
     KIND = "policy"
 
@@ -600,8 +599,8 @@ class AsymmetricVectorPolicy(Stage):
 
     actor_keys: tuple[str, ...] = ("state",)
     critic_keys: tuple[str, ...] = ("state",)
-    mlp: Optional[dict] = None
-    actions: Optional[tuple] = None       # (steer, speed) pairs => discrete
+    mlp: dict | None = None
+    actions: tuple | None = None       # (steer, speed) pairs => discrete
 
     KIND = "policy"
 
@@ -699,7 +698,7 @@ class PPOLagrangian(PPO):
         lambda_init: Initial Lagrange multiplier value.
     """
 
-    budget: Optional[float] = None          # None => taken from the env stage
+    budget: float | None = None          # None => taken from the env stage
     pid: tuple[float, float, float] = DEFAULT_PID
     cost_gae_lambda: float = 0.95
     lambda_init: float = 0.0
@@ -726,8 +725,8 @@ class Algo(PPO):
         params: Algorithm-specific arguments passed through.
     """
 
-    cls: "type | None" = None
-    params: Optional[dict] = None
+    cls: type | None = None
+    params: dict | None = None
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, algorithm=AlgorithmSpec(
@@ -757,10 +756,10 @@ class Evaluation(Stage):
 
     real_tracks: tuple[str, ...] = ()
     eval_num_envs: int = 64
-    eval_episodes: Optional[int] = None
+    eval_episodes: int | None = None
     charts: bool = True
     gui: bool = False
-    telemetry_envs: Optional[int] = 64
+    telemetry_envs: int | None = 64
     keep_checkpoints: str = "best_last"
     best_metric: str = "mean_progress_m"
 

@@ -17,9 +17,9 @@ import pathlib
 import re
 import typing
 
-import deepracer_genesis.randomization.catalog as catalog
 from deepracer_genesis.experiment.spec import NEUTRAL_PHYSICS, ActionDRSpec
 from deepracer_genesis.experiment.stages import DomainRandomizationCamera
+from deepracer_genesis.randomization import catalog
 from deepracer_genesis.randomization.catalog import BY_NAME, CATALOG, Layer, by_layer
 
 _PKG = pathlib.Path(catalog.__file__).resolve().parent.parent

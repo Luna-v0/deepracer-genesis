@@ -7,4 +7,4 @@ interface (see :mod:`deepracer_genesis.algorithms.protocol`).
 
 from .protocol import ALGO_INTERFACE, RslAlgorithm, missing_algorithm_methods
 
-__all__ = ["RslAlgorithm", "ALGO_INTERFACE", "missing_algorithm_methods"]
+__all__ = ["ALGO_INTERFACE", "RslAlgorithm", "missing_algorithm_methods"]

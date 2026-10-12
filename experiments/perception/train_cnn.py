@@ -13,8 +13,11 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Subset
 
-from deepracer_genesis.perception.dataset import (HOLDOUT_TRACKS, TRAINING_TRACKS,
-                                                  RolloutDataset)
+from deepracer_genesis.perception.dataset import (
+    HOLDOUT_TRACKS,
+    TRAINING_TRACKS,
+    RolloutDataset,
+)
 from deepracer_genesis.perception.model import PerceptionCNN
 
 logger = logging.getLogger(__name__)

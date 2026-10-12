@@ -7,9 +7,8 @@ import argparse
 import os
 import pickle
 
-import torch
-
 import genesis as gs
+import torch
 
 
 def main():

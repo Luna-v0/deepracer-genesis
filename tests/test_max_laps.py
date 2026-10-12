@@ -18,7 +18,6 @@ from deepracer_genesis.experiment.stages import (
     CameraEnvironment,
     FeatureEnvironment,
     SafeRLCameraEnvironment,
-    VectorPolicy,
 )
 
 N = 3

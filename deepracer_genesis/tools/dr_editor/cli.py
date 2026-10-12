@@ -22,9 +22,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Optional
 
-from . import emit, knobs as K
+from . import emit
+from . import knobs as K
 from .rng import stamp
 
 
@@ -73,7 +73,7 @@ def _session_updates(names: list[str], renderer: str) -> dict:
     return updates
 
 
-def _build_session(args, names: Optional[list[str]] = None):
+def _build_session(args, names: list[str] | None = None):
     """Construct the live session a command asked for.
 
     Args:
@@ -96,7 +96,7 @@ def _build_session(args, names: Optional[list[str]] = None):
         res=res, cfg_updates=updates)
 
 
-def _raw_frames(args, names: Optional[list[str]] = None):
+def _raw_frames(args, names: list[str] | None = None):
     """One raw batch: from a bank (offline) or a fresh live session.
 
     Args:
@@ -258,7 +258,7 @@ def cmd_bank(args) -> int:
 
 
 # ------------------------------------------------------------------ parser
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point.
 
     Args:

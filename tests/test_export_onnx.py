@@ -284,8 +284,7 @@ def test_bundle_written(report):
 
 def _spec_with_max_speed(max_speed):
     """Build a minimal camera spec with the given action cap."""
-    from deepracer_genesis.experiment import (AsymmetricCameraPolicy,
-                                              CameraEnvironment)
+    from deepracer_genesis.experiment import AsymmetricCameraPolicy, CameraEnvironment
 
     return (CameraEnvironment(render="madrona", resolution=(160, 120),
                               max_speed=max_speed)

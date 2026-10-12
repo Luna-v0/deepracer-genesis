@@ -8,9 +8,8 @@ import argparse
 import os
 import sys
 
-import torch
-
 import genesis as gs
+import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

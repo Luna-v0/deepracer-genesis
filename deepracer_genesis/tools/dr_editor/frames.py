@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -63,7 +63,7 @@ class FrameBank:
     def record(session, out_dir: str, *,
                waypoints: Sequence[int] = (0, 5, 10, 20, 40),
                lateral_fracs: Sequence[float] = (0.0,),
-               yaw_offs: Sequence[float] = (0.0,)) -> "FrameBank":
+               yaw_offs: Sequence[float] = (0.0,)) -> FrameBank:
         """Capture a pose grid from a live session into a bank directory.
 
         Args:

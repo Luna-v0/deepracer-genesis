@@ -10,8 +10,10 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from deepracer_genesis.experiment.visualize import rollout_video
-
-from experiments.perception.train_policy_with_noise import TEST_TRACKS, NoisyPerceptionPolicy
+from experiments.perception.train_policy_with_noise import (
+    TEST_TRACKS,
+    NoisyPerceptionPolicy,
+)
 
 NOISE_LEVELS = (0.0, 1.0)
 

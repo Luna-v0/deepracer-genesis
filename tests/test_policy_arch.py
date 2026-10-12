@@ -7,10 +7,13 @@ cfg translation are pure-python.
 
 import pytest
 
-from deepracer_genesis.experiment import (AsymmetricCameraPolicy,
-                                          CameraEnvironment,
-                                          FeatureEnvironment, SpecError,
-                                          VectorPolicy)
+from deepracer_genesis.experiment import (
+    AsymmetricCameraPolicy,
+    CameraEnvironment,
+    FeatureEnvironment,
+    SpecError,
+    VectorPolicy,
+)
 from deepracer_genesis.experiment.rsl_backend import spec_to_train_cfg
 
 

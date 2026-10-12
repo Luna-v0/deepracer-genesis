@@ -10,7 +10,8 @@ so the build-time learnability check (K.5) can verify the critic can see them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 RewardFn = Callable[["DeepRacerEnv"], "dict[str, torch.Tensor] | torch.Tensor"]
 
 
-def reads(*signals: str) -> "Callable[[RewardFn], RewardFn]":
+def reads(*signals: str) -> Callable[[RewardFn], RewardFn]:
     """Declare the signal names a reward fn reads (Part K.4).
 
     Attaches a ``reads`` frozenset to the fn so the K.5 learnability check can
@@ -38,14 +39,14 @@ def reads(*signals: str) -> "Callable[[RewardFn], RewardFn]":
     """
     frozen = frozenset(signals)
 
-    def decorate(fn: "RewardFn") -> "RewardFn":
+    def decorate(fn: RewardFn) -> RewardFn:
         fn.reads = frozen  # type: ignore[attr-defined]
         return fn
 
     return decorate
 
 
-def reward_reads(fn: "RewardFn") -> "frozenset[str]":
+def reward_reads(fn: RewardFn) -> frozenset[str]:
     """Return the signal names ``fn`` declared it reads (empty if undeclared).
 
     An undeclared custom reward returns ``frozenset()``, which the K.5 check
@@ -56,14 +57,14 @@ def reward_reads(fn: "RewardFn") -> "frozenset[str]":
 
 #: signal names each cost fn reads (Part K.4; ``cost_fn`` name -> reads). The
 #: env's default cost is the plain ``offtrack`` term (see mdp.check_termination).
-COST_READS: "dict[str, frozenset[str]]" = {
+COST_READS: dict[str, frozenset[str]] = {
     "offtrack": frozenset({"off_track", "up_z"}),
     "offtrack_or_overspeed": frozenset({"off_track", "up_z", "v_forward"}),
     "crash": frozenset({"off_track", "up_z"}),
 }
 
 
-def cost_reads(cost_fn: "str | None") -> "frozenset[str]":
+def cost_reads(cost_fn: str | None) -> frozenset[str]:
     """Return the signal names the named cost fn reads (empty if none/unknown)."""
     return COST_READS.get(cost_fn or "", frozenset())
 
@@ -73,7 +74,7 @@ def cost_reads(cost_fn: "str | None") -> "frozenset[str]":
 # reward, not just the terms this fn returns (the CMDP path models it via COST_READS).
 @reads("d_progress", "v_forward", "lateral", "half_width", "heading_err",
        "actions", "action_rate", "off_track", "up_z")
-def deepracer(env: "DeepRacerEnv") -> dict[str, torch.Tensor]:
+def deepracer(env: DeepRacerEnv) -> dict[str, torch.Tensor]:
     """Compute the built-in DeepRacer shaping: progress-dominated with stability.
 
     Args:

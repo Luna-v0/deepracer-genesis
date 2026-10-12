@@ -7,4 +7,4 @@ from .base_env import DeepRacerEnv
 from .vector_env import VectorDeepRacerEnv
 from .vision_env import VisionDeepRacerEnv
 
-__all__ = ["DeepRacerEnv", "VisionDeepRacerEnv", "VectorDeepRacerEnv"]
+__all__ = ["DeepRacerEnv", "VectorDeepRacerEnv", "VisionDeepRacerEnv"]

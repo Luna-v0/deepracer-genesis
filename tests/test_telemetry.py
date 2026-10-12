@@ -11,8 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from deepracer_genesis.analysis.telemetry import (COLUMNS, episode_agg,
-                                                  load_telemetry)
+from deepracer_genesis.analysis.telemetry import COLUMNS, episode_agg, load_telemetry
 
 
 def _synthetic(track: str = "reinvent_base", envs: int = 2, steps: int = 20,

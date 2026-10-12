@@ -30,14 +30,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Sequence, Union
+from typing import Union
 
 import numpy as np
 
 from .. import ASSETS_DIR
-from .track_builder import (GENERATED_DIR, _PALETTE, install_track,
-                            scale_route_width)
+from .track_builder import _PALETTE, GENERATED_DIR, install_track, scale_route_width
 
 # named palettes (0-255 RGB per material); "classic" is the repo default
 PALETTES: dict[str, dict] = {
@@ -99,9 +99,9 @@ class TrackVariant:
 
     base: str
     width: float = 1.0
-    palette: Union[str, dict, None] = None
-    field: Union[str, tuple, None] = None
-    wall: Union[str, tuple, None] = None
+    palette: str | dict | None = None
+    field: str | tuple | None = None
+    wall: str | tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +123,7 @@ class OfficialSample:
         names: Explicit name pool (None = the full official library).
     """
 
-    n: Optional[int] = None
+    n: int | None = None
     seed: int = 0
     jitter: float = 0.4
     clones: int = 1
@@ -131,7 +131,7 @@ class OfficialSample:
     keep_original: bool = False
     loops_only: bool = True
     fetch: bool = True
-    names: Optional[tuple] = None
+    names: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -178,7 +178,7 @@ class Zoo:
 
     name: str
     variants: tuple[Source, ...]
-    grid_spacing: Optional[float] = None
+    grid_spacing: float | None = None
 
 
 def _luminance(rgb: Sequence[float]) -> float:
@@ -194,8 +194,8 @@ def _luminance(rgb: Sequence[float]) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-def _resolve(variant: TrackVariant) -> tuple[Optional[dict], Optional[tuple],
-                                             Optional[tuple]]:
+def _resolve(variant: TrackVariant) -> tuple[dict | None, tuple | None,
+                                             tuple | None]:
     """Resolve a variant's palette/field/wall references to explicit values.
 
     Args:
@@ -762,8 +762,8 @@ def _perturb_route(route: np.ndarray, rng: np.random.Generator,
     return route
 
 
-def official_zoo(n: Optional[int] = None, *, seed: int = 0,
-                 names: Optional[Sequence[str]] = None,
+def official_zoo(n: int | None = None, *, seed: int = 0,
+                 names: Sequence[str] | None = None,
                  fetch: bool = True, loops_only: bool = True,
                  jitter: float = 0.0, clones: int = 1,
                  keep_original: bool = False, looks: bool = False) -> Zoo:
@@ -890,8 +890,8 @@ def demo_zoo(base: str = "reinvent_base") -> Zoo:
 
 
 # ----------------------------------------------------------------- see / run
-def view_zoo(names: Sequence[str], *, grid_spacing: Optional[float] = None,
-             screenshot: Optional[str] = None, seconds: Optional[float] = None,
+def view_zoo(names: Sequence[str], *, grid_spacing: float | None = None,
+             screenshot: str | None = None, seconds: float | None = None,
              res: tuple = (1280, 960)) -> None:
     """Open the bare-scene testing ground: every variant on its world tile.
 
@@ -981,10 +981,10 @@ def view_zoo(names: Sequence[str], *, grid_spacing: Optional[float] = None,
 
 
 def watch_zoo(names: Sequence[str], *, num_envs: int = 12, gui: bool = True,
-              steps: Optional[int] = None, photos_every: int = 100,
+              steps: int | None = None, photos_every: int = 100,
               photo_envs: int = 4, out: str = "logs/zoo",
               randomize: bool = False,
-              grid_spacing: Optional[float] = None) -> None:
+              grid_spacing: float | None = None) -> None:
     """Run cars on the zoo — the training world, watchable.
 
     Builds the real ``DeepRacerEnv`` on the compiled tracks (spawn
@@ -1091,7 +1091,7 @@ def watch_zoo(names: Sequence[str], *, num_envs: int = 12, gui: bool = True,
 
 # --------------------------------------------------- run-the-file entry points
 def _prepare(zoo_or_names, *, force: bool = False,
-             grid_spacing: Optional[float] = None) -> tuple[tuple, float]:
+             grid_spacing: float | None = None) -> tuple[tuple, float]:
     """Compile a manifest (or accept ready names) and resolve tile spacing.
 
     Args:
@@ -1120,9 +1120,9 @@ def _prepare(zoo_or_names, *, force: bool = False,
     return names, float(grid_spacing)
 
 
-def view(zoo_or_names, *, screenshot: Optional[str] = None,
-         seconds: Optional[float] = None, force: bool = False,
-         grid_spacing: Optional[float] = None) -> None:
+def view(zoo_or_names, *, screenshot: str | None = None,
+         seconds: float | None = None, force: bool = False,
+         grid_spacing: float | None = None) -> None:
     """Compile and open the bare-scene view — from a manifest, in one call.
 
     The run-the-file idiom: a manifest ends with
@@ -1143,10 +1143,10 @@ def view(zoo_or_names, *, screenshot: Optional[str] = None,
 
 
 def watch(zoo_or_names, *, num_envs: int = 12, gui: bool = True,
-          steps: Optional[int] = None, photos_every: int = 100,
+          steps: int | None = None, photos_every: int = 100,
           photo_envs: int = 4, out: str = "logs/zoo",
           randomize: bool = False, force: bool = False,
-          grid_spacing: Optional[float] = None) -> None:
+          grid_spacing: float | None = None) -> None:
     """Compile and run cars on the zoo — from a manifest, in one call.
 
     The run-the-file idiom: a manifest ends with
@@ -1228,7 +1228,7 @@ def load_manifest(ref: str) -> Zoo:
         f"pick one explicitly, e.g. {path}:{next(iter(sorted(zoos)), 'my_zoo')}")
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point: ``compile`` / ``view`` / ``watch`` over a manifest.
 
     What to build lives in the MANIFEST FILE (config-as-code — the repo

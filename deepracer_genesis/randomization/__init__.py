@@ -17,7 +17,12 @@ from .physics import randomize_physics
 from .spaces import Choice, FloatRange, IntRange, Space, SymRange
 
 __all__ = [
-    "Space", "FloatRange", "IntRange", "SymRange", "Choice",
+    "CATALOG",
+    "Choice",
+    "FloatRange",
+    "IntRange",
+    "Knob",
+    "Space",
+    "SymRange",
     "randomize_physics",
-    "CATALOG", "Knob",
 ]

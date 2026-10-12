@@ -40,15 +40,14 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
+    from deepracer_genesis.agents import NoisyExpert
+    from deepracer_genesis.datasets import TrackDataset, collect_rollout_dataset
     from deepracer_genesis.experiment import (
         CameraEnvironment,
         DomainRandomizationCamera,
         DomainRandomizationPhysics,
         DomainRandomizationTrackAppearance,
     )
-    from deepracer_genesis.agents import NoisyExpert
-    from deepracer_genesis.datasets import collect_rollout_dataset
-    from deepracer_genesis.datasets import TrackDataset
 
     if args.tracks:
         tracks = args.tracks.split(",")

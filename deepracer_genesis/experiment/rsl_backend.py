@@ -11,7 +11,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -38,7 +38,7 @@ _PPO_KEY_MAP = {
 }
 
 
-def rsl_supported(spec: "ExperimentSpec") -> bool:
+def rsl_supported(spec: ExperimentSpec) -> bool:
     """True when spec is in the migrated (rsl-rl) scope.
 
     Excludes cost/Lagrangian, frozen-CNN, and discrete actions (their phases).
@@ -93,7 +93,7 @@ def _apply_mlp_cfg(cfg: dict, mlp: dict) -> None:
             cfg[net]["rnn_num_layers"] = rnn.get("layers", 1)
 
 
-def spec_to_train_cfg(spec: "ExperimentSpec") -> dict:
+def spec_to_train_cfg(spec: ExperimentSpec) -> dict:
     """Translate an ExperimentSpec into an rsl-rl OnPolicyRunner train cfg.
 
     Args:
@@ -222,7 +222,7 @@ def _eval(sim, policy, telemetry=None, telemetry_envs=None):
 _ITER_CKPT = re.compile(r"model_\d+\.pt")
 
 
-def _improves(value: Optional[float], best: Optional[float]) -> bool:
+def _improves(value: float | None, best: float | None) -> bool:
     """Whether an eval value beats the best so far (higher wins, NaN never).
 
     Args:
@@ -285,8 +285,8 @@ class _CheckpointKeeper:
 
     def __init__(self, run_dir: str, metric: str, prune: bool) -> None:
         self.run_dir, self.metric, self.prune = run_dir, metric, prune
-        self.best_value: Optional[float] = None
-        self.best_frames: Optional[int] = None
+        self.best_value: float | None = None
+        self.best_frames: int | None = None
 
     def observe(self, runner, frames: int, metrics: dict) -> None:
         """Save ``model_best.pt`` when this eval improves the metric.
@@ -337,7 +337,7 @@ class _CheckpointKeeper:
                 "best_frames": self.best_frames}
 
 
-def _holdout_eval(spec: "ExperimentSpec", policy, runner, run_dir: str,
+def _holdout_eval(spec: ExperimentSpec, policy, runner, run_dir: str,
                   frames: int) -> dict:
     """Per-track no-DR holdout eval after training (Part N.3, opt-in).
 
@@ -377,7 +377,7 @@ def _holdout_eval(spec: "ExperimentSpec", policy, runner, run_dir: str,
         return {}
 
 
-def run_rsl(spec: "ExperimentSpec", root: str = "runs", on_eval=None) -> EvalRecord:
+def run_rsl(spec: ExperimentSpec, root: str = "runs", on_eval=None) -> EvalRecord:
     """Train spec via OnPolicyRunner, returning an EvalRecord.
 
     Runs learn() in eval-cadence chunks so periodic eval + on_eval survive.

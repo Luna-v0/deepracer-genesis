@@ -13,8 +13,6 @@ TensorBoard via ``SummaryWriter.add_figure``.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
 
@@ -52,7 +50,7 @@ def _route(track: str) -> np.ndarray:
     return np.load(tracks.info(track).route_path)
 
 
-def _resolve_track(df, track: Optional[str]) -> str:
+def _resolve_track(df, track: str | None) -> str:
     """Pick the single track a plot should draw.
 
     Args:
@@ -90,7 +88,7 @@ def _fig_ax(ax, figsize=(7, 6)):
     return plt.subplots(figsize=figsize)
 
 
-def _episode_segments(d, color_by: str, max_episodes: Optional[int]):
+def _episode_segments(d, color_by: str, max_episodes: int | None):
     """Split single-track telemetry into drawable line segments per episode.
 
     A done row's pose is already the RESPAWN pose (the env auto-resets
@@ -154,9 +152,9 @@ def _outline(ax, route: np.ndarray) -> None:
     ax.set_yticks([])
 
 
-def plot_trajectories(df, track: Optional[str] = None, *,
+def plot_trajectories(df, track: str | None = None, *,
                       color_by: str = "speed", ax=None,
-                      max_episodes: Optional[int] = None, cmap="viridis"):
+                      max_episodes: int | None = None, cmap="viridis"):
     """Lap trajectories over the track, colored by a telemetry column.
 
     The headline deepracer-analysis view: every recorded episode drawn as a
@@ -200,7 +198,7 @@ def plot_trajectories(df, track: Optional[str] = None, *,
 
 
 def plot_variant_grid(df, *, color_by: str = "speed", cols: int = 3,
-                      max_episodes: Optional[int] = None):
+                      max_episodes: int | None = None):
     """One trajectory panel per zoo variant present in the telemetry.
 
     Args:
@@ -227,7 +225,7 @@ def plot_variant_grid(df, *, color_by: str = "speed", cols: int = 3,
     return fig
 
 
-def plot_waypoint_heat(df, track: Optional[str] = None, *,
+def plot_waypoint_heat(df, track: str | None = None, *,
                        value: str = "speed", agg: str = "mean",
                        cmap="plasma"):
     """A per-waypoint aggregate painted on the centerline.
@@ -288,7 +286,7 @@ def _crash_positions(d):
     return prev[d["off_track"].to_numpy()].dropna().to_numpy()
 
 
-def plot_offtrack_hotspots(df, track: Optional[str] = None):
+def plot_offtrack_hotspots(df, track: str | None = None):
     """Where cars leave the track — the actionable sim2real view.
 
     Args:

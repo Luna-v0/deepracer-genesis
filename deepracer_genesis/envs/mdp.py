@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .deepracer_env import DeepRacerEnv
 
 
-def map_action(env: "DeepRacerEnv") -> tuple[torch.Tensor, torch.Tensor]:
+def map_action(env: DeepRacerEnv) -> tuple[torch.Tensor, torch.Tensor]:
     """Map the normalized ``[-1, 1]`` action to physical steering and speed.
 
     Reads the per-experiment action caps from ``env.cfg["action"]`` (whose
@@ -40,14 +40,14 @@ def map_action(env: "DeepRacerEnv") -> tuple[torch.Tensor, torch.Tensor]:
     return steer, speed
 
 
-def _reward_verbatim(env: "DeepRacerEnv", r: torch.Tensor) -> None:
+def _reward_verbatim(env: DeepRacerEnv, r: torch.Tensor) -> None:
     """Write ``r`` into ``rew_buf`` as the whole step reward (logged as ``total``)."""
     r = r.reshape(env.rew_buf.shape)
     env.rew_buf.copy_(r)
     env.episode_sums.setdefault("total", torch.zeros_like(env.rew_buf)).add_(r)
 
 
-def compute_reward(env: "DeepRacerEnv") -> None:
+def compute_reward(env: DeepRacerEnv) -> None:
     """Reduce the reward fn's output into the env's reward buffer.
 
     A bare (N,) tensor (or a ``total`` term with no scales) is the reward
@@ -114,7 +114,7 @@ def compute_reward(env: "DeepRacerEnv") -> None:
                 name, torch.zeros_like(env.rew_buf)).add_(value)
 
 
-def check_termination(env: "DeepRacerEnv") -> None:
+def check_termination(env: DeepRacerEnv) -> None:
     """Set the termination (and, under the CMDP framing, cost) buffers for the step.
 
     Evaluates the off-track and flipped predicates and writes the per-env termination buffers.
@@ -185,7 +185,7 @@ def check_termination(env: "DeepRacerEnv") -> None:
             _dump_body_fields(env)
 
 
-def _dump_body_fields(env: "DeepRacerEnv") -> None:
+def _dump_body_fields(env: DeepRacerEnv) -> None:
     """One-shot diagnostic on the first blow-up: report whether PERSISTENT body
     fields (which no reset ever rewrites) have been corrupted in place — the
     signature of the quadrants 1.0.2 allocator/zerocopy memory-safety bugs.

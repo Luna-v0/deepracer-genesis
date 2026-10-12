@@ -25,11 +25,10 @@ import dataclasses
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 
 import torch
 
-from .knobs import REGISTRY, EditorKnob, get
+from .knobs import EditorKnob, get
 from .pipeline import apply_world_color, replay_stages, replay_temporal
 from .rng import seeded
 from .session import EditorSession
@@ -342,8 +341,7 @@ def prove_refusal(knob: EditorKnob, renderer: str) -> Verdict:
 
     from ...experiment import stages as st
     from ...experiment.spec import SpecError
-    from ...experiment.stages import (AsymmetricCameraPolicy,
-                                      CameraEnvironment, PPO)
+    from ...experiment.stages import PPO, AsymmetricCameraPolicy, CameraEnvironment
     stage_map = {
         "mount": lambda: st.DomainRandomizationCamera(camera_jitter=True),
         "env_map": lambda: st.DomainRandomizationTrackAppearance(
@@ -403,11 +401,11 @@ def prove_knob(session: EditorSession, name: str, *,
     if knob.kind == "action":
         return _prove_action(session, knob, seed)
     return [Verdict("skipped", name, False,
-                    f"static scene knob — compare via an A/B build", {})]
+                    "static scene knob — compare via an A/B build", {})]
 
 
 def run_suite(session: EditorSession, names: list[str], *, seed: int = 0,
-              waypoint: int = 5, out_json: Optional[str] = None
+              waypoint: int = 5, out_json: str | None = None
               ) -> list[Verdict]:
     """Prove a list of knobs at one shared pose; optionally persist verdicts.
 

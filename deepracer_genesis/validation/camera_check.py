@@ -5,11 +5,10 @@ import argparse
 import math
 import os
 
+import genesis as gs
 import numpy as np
 import torch
 from PIL import Image
-
-import genesis as gs
 
 
 def main():

@@ -6,8 +6,8 @@ Depends only on (names, holdout, test_fraction, seed), not registration order.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
 
 #: tracks with a physical counterpart — final-eval only, never in train/test
 PRINTED_TRACKS = ("reinvent_base", "Oval_track")
@@ -26,7 +26,7 @@ class TrackDataset:
         test: tracks selected for testing.
     """
 
-    names: Optional[Sequence[str]] = None       # default: every registered track
+    names: Sequence[str] | None = None       # default: every registered track
     holdout: Sequence[str] = PRINTED_TRACKS
     test_fraction: float = 0.2
     seed: int = 0

@@ -18,7 +18,9 @@ import pytest
 import torch
 
 from deepracer_genesis.envs.features import (
-    FEATURE_BLOCKS, RoutedFeatures, SelectFeatures,
+    FEATURE_BLOCKS,
+    RoutedFeatures,
+    SelectFeatures,
 )
 from deepracer_genesis.envs.signals import SignalBus
 from deepracer_genesis.experiment import (

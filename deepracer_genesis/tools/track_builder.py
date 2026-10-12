@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import os
 import urllib.request
-
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -96,7 +95,7 @@ def build_route(points_xy, half_width: float, n_waypoints: int = 150,
 
 
 def route_from_waypoints(waypoints_xy, width: float,
-                         n_waypoints: Optional[int] = None,
+                         n_waypoints: int | None = None,
                          waypoint_spacing: float = 0.3) -> np.ndarray:
     """Build a (W, 6) route from unsmoothed centerline waypoints and a width,
     densifying the polyline so downstream localization features stay valid.
@@ -300,7 +299,7 @@ def _dash_quads(center: np.ndarray, nrm: np.ndarray, dash_len: float,
         s += dash_len + dash_gap
 
 
-def plot_track(route: np.ndarray, *, out_path: Optional[str] = None,
+def plot_track(route: np.ndarray, *, out_path: str | None = None,
                ax=None, room=None, show_centerline: bool = True,
                border_strip: float = 0.04, dash_len: float = 0.30,
                dash_gap: float = 0.35, centerline_width: float = 0.05,
@@ -379,7 +378,7 @@ def plot_track(route: np.ndarray, *, out_path: Optional[str] = None,
 
 
 def plot_wireframe(route: np.ndarray, waypoints=None, *,
-                   out_path: Optional[str] = None, ax=None, room=None,
+                   out_path: str | None = None, ax=None, room=None,
                    dpi: int = 200):
     """Render an inspection wireframe: border/centerline outlines, waypoint
     dots, a start marker, and a driving-direction arrow, with axes in meters.
@@ -503,9 +502,9 @@ def _wall_ring_quads(x0: float, y0: float, x1: float, y1: float,
 
 def build_track_mesh(route: np.ndarray, out_obj: str, *,
                      line_width: float = 0.04, dash_len: float = 0.30,
-                     dash_gap: float = 0.35, palette: "dict | None" = None,
-                     field: "tuple | None" = None,
-                     wall: "tuple | None" = None,
+                     dash_gap: float = 0.35, palette: dict | None = None,
+                     field: tuple | None = None,
+                     wall: tuple | None = None,
                      wall_height: float = 0.3) -> str:
     """Write a road-ribbon OBJ (road, border lines, dashed centerline) plus its
     .mtl and solid-color 4x4 PNG textures next to it.
@@ -591,15 +590,13 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
         if field is not None:
             # ground quad: above the global plane (z=-0.001), below the road
             f.write("usemtl field\n")
-            for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
-                f.write(f"v {px:.5f} {py:.5f} 0.0005\n")
+            f.writelines(f"v {px:.5f} {py:.5f} 0.0005\n" for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
             _quad(f, v, False)
             v += 4
         if wall is not None:
             f.write("usemtl wall\n")
             for quad in _wall_ring_quads(x0, y0, x1, y1, 0.05, wall_height):
-                for px, py, pz in quad:
-                    f.write(f"v {px:.5f} {py:.5f} {pz:.5f}\n")
+                f.writelines(f"v {px:.5f} {py:.5f} {pz:.5f}\n" for px, py, pz in quad)
                 f.write(f"f {v}/1 {v + 1}/1 {v + 2}/1\n")
                 f.write(f"f {v}/1 {v + 2}/1 {v + 3}/1\n")
                 v += 4
@@ -627,8 +624,7 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
             pa = center[a] * (1 - fa) + nxt[a] * fa
             pb = center[b] * (1 - fb) + nxt[b] * fb
             na, nb = normal[a] * (line_width * 1.2), normal[b] * (line_width * 1.2)
-            for p in (pa + na, pa - na, pb - nb, pb + nb):
-                f.write(f"v {p[0]:.5f} {p[1]:.5f} 0.003\n")
+            f.writelines(f"v {p[0]:.5f} {p[1]:.5f} 0.003\n" for p in (pa + na, pa - na, pb - nb, pb + nb))
             _quad(f, v, flip)
             v += 4
             s += dash_len + dash_gap
@@ -637,9 +633,9 @@ def build_track_mesh(route: np.ndarray, out_obj: str, *,
 
 # ------------------------------------------------------------ registration
 def install_track(name: str, route: np.ndarray, *,
-                  palette: "dict | None" = None,
-                  field: "tuple | None" = None,
-                  wall: "tuple | None" = None) -> str:
+                  palette: dict | None = None,
+                  field: tuple | None = None,
+                  wall: tuple | None = None) -> str:
     """Persist a route and generated mesh under the assets tree and register it
     so the track is usable anywhere a track name is accepted.
 

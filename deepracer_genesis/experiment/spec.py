@@ -7,7 +7,7 @@ import hashlib
 import json
 import warnings
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from ..envs.features import FeatureSet
@@ -52,7 +52,7 @@ def _is_neutral(leaf: str, value) -> bool:
     return v == neutral
 
 
-def _active_knobs(spec: "ExperimentSpec") -> list[tuple]:
+def _active_knobs(spec: ExperimentSpec) -> list[tuple]:
     """Resolve every DR knob this spec activates to its catalog entry.
 
     The spec's DR containers are stringly-keyed dicts; this is the single
@@ -175,7 +175,7 @@ class EnvSpec:
     # the FeatureSet subclass the env assembles (envs/features.py): None keeps
     # the default ClassicFeatures (waypoint lookahead); PerceptionFeatures gives
     # the sim2real CNN targets + error channels. feature_params tunes it.
-    feature_set: "type[FeatureSet] | None" = None
+    feature_set: type[FeatureSet] | None = None
     feature_params: dict = field(default_factory=dict)
     # per-signal actor/critic obs routing (Part K.3), feature mode only. None =
     # the single "state" vector (default). When set:
@@ -183,7 +183,7 @@ class EnvSpec:
     # where each sel is a subset of base or ("*",) (= all base blocks). The env
     # then emits distinct "obs_actor"/"obs_critic" vectors instead of "state" —
     # the vector-mode privileged-critic analogue (critic sees a superset).
-    obs_routing: Optional[dict] = None
+    obs_routing: dict | None = None
     tracks: tuple[str, ...] = ("reinvent_base",)
     num_envs: int = 512
     # spawn randomization: every episode starts at a random waypoint with
@@ -197,7 +197,7 @@ class EnvSpec:
     # or -> a bare (N,) reward tensor) + scale overrides. None keeps the
     # built-in `deepracer` default. The fn's NAME is recorded in the run-dir
     # id (not its body); runs always retrain.
-    reward: "RewardFn | None" = None
+    reward: RewardFn | None = None
     reward_scales: dict = field(default_factory=dict)
     # spec-hashed constants the reward fn reads via `env.reward_params` — the
     # searchable/recorded home for what would otherwise be closure constants.
@@ -217,11 +217,11 @@ class EnvSpec:
     # endless default. Excluded from id() when None (hash-stable).
     max_laps: int | None = None
     emits_cost: bool = False
-    cost_fn: Optional[str] = None
-    cost_budget: Optional[float] = None
+    cost_fn: str | None = None
+    cost_budget: float | None = None
 
     @property
-    def effective_renderer(self) -> Optional[str]:
+    def effective_renderer(self) -> str | None:
         """The renderer that will actually back this env's camera, or None.
 
         The single source of truth for renderer resolution, mirrored by
@@ -279,9 +279,9 @@ class EncoderSpec:
     """
 
     kind: Literal["none", "frozen_cnn"] = "none"
-    checkpoint: Optional[str] = None
-    output_dim: Optional[int] = None
-    layer: Optional[str] = None
+    checkpoint: str | None = None
+    output_dim: int | None = None
+    layer: str | None = None
     out_key: str = "encoded"
 
 
@@ -299,18 +299,18 @@ class PolicySpec:
 
     actor_keys: tuple[str, ...]
     critic_keys: tuple[str, ...]
-    cnn: Optional[dict] = None               # None => pure vector policy
+    cnn: dict | None = None               # None => pure vector policy
     mlp: dict = field(default_factory=dict)
     # None => continuous TanhNormal over [steer, speed] in [-1, 1]^2 (default).
     # A tuple of (steer, speed) pairs => DISCRETE Categorical policy over that
     # action list — the original AWS DeepRacer action-space style.
-    actions: Optional[tuple] = None
+    actions: tuple | None = None
     # Overrides merged into the rsl-rl distribution_cfg (e.g. init_std,
     # std_range, learn_std). Needed because the unbounded learned std is
     # bistable on the camera task: entropy_coef=0.01 explodes it (18+),
     # <=0.001 collapses it (0.02) — a std_range ceiling gives entropy a
     # stable operating point. None => backend defaults.
-    distribution: Optional[dict] = None
+    distribution: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -339,7 +339,7 @@ class AlgorithmSpec:
         params: free-form parameters for custom algorithm classes.
     """
 
-    cls: "type | None" = None   # None => built-in rsl-rl PPO
+    cls: type | None = None   # None => built-in rsl-rl PPO
     ppo: dict = field(default_factory=dict)
     lagrangian: dict = field(default_factory=dict)  # budget, pid=(kp,ki,kd), ...
     params: dict = field(default_factory=dict)      # free-form for custom classes
@@ -384,10 +384,10 @@ class EvalConfig:
 
     real_tracks: tuple[str, ...] = ()
     eval_num_envs: int = 64
-    eval_episodes: Optional[int] = None
+    eval_episodes: int | None = None
     charts: bool = True
     gui: bool = False
-    telemetry_envs: Optional[int] = 64
+    telemetry_envs: int | None = 64
     keep_checkpoints: str = "best_last"
     best_metric: str = "mean_progress_m"
 
@@ -426,19 +426,19 @@ class ExperimentSpec:
         variant: bookkeeping tag naming this run within its group.
     """
 
-    env: Optional[EnvSpec] = None
+    env: EnvSpec | None = None
     obs_dr: ObsDRSpec = field(default_factory=ObsDRSpec)
     encoder: EncoderSpec = field(default_factory=EncoderSpec)
-    policy: Optional[PolicySpec] = None
+    policy: PolicySpec | None = None
     action_dr: ActionDRSpec = field(default_factory=ActionDRSpec)
-    algorithm: Optional[AlgorithmSpec] = None
+    algorithm: AlgorithmSpec | None = None
     eval: EvalConfig = field(default_factory=EvalConfig)
     resume: str | None = None         # checkpoint to start from (fine-tuning)
     total_env_steps: int = 5_000_000
     eval_every_steps: int = 0        # 0 = final eval only; N = also every N env-steps
     seed: int = 0
-    group: Optional[str] = None
-    variant: Optional[str] = None
+    group: str | None = None
+    variant: str | None = None
 
     # ------------------------------------------------------------------
     def to_dict(self) -> dict:
@@ -486,7 +486,7 @@ class ExperimentSpec:
             keys.append(self.encoder.out_key)
         return tuple(keys)
 
-    def validate(self) -> "ExperimentSpec":
+    def validate(self) -> ExperimentSpec:
         """Check the spec is structurally and semantically coherent.
 
         Returns:
@@ -806,7 +806,7 @@ class ExperimentSpec:
                 stacklevel=2)
 
     # ------------------------------------------------------------------
-    def _routed_signals(self, role: str) -> "set[str]":
+    def _routed_signals(self, role: str) -> set[str]:
         """Signals an ``obs_actor``/``obs_critic`` vector recovers (Part K.3).
 
         Resolves the routed block selection for ``role`` (``"actor"``/
@@ -824,7 +824,7 @@ class ExperimentSpec:
         chosen = tuple(n for n in base if n in set(sel))   # base order
         return blocks_signal_set(chosen)
 
-    def _signals_for_keys(self, keys: "set[str]") -> "set[str]":
+    def _signals_for_keys(self, keys: set[str]) -> set[str]:
         """Map obs keys to the signal names a consumer can recover (K.5).
 
         A feature vector (``state``) carries every signal; a raw camera or a

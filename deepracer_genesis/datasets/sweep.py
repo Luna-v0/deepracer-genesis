@@ -8,7 +8,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -21,7 +21,7 @@ def collect_camera_dataset(
     yaw_offsets: Sequence[float] = (-0.3, 0.0, 0.3),
     waypoint_stride: int = 1,
     resolution: tuple[int, int] = (160, 120),
-    image_aug: Optional[dict] = None,
+    image_aug: dict | None = None,
     num_envs: int = 64,
     shard_size: int = 512,
     render: str = "madrona",

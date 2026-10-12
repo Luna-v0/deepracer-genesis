@@ -16,4 +16,4 @@ functions), so the offline tier (pipeline replay, sheets, frame banks, emit)
 runs on any machine with torch + PIL.
 """
 
-__all__ = ["knobs", "pipeline", "session", "sheets", "prove", "emit", "frames"]
+__all__ = ["emit", "frames", "knobs", "pipeline", "prove", "session", "sheets"]

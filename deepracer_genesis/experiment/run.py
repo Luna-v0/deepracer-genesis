@@ -66,7 +66,7 @@ def build(target, **overrides) -> ExperimentSpec:
 
 
 def run(target, *, root: str = "runs", build_only: bool = False, on_eval=None,
-        **overrides) -> "EvalRecord | ExperimentSpec":
+        **overrides) -> EvalRecord | ExperimentSpec:
     """Build the spec and train it (always from scratch — no result cache).
 
     Args:

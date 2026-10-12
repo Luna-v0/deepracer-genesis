@@ -21,8 +21,9 @@ preserved.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import torch
 
@@ -42,7 +43,7 @@ class Space(Protocol):
 
     kind: str
 
-    def suggest(self, trial: "optuna.Trial", name: str) -> Any:
+    def suggest(self, trial: optuna.Trial, name: str) -> Any:
         """Draw one python scalar for an HPO trial (frozen for the trial)."""
 
     def sample(self, n: int, device) -> torch.Tensor:
@@ -74,7 +75,7 @@ class FloatRange:
             raise ValueError(
                 f"log=True needs a strictly-positive lower bound; got lo={self.lo}")
 
-    def suggest(self, trial: "optuna.Trial", name: str) -> float:
+    def suggest(self, trial: optuna.Trial, name: str) -> float:
         return trial.suggest_float(name, self.lo, self.hi, log=self.log)
 
     def sample(self, n: int, device) -> torch.Tensor:
@@ -105,7 +106,7 @@ class IntRange:
         if self.hi < self.lo:
             raise ValueError(f"IntRange hi < lo: ({self.lo}, {self.hi})")
 
-    def suggest(self, trial: "optuna.Trial", name: str) -> int:
+    def suggest(self, trial: optuna.Trial, name: str) -> int:
         return trial.suggest_int(name, self.lo, self.hi)
 
     def sample(self, n: int, device) -> torch.Tensor:
@@ -134,7 +135,7 @@ class SymRange:
         if self.m < 0:
             raise ValueError(f"SymRange magnitude must be >= 0; got {self.m}")
 
-    def suggest(self, trial: "optuna.Trial", name: str):
+    def suggest(self, trial: optuna.Trial, name: str):
         raise NotImplementedError(
             "SymRange is DR-native (a symmetric [-m, m] magnitude); it has no "
             "single scalar to freeze into an HPO trial. Search the bound with a "
@@ -166,7 +167,7 @@ class Choice:
         if len(self.values) == 0:
             raise ValueError("Choice needs at least one value")
 
-    def suggest(self, trial: "optuna.Trial", name: str) -> Any:
+    def suggest(self, trial: optuna.Trial, name: str) -> Any:
         return trial.suggest_categorical(name, list(self.values))
 
     def sample(self, n: int, device) -> torch.Tensor:

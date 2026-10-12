@@ -66,7 +66,7 @@ def sample_world_color(n: int, strength: float, device) -> tuple[torch.Tensor, t
 
 def sample_env_map(n: int, tint_range: tuple[float, float] = (0.35, 0.75),
                    mult_range: tuple[float, float] = (0.5, 2.0), *,
-                   device, generator: "torch.Generator | None" = None
+                   device, generator: torch.Generator | None = None
                    ) -> tuple[torch.Tensor, torch.Tensor]:
     """Sample per-env Nyx environment-map (sky) DR: RGB tint + exposure (Part P.1).
 

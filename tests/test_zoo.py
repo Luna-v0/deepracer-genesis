@@ -15,9 +15,16 @@ from deepracer_genesis.envs import track as track_mod
 from deepracer_genesis.envs.track import TRACKS
 from deepracer_genesis.tools import track_builder
 from deepracer_genesis.tools import zoo as zoo_mod
-from deepracer_genesis.tools.zoo import (FIELDS, PALETTES, TrackVariant, Zoo,
-                                         compile_zoo, demo_zoo, lint_variant,
-                                         variant_name)
+from deepracer_genesis.tools.zoo import (
+    FIELDS,
+    PALETTES,
+    TrackVariant,
+    Zoo,
+    compile_zoo,
+    demo_zoo,
+    lint_variant,
+    variant_name,
+)
 
 
 def _ellipse_route(n: int = 64) -> np.ndarray:

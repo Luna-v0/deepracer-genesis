@@ -13,9 +13,8 @@ Run: uv run python experiments/camera_std_sweep.py
 import sys
 
 sys.path.insert(0, ".")   # examples.* lives at the project root
-from examples.camera import CameraMadronaDr  # noqa: E402
-
-from deepracer_genesis.experiment import PPO  # noqa: E402
+from deepracer_genesis.experiment import PPO
+from examples.camera import CameraMadronaDr
 
 
 class _ShortCamera(CameraMadronaDr):
@@ -130,9 +129,9 @@ class SweepNoDr(_ShortCamera):
 
     def pipeline(self):
         from deepracer_genesis.experiment import (
+            PPO,
             AsymmetricCameraPolicy,
             CameraEnvironment,
-            PPO,
         )
         return (
             CameraEnvironment(render="madrona", resolution=(160, 120),

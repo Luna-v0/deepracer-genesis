@@ -19,10 +19,10 @@ import hashlib
 import json
 import os
 import tarfile
-from typing import Optional
 
 from ..experiment.spec import ExperimentSpec
 from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
+
 
 def action_physical(spec: ExperimentSpec) -> dict:
     """Physical meaning of the normalized action channels for one spec.
@@ -277,9 +277,9 @@ def _rebuild_camera_actor(spec: ExperimentSpec, ckpt_payload: dict):
     return actor, model
 
 
-def export_policy(target, *, root: str = "runs", ckpt: Optional[str] = None,
-                  out: Optional[str] = None, opset: int = 11,
-                  bundle_name: Optional[str] = None, **overrides) -> str:
+def export_policy(target, *, root: str = "runs", ckpt: str | None = None,
+                  out: str | None = None, opset: int = 11,
+                  bundle_name: str | None = None, **overrides) -> str:
     """Export ``target``'s trained actor to ONNX + model card + car bundle.
 
     Args:
@@ -517,9 +517,9 @@ def _spec_from_record(payload: dict) -> ExperimentSpec:
     ).validate()
 
 
-def export_from_run_dir(run_dir: str, *, out: Optional[str] = None,
+def export_from_run_dir(run_dir: str, *, out: str | None = None,
                         opset: int = 11,
-                        bundle_name: Optional[str] = None) -> str:
+                        bundle_name: str | None = None) -> str:
     """Export a finished run's actor using only its run directory.
 
     Reads ``eval_record.json`` for the spec and ``model.pt`` for the

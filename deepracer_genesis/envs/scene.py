@@ -29,7 +29,7 @@ def _realtime_factor(env_cfg: dict) -> float | None:
     return None if rf is None or rf <= 0 else float(rf)
 
 
-def build_scene(env: "DeepRacerEnv", env_cfg: dict, show_viewer: bool) -> None:
+def build_scene(env: DeepRacerEnv, env_cfg: dict, show_viewer: bool) -> None:
     """Create the scene, add the plane/car/track morph(s), and build it.
 
     Populates ``env.renderer``, ``env.scene``, ``env.plane``, ``env.car``, and ``env.track_entity``.

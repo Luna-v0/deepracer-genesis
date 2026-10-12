@@ -17,7 +17,6 @@ from deepracer_genesis.experiment.evaluator import (
     evaluate_on_tracks,
 )
 from deepracer_genesis.experiment.visualize import _rsl_actor
-
 from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
 NUM_ENVS = 8

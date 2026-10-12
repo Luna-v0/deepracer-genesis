@@ -55,6 +55,7 @@ def test_select_features_subset_widths():
 
 def test_select_features_rejects_unknown_and_empty():
     import pytest
+
     from deepracer_genesis.envs.features import SelectFeatures
     with pytest.raises(ValueError, match="unknown feature block"):
         feature_dim(SelectFeatures, params={"features": ("v_forward", "bogus")})

@@ -12,7 +12,7 @@ import pytest
 
 from deepracer_genesis.configs.cfgs import get_env_cfg
 from deepracer_genesis.randomization.catalog import BY_NAME, CATALOG
-from deepracer_genesis.randomization.spaces import FloatRange, IntRange, SymRange
+from deepracer_genesis.randomization.spaces import IntRange, SymRange
 from deepracer_genesis.tools.dr_editor.knobs import (
     REGISTRY,
     SCENE_KNOBS,

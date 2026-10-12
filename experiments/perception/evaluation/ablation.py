@@ -12,7 +12,6 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from deepracer_genesis.experiment import run
-
 from experiments.perception.train_policy_with_noise import NoisyPerceptionPolicy
 
 RUNS = (

@@ -8,7 +8,7 @@ import torch
 
 from deepracer_genesis.envs.features import PerceptionFeatures
 from deepracer_genesis.envs.renderers import _FLEET_CAR_THRESHOLD
-from deepracer_genesis.experiment import CameraEnvironment, PPO, VectorPolicy
+from deepracer_genesis.experiment import PPO, CameraEnvironment, VectorPolicy
 from deepracer_genesis.experiment.builder import Builder
 
 RES = (160, 120)            # (W, H) — DeepRacer-native camera

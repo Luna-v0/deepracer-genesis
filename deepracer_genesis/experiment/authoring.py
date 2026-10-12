@@ -48,7 +48,7 @@ class Experiment:
         return sorted(attrs)
 
     # ------------------------------------------------------------------
-    def pipeline(self) -> "Stage | Pipeline":
+    def pipeline(self) -> Stage | Pipeline:
         """Return the `>>` stage chain (NOT built); spec() finalizes it with
         the standard attributes afterwards.
 
@@ -78,7 +78,7 @@ class Experiment:
             variant=self.variant or type(self).__name__,
         )
 
-    def run(self, *, root: str = "runs") -> "EvalRecord":
+    def run(self, *, root: str = "runs") -> EvalRecord:
         """Train this experiment (always from scratch — no result cache).
 
         Args:

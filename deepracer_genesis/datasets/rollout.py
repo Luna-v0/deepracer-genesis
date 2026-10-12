@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional
 
 import numpy as np
 import torch
@@ -15,7 +14,7 @@ def collect_rollout_dataset(
     *,
     out: str = "datasets/rollouts",
     steps: int = 2048,
-    num_envs: Optional[int] = None,
+    num_envs: int | None = None,
     agent=None,
     shard_steps: int = 256,
     seed: int = 0,

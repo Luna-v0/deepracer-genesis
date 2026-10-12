@@ -8,14 +8,24 @@ import pytest
 import torch
 
 from deepracer_genesis.perception import augment
-from deepracer_genesis.perception.dataset import (DATASET_TRACKS, HOLDOUT_TRACKS,
-                                                  TRAINING_TRACKS, track_names)
-from deepracer_genesis.perception.features import (CHANNEL_NAMES, SIGMA,
-                                                   CNNPerceptionFeatures,
-                                                   NoisyPerceptionFeatures)
-from deepracer_genesis.perception.model import (DEFAULT_ARCH, PerceptionCNN,
-                                                load_checkpoint,
-                                                save_checkpoint)
+from deepracer_genesis.perception.dataset import (
+    DATASET_TRACKS,
+    HOLDOUT_TRACKS,
+    TRAINING_TRACKS,
+    track_names,
+)
+from deepracer_genesis.perception.features import (
+    CHANNEL_NAMES,
+    SIGMA,
+    CNNPerceptionFeatures,
+    NoisyPerceptionFeatures,
+)
+from deepracer_genesis.perception.model import (
+    DEFAULT_ARCH,
+    PerceptionCNN,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 
 class _FakeEnv:
@@ -46,8 +56,7 @@ def test_the_holdout_split_is_disjoint_and_complete():
 
 def test_the_policy_and_the_cnn_hold_out_the_same_tracks():
     """The whole pipeline is measured on tracks neither half ever trained on."""
-    from experiments.perception.train_policy_with_noise import (TEST_TRACKS,
-                                                                TRAIN_TRACKS)
+    from experiments.perception.train_policy_with_noise import TEST_TRACKS, TRAIN_TRACKS
 
     assert set(TEST_TRACKS) == set(track_names(HOLDOUT_TRACKS))
     assert set(TRAIN_TRACKS) & set(TEST_TRACKS) == set()

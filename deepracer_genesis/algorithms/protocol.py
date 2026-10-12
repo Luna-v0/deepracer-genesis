@@ -49,25 +49,25 @@ class RslAlgorithm(Protocol):
     learning_rate: float
 
     @staticmethod
-    def construct_algorithm(obs: "TensorDict", env: Any, cfg: dict,
-                            device: str) -> "RslAlgorithm":
+    def construct_algorithm(obs: TensorDict, env: Any, cfg: dict,
+                            device: str) -> RslAlgorithm:
         """Build the algorithm from the first obs, the env, the resolved cfg, and device."""
         ...
 
-    def act(self, obs: "TensorDict") -> "torch.Tensor":
+    def act(self, obs: TensorDict) -> torch.Tensor:
         """Return the actions to step the env with for this transition."""
         ...
 
-    def process_env_step(self, obs: "TensorDict", rewards: "torch.Tensor",
-                         dones: "torch.Tensor", extras: dict) -> None:
+    def process_env_step(self, obs: TensorDict, rewards: torch.Tensor,
+                         dones: torch.Tensor, extras: dict) -> None:
         """Record the post-step transition (rewards, dones, bootstrapping)."""
         ...
 
-    def compute_returns(self, obs: "TensorDict") -> None:
+    def compute_returns(self, obs: TensorDict) -> None:
         """Finalize returns/advantages over the collected rollout."""
         ...
 
-    def update(self) -> "dict[str, float]":
+    def update(self) -> dict[str, float]:
         """Run the learning update; return a name -> scalar loss dict for logging."""
         ...
 
@@ -80,7 +80,7 @@ class RslAlgorithm(Protocol):
         ...
 
     def save(self) -> dict: ...
-    def load(self, loaded_dict: dict, load_cfg: "dict | None", strict: bool) -> bool: ...
+    def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool: ...
 
 
 #: The methods ``OnPolicyRunner`` calls on the algorithm. Used for a build-time

@@ -14,8 +14,8 @@ import json
 import math
 import subprocess
 import sys
-from pathlib import Path
 import warnings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
@@ -31,10 +31,11 @@ MODULE = "perception.evaluation.sweep_tracks"
 
 def evaluate(ckpt, track):
     from deepracer_genesis.experiment import run
-    from deepracer_genesis.experiment.evaluator import (build_single_track_sim,
-                                                        evaluate_on_tracks)
+    from deepracer_genesis.experiment.evaluator import (
+        build_single_track_sim,
+        evaluate_on_tracks,
+    )
     from deepracer_genesis.experiment.visualize import _rsl_actor
-
     from deepracer_genesis.perception.features import CNNPerceptionFeatures
     from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 

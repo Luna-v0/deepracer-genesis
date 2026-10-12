@@ -6,7 +6,6 @@ import torch
 
 from deepracer_genesis.experiment.evaluator import aggregate_episodes
 
-
 L = 10.0   # track length used throughout
 
 

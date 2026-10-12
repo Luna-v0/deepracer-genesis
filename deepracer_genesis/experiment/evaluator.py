@@ -6,8 +6,9 @@ import dataclasses
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -34,8 +35,8 @@ class EvalRecord:
     spec_id: str
     spec: dict                      # one-way dump of the ExperimentSpec
     seed: int
-    group: Optional[str]
-    variant: Optional[str]
+    group: str | None
+    variant: str | None
     metrics: dict = field(default_factory=dict)
     train: dict = field(default_factory=dict)   # steps_per_s, wall_clock_s, ...
     eval_history: list = field(default_factory=list)  # periodic evals: [{frames, **metrics}]
@@ -60,7 +61,7 @@ class EvalRecord:
         return path
 
     @staticmethod
-    def load(path: str) -> "EvalRecord":
+    def load(path: str) -> EvalRecord:
         """Load a record previously written by save().
 
         Args:
@@ -77,11 +78,11 @@ class EvalRecord:
         return EvalRecord(**payload)
 
 
-def evaluate_policy(sim: "DeepRacerEnv", actor, steps: Optional[int] = None,
+def evaluate_policy(sim: DeepRacerEnv, actor, steps: int | None = None,
                     obs_transform: Callable | None = None,
-                    cost_budget: Optional[float] = None,
-                    telemetry: Optional[str] = None,
-                    telemetry_envs: Optional[int] = None) -> dict:
+                    cost_budget: float | None = None,
+                    telemetry: str | None = None,
+                    telemetry_envs: int | None = None) -> dict:
     """Run a deterministic eval rollout on the raw sim, reading exact
     terminal stats from sim.step_info (no collector/autoreset).
 
@@ -163,8 +164,8 @@ def aggregate_episodes(
     offtrack: torch.Tensor,          # (T, N) bool: offtrack termination event
     control_dt: float,
     track_length,                    # scalar or (N,): meters per lap (per env)
-    cost: Optional[torch.Tensor] = None,    # (T, N) per-step cost
-    cost_budget: Optional[float] = None,
+    cost: torch.Tensor | None = None,    # (T, N) per-step cost
+    cost_budget: float | None = None,
 ) -> dict:
     """Fold per-step streams into scalar metrics, counting only completed
     episodes and deriving laps from cumulative progress / track_length.

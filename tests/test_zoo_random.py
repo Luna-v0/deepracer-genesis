@@ -9,9 +9,14 @@ import numpy as np
 import pytest
 
 from deepracer_genesis.tools.track_builder import track_metrics
-from deepracer_genesis.tools.zoo import (FIELDS, PALETTES, TrackVariant,
-                                         _random_palette, _random_route,
-                                         lint_variant, near_spacing)
+from deepracer_genesis.tools.zoo import (
+    FIELDS,
+    PALETTES,
+    TrackVariant,
+    _random_palette,
+    _random_route,
+    lint_variant,
+)
 
 
 def test_random_route_is_deterministic_and_drivable():
@@ -66,7 +71,7 @@ def test_random_zoo_names_are_seed_stable():
 
 def test_near_spacing_uses_extent_plus_camera_far(monkeypatch):
     """near_spacing = footprint + 26 m (20 m camera far plane + margin)."""
-    import deepracer_genesis.tools.zoo as zoo
+    from deepracer_genesis.tools import zoo
 
     monkeypatch.setattr(zoo, "zoo_extent", lambda names: 7.5)
     assert zoo.near_spacing(("x",)) == pytest.approx(33.5)
@@ -166,8 +171,7 @@ def test_camouflaged_field_is_rejected():
 
 def test_random_look_never_emits_camouflage():
     """Every seeded look draw passes the full lint (incl. ground contrast)."""
-    from deepracer_genesis.tools.zoo import (TrackVariant, _random_look,
-                                             lint_variant)
+    from deepracer_genesis.tools.zoo import TrackVariant, _random_look, lint_variant
 
     for seed in range(25):
         pal, field, wall = _random_look(np.random.default_rng(seed))

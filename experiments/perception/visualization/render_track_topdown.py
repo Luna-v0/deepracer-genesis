@@ -9,11 +9,11 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+import genesis as gs
 import numpy as np
 import torch
 from PIL import Image
 
-import genesis as gs
 from deepracer_genesis.configs.cfgs import get_env_cfg
 from deepracer_genesis.envs.base_env import DeepRacerEnv
 

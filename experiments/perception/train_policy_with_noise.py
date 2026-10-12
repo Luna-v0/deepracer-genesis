@@ -17,8 +17,11 @@ from deepracer_genesis.experiment import (
     VectorPolicy,
     run,
 )
-
-from deepracer_genesis.perception.dataset import HOLDOUT_TRACKS, TRAINING_TRACKS, track_names
+from deepracer_genesis.perception.dataset import (
+    HOLDOUT_TRACKS,
+    TRAINING_TRACKS,
+    track_names,
+)
 from deepracer_genesis.perception.features import NoisyPerceptionFeatures
 
 # every track the dataset covers, minus the shared holdout. Ten training tracks

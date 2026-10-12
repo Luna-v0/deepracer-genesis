@@ -33,7 +33,6 @@ MODULE = "perception.evaluation.compare_perception"
 
 def _feature_set(source):
     from deepracer_genesis.envs.features import PerceptionFeatures
-
     from deepracer_genesis.perception.features import CNNPerceptionFeatures
     return PerceptionFeatures if source == "sim" else CNNPerceptionFeatures
 
@@ -42,10 +41,11 @@ def _feature_set(source):
 def evaluate_one(ckpt, track, source, cnn=None):
     """One track, one perception source, one scene. Prints RESULT <json>."""
     from deepracer_genesis.experiment import run
-    from deepracer_genesis.experiment.evaluator import (build_single_track_sim,
-                                                        evaluate_on_tracks)
+    from deepracer_genesis.experiment.evaluator import (
+        build_single_track_sim,
+        evaluate_on_tracks,
+    )
     from deepracer_genesis.experiment.visualize import _rsl_actor
-
     from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
     spec = run(CNNPerceptionPolicy, build_only=True,
@@ -59,7 +59,6 @@ def evaluate_one(ckpt, track, source, cnn=None):
 
 def record_one(ckpt, track, source, cnn=None):
     from deepracer_genesis.experiment.visualize import rollout_video
-
     from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
     rollout_video(CNNPerceptionPolicy, root="runs", ckpt=ckpt, track=track,

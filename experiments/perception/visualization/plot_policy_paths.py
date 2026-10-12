@@ -7,8 +7,8 @@ the two sources diverge, and marks every point a car left the track.
 """
 
 import sys
-from pathlib import Path
 import warnings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
@@ -24,9 +24,7 @@ from deepracer_genesis.envs.track import ASSETS_DIR, TRACKS
 from deepracer_genesis.experiment import run
 from deepracer_genesis.experiment.evaluator import build_single_track_sim
 from deepracer_genesis.experiment.visualize import _rsl_actor
-
 from deepracer_genesis.perception.features import CNNPerceptionFeatures
-
 from experiments.perception.train_policy_with_cnn import CNNPerceptionPolicy
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

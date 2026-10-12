@@ -12,10 +12,15 @@ import pytest
 import torch
 
 from deepracer_genesis.analysis.telemetry import TelemetryRecorder, telemetry_env_ids
-from deepracer_genesis.experiment import (PPO, EvalConfig, Evaluation,
-                                          FeatureEnvironment, VectorPolicy, run)
-from deepracer_genesis.experiment.rsl_backend import (_improves,
-                                                      _sweep_iter_checkpoints)
+from deepracer_genesis.experiment import (
+    PPO,
+    EvalConfig,
+    Evaluation,
+    FeatureEnvironment,
+    VectorPolicy,
+    run,
+)
+from deepracer_genesis.experiment.rsl_backend import _improves, _sweep_iter_checkpoints
 
 # ---------------------------------------------------------------------------
 # pure helpers

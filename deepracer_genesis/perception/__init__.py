@@ -19,11 +19,11 @@ from deepracer_genesis.perception.model import (
 
 __all__ = [
     "CHANNEL_NAMES",
+    "DEFAULT_ARCH",
     "SIGMA",
     "CNNPerceptionFeatures",
     "NoisyPerceptionFeatures",
     "PerceptionCNN",
-    "DEFAULT_ARCH",
-    "save_checkpoint",
     "load_checkpoint",
+    "save_checkpoint",
 ]

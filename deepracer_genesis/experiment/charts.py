@@ -12,7 +12,7 @@ dict dump) and writes PNGs:
 from __future__ import annotations
 
 import os
-from typing import Sequence
+from collections.abc import Sequence
 
 #: metrics charted by default (present-in-data ones are used)
 DEFAULT_METRICS = ("completion_rate", "lap_time_s", "offtrack_rate", "mean_speed_mps")

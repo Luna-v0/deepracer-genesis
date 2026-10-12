@@ -12,10 +12,13 @@ import sys
 import pytest
 import torch
 
-from deepracer_genesis.deploy.perception_onnx import (ACTOR_INPUT, ACTOR_OUTPUT,
-                                                      PERCEPTION_INPUT,
-                                                      PERCEPTION_OUTPUT,
-                                                      export_perception_cnn)
+from deepracer_genesis.deploy.perception_onnx import (
+    ACTOR_INPUT,
+    ACTOR_OUTPUT,
+    PERCEPTION_INPUT,
+    PERCEPTION_OUTPUT,
+    export_perception_cnn,
+)
 from deepracer_genesis.perception.model import CHANNEL_NAMES, PerceptionCNN
 
 pytest.importorskip("onnxruntime", reason="needs the [export] extra")

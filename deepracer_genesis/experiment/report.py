@@ -13,7 +13,6 @@ from collections import defaultdict
 
 from .evaluator import EvalRecord
 
-
 TABLE_METRICS = ("completion_rate", "lap_time_s", "mean_progress_m",
                  "offtrack_rate", "mean_return", "mean_cost",
                  "cost_violation_rate")

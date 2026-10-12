@@ -12,7 +12,6 @@ import sys
 import warnings
 
 import numpy as np
-import pytest
 import torch
 
 from deepracer_genesis.experiment import (
@@ -199,7 +198,6 @@ def test_prove_refusal_is_genesis_free():
             if name == "genesis" or name.startswith("genesis."):
                 raise ImportError("genesis import attempted in a GPU-free "
                                   "prove_refusal check")
-            return None
 
     blocker = _BlockGenesis()
     sys.meta_path.insert(0, blocker)

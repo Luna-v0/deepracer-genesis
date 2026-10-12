@@ -25,7 +25,6 @@ def measure(num_envs: int, iters: int, warmup: int) -> tuple[float, float]:
         Aggregate steps/s and peak VRAM in GB.
     """
     import torch
-
     from rsl_rl.runners import OnPolicyRunner
     cfg = get_env_cfg(vision=False, track="reinvent_base", randomize=True, backend="gpu")
     env = DeepRacerEnv(num_envs=num_envs, env_cfg=cfg)

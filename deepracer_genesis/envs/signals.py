@@ -28,8 +28,9 @@ consume this bus.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
@@ -54,7 +55,7 @@ class Signal:
     """
 
     name: str
-    compute: Callable[["DeepRacerEnv"], torch.Tensor]
+    compute: Callable[[DeepRacerEnv], torch.Tensor]
     pixel_observable: bool
     cost: Literal["cheap", "heavy"] = "cheap"
     frame: Literal["raw", "driving"] = "driving"
@@ -71,8 +72,8 @@ class SignalBus:
         registry: The name -> Signal table this bus resolves against.
     """
 
-    def __init__(self, env: "DeepRacerEnv",
-                 registry: "dict[str, Signal] | None" = None) -> None:
+    def __init__(self, env: DeepRacerEnv,
+                 registry: dict[str, Signal] | None = None) -> None:
         self._env = env
         self.registry: dict[str, Signal] = registry if registry is not None else SIGNALS
         self._cache: dict[str, torch.Tensor] = {}
@@ -116,16 +117,16 @@ class SignalBus:
 # Signal definitions — thin, driving-frame-correct reads of the env state the
 # env already computed in _post_physics (single source; no recomputation).
 
-def _off_track(env: "DeepRacerEnv") -> torch.Tensor:
+def _off_track(env: DeepRacerEnv) -> torch.Tensor:
     margin = env.cfg["termination"].get("wheel_margin", 0.0)
     return rules.is_off_track(env.lateral, env.half_width, margin).float()
 
 
-def _d_actions(env: "DeepRacerEnv") -> torch.Tensor:
+def _d_actions(env: DeepRacerEnv) -> torch.Tensor:
     return ((env.actions - env.last_actions) ** 2).sum(dim=1)
 
 
-def _curvature_ahead(env: "DeepRacerEnv") -> torch.Tensor:
+def _curvature_ahead(env: DeepRacerEnv) -> torch.Tensor:
     # heavy: lookahead geometry. Prefer a value the env already cached this
     # step; otherwise compute a single-step-ahead curvature at the car's wp.
     cached = getattr(env, "curvature_ahead", None)
@@ -170,9 +171,9 @@ SIGNALS: dict[str, Signal] = {
 # ---------------------------------------------------------------------------
 # K.5 build-time learnability check (pure; fed by K.2/K.3 once they land).
 
-def check_learnability(reward_reads: "set[str]", cost_reads: "set[str]",
-                       actor_signals: "set[str]", critic_signals: "set[str]",
-                       registry: "dict[str, Signal] | None" = None) -> list[str]:
+def check_learnability(reward_reads: set[str], cost_reads: set[str],
+                       actor_signals: set[str], critic_signals: set[str],
+                       registry: dict[str, Signal] | None = None) -> list[str]:
     """Statically flag reward/cost terms that cannot be learned.
 
     A reward/cost is learnable only if its inputs are recoverable from what the

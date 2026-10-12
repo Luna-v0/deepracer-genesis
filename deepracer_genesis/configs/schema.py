@@ -4,7 +4,7 @@ so each gets only its slice, not one blob that does everything.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Optional, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 if TYPE_CHECKING:
     from ..envs.rewards import RewardFn
@@ -27,7 +27,7 @@ class ActionConfig(TypedDict):
     max_steering_deg: float
     min_speed: float
     max_speed: float
-    action_table: Optional[list]   # discrete (steer, speed) pairs, or None
+    action_table: list | None   # discrete (steer, speed) pairs, or None
 
 
 class CarConfig(TypedDict):
@@ -57,7 +57,7 @@ class TerminationConfig(TypedDict):
     wheel_margin: float
     crash_penalty: float
     overspeed_limit: float
-    max_laps: Optional[int]   # truncate the episode after N laps (None = endless)
+    max_laps: int | None   # truncate the episode after N laps (None = endless)
 
 
 class ObsConfig(TypedDict):
@@ -67,9 +67,9 @@ class ObsConfig(TypedDict):
     lookahead_spacing_m: float   # meters between arclength lookahead samples (P1)
     lookahead_scale: float
     obs_noise: float
-    feature_set: Optional[type]   # a FeatureSet subclass, or None -> ClassicFeatures
+    feature_set: type | None   # a FeatureSet subclass, or None -> ClassicFeatures
     feature_params: dict
-    obs_routing: Optional[dict]   # Part K.3 actor/critic routing (None = single "state")
+    obs_routing: dict | None   # Part K.3 actor/critic routing (None = single "state")
 
 
 class VisionConfig(TypedDict):
@@ -79,7 +79,7 @@ class VisionConfig(TypedDict):
     camera_res: tuple
     camera_fov: float
     camera_pitch_deg: float
-    policy_res: Optional[tuple]
+    policy_res: tuple | None
     frame_stack: int
     topdown_camera: bool
     spectator: bool
@@ -100,12 +100,12 @@ class VisionConfig(TypedDict):
 class RewardConfig(TypedDict):
     """Reward callable + term scales and the (optional) cost stream."""
 
-    reward: "Optional[RewardFn]"   # None -> the built-in `deepracer` default
+    reward: RewardFn | None   # None -> the built-in `deepracer` default
     reward_scales: dict
     reward_scale_overrides: dict
     reward_params: dict            # constants exposed as env.reward_params
     emit_cost: bool
-    cost_fn: Optional[str]
+    cost_fn: str | None
 
 
 class RandConfig(TypedDict):

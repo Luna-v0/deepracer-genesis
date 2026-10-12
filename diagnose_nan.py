@@ -13,7 +13,6 @@ Scenarios:
 Run: uv run python diagnose_nan.py
 """
 
-import math
 
 import torch
 

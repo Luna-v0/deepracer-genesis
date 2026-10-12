@@ -10,7 +10,7 @@ and tiled.
 from __future__ import annotations
 
 import os
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import torch
 from PIL import Image, ImageDraw, ImageFont
@@ -70,7 +70,7 @@ def _labeled(img: Image.Image, label: str) -> Image.Image:
 
 
 def sheet(tiles: Sequence[tuple[str, object]], out_path: str, *,
-          cols: Optional[int] = None, scale: int = 3,
+          cols: int | None = None, scale: int = 3,
           title: str = "") -> str:
     """Tile labeled frames into one PNG (filmstrip = one row; grid = cols).
 

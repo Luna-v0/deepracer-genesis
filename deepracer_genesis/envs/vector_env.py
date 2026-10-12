@@ -11,4 +11,3 @@ class VectorDeepRacerEnv(DeepRacerEnv):
     A thin no-vision specialization of :class:`~.base_env.DeepRacerEnv`.
     """
 
-    pass

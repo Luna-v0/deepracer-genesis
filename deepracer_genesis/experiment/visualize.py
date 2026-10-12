@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
-from typing import Optional
 
 import torch
 
-from .overrides import override
 from ..agents import CenterlineFollower
+from .overrides import override
 from .run import build
 from .spec import ActionDRSpec, ExperimentSpec, ObsDRSpec
 
@@ -39,9 +38,9 @@ def _rsl_actor(spec, ckpt_path: str, sim):
     return _RslActor(runner.get_inference_policy(device=str(sim.device)))
 
 
-def rollout_video(target, *, root: str = "runs", ckpt: Optional[str] = None,
-                  track: Optional[str] = None, steps: int = 500,
-                  num_envs: Optional[int] = None, out: Optional[str] = None,
+def rollout_video(target, *, root: str = "runs", ckpt: str | None = None,
+                  track: str | None = None, steps: int = 500,
+                  num_envs: int | None = None, out: str | None = None,
                   spectator_res: tuple = (1280, 960),
                   **overrides) -> str:
     """Record a deterministic rollout of a trained experiment under nominal conditions.
@@ -159,8 +158,8 @@ def dr_preview_video(target="cam_baseline", *, steps: int = 300,
     import imageio.v2 as imageio
     import numpy as np
 
-    from .builder import Builder
     from ..randomization.image_aug import apply_image_aug
+    from .builder import Builder
 
     spec = build(target, **overrides)
     if spec.env.modality != "camera" or not spec.obs_dr.image_aug:
@@ -191,8 +190,8 @@ def dr_preview_video(target="cam_baseline", *, steps: int = 300,
     return onboard_path
 
 
-def view_zoo(target, *, root: str = "runs", num_envs: Optional[int] = None,
-             steps: int = 40, upscale: int = 1, save: Optional[str] = None,
+def view_zoo(target, *, root: str = "runs", num_envs: int | None = None,
+             steps: int = 40, upscale: int = 1, save: str | None = None,
              **overrides) -> list:
     """Capture each car's onboard camera view across the experiment's tracks.
 

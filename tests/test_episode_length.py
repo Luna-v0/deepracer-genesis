@@ -2,7 +2,7 @@
 
 from deepracer_genesis.experiment.builder import Builder
 from deepracer_genesis.experiment.spec import AlgorithmSpec, ExperimentSpec, PolicySpec
-from deepracer_genesis.experiment.stages import FeatureEnvironment, VectorPolicy
+from deepracer_genesis.experiment.stages import FeatureEnvironment
 
 
 def _spec(**env_kw):

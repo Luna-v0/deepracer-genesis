@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-from typing import Optional
 
 import torch
 
@@ -71,7 +70,7 @@ class EditorSession:
             needs no dynamics).
     """
 
-    def __init__(self, env_cfg: dict, num_envs: int, *, dr: Optional[dict] = None,
+    def __init__(self, env_cfg: dict, num_envs: int, *, dr: dict | None = None,
                  spec=None) -> None:
         """Build the inspection scene from a ready env cfg.
 
@@ -105,9 +104,9 @@ class EditorSession:
     @classmethod
     def from_defaults(cls, *, track: str = "reinvent_base",
                       renderer: str = "batch", num_envs: int = 12,
-                      res: tuple = (160, 120), dr: Optional[dict] = None,
-                      cfg_updates: Optional[dict] = None,
-                      spectator: bool = True) -> "EditorSession":
+                      res: tuple = (160, 120), dr: dict | None = None,
+                      cfg_updates: dict | None = None,
+                      spectator: bool = True) -> EditorSession:
         """Build a bare inspection scene (no experiment needed).
 
         Args:
@@ -141,8 +140,8 @@ class EditorSession:
 
     @classmethod
     def from_target(cls, target: str, *, num_envs: int = 12,
-                    cfg_updates: Optional[dict] = None,
-                    spectator: bool = True) -> "EditorSession":
+                    cfg_updates: dict | None = None,
+                    spectator: bool = True) -> EditorSession:
         """Build the inspection scene for an experiment's own config.
 
         The experiment's DR is carried as the session's replay params while
@@ -235,8 +234,8 @@ class EditorSession:
         """
         return self.env.image_buf.clone()
 
-    def stages(self, *, dr: Optional[dict] = None, seed: int = 0,
-               frame_stack: Optional[int] = None) -> dict[str, torch.Tensor]:
+    def stages(self, *, dr: dict | None = None, seed: int = 0,
+               frame_stack: int | None = None) -> dict[str, torch.Tensor]:
         """Replay every pipeline stage on the current instant's raw frames.
 
         Args:

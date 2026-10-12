@@ -11,7 +11,6 @@ from deepracer_genesis.experiment import (
     FeatureEnvironment,
     VectorPolicy,
 )
-from deepracer_genesis.experiment.spec import SpecError
 
 
 def test_get_env_cfg_carries_backend_and_view():
@@ -74,8 +73,12 @@ def test_builder_routes_camera_cpu_to_rasterizer():
 
 def test_make_renderer_selects_rasterizer_on_cpu_flag():
     import genesis as gs
+
     from deepracer_genesis.envs.renderers import (
-        MadronaRenderer, NullRenderer, NyxRenderer, RasterizerObsRenderer,
+        MadronaRenderer,
+        NullRenderer,
+        NyxRenderer,
+        RasterizerObsRenderer,
         make_renderer,
     )
     base = {"vision": True}

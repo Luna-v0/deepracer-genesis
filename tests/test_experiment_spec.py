@@ -303,10 +303,13 @@ def test_random_direction_routes_to_env_spec_and_changes_id():
 
 
 def test_appearance_dr_routes_and_validates():
-    from deepracer_genesis.experiment import (AsymmetricCameraPolicy,
-                                              CameraEnvironment,
-                                              DomainRandomizationTrackAppearance,
-                                              FeatureEnvironment, VectorPolicy)
+    from deepracer_genesis.experiment import (
+        AsymmetricCameraPolicy,
+        CameraEnvironment,
+        DomainRandomizationTrackAppearance,
+        FeatureEnvironment,
+        VectorPolicy,
+    )
 
     spec = (CameraEnvironment(num_envs=8)
             >> DomainRandomizationTrackAppearance(strength=0.4)
@@ -332,11 +335,16 @@ def test_appearance_dr_routes_and_validates():
 
 
 def test_rsl_backend_maps_spec_and_gates_dispatch():
-    from deepracer_genesis.experiment import (AsymmetricCameraPolicy,
-                                              CameraEnvironment, PPO,
-                                              VectorPolicy)
-    from deepracer_genesis.experiment.rsl_backend import (rsl_supported,
-                                                          spec_to_train_cfg)
+    from deepracer_genesis.experiment import (
+        PPO,
+        AsymmetricCameraPolicy,
+        CameraEnvironment,
+        VectorPolicy,
+    )
+    from deepracer_genesis.experiment.rsl_backend import (
+        rsl_supported,
+        spec_to_train_cfg,
+    )
 
     # feature + symmetric + continuous PPO => migrated (rsl-rl) scope
     spec = (FeatureEnvironment(num_envs=8) >> VectorPolicy()
@@ -358,8 +366,10 @@ def test_rsl_backend_maps_spec_and_gates_dispatch():
     assert cam_cfg["obs_groups"] == {"actor": ["camera"], "critic": ["camera", "state"]}
 
     # action-DR is migrated (applied env-side, not a TorchRL transform)
-    from deepracer_genesis.experiment import (DomainRandomizationActions,
-                                              SafeRLFeatureEnvironment)
+    from deepracer_genesis.experiment import (
+        DomainRandomizationActions,
+        SafeRLFeatureEnvironment,
+    )
     act_dr = (FeatureEnvironment(num_envs=8) >> VectorPolicy()
               >> DomainRandomizationActions(steer_noise=0.1, delay_steps=2)).build()
     assert rsl_supported(act_dr)
@@ -398,8 +408,10 @@ def test_track_width_scale_in_catalog_as_geometry_layer():
 
 def test_discrete_action_space_routes_and_validates():
     from deepracer_genesis.experiment import FeatureEnvironment, VectorPolicy
-    from deepracer_genesis.experiment.stages import (DomainRandomizationActions,
-                                                     discrete_grid)
+    from deepracer_genesis.experiment.stages import (
+        DomainRandomizationActions,
+        discrete_grid,
+    )
 
     grid_acts = discrete_grid(steer_bins=3, speed_bins=2)
     spec = (FeatureEnvironment(num_envs=8)

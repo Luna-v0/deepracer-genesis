@@ -3,8 +3,8 @@
     uv run python -m experiments.perception.visualization.plot_track_catalog
 """
 
-from pathlib import Path
 import math
+from pathlib import Path
 
 import matplotlib
 import numpy as np
@@ -13,9 +13,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from deepracer_genesis.envs.track import ASSETS_DIR, TRACKS
-from deepracer_genesis.tools.track_builder import plot_track, track_metrics
-
 from deepracer_genesis.perception.dataset import DATASET_TRACKS, HOLDOUT_TRACKS
+from deepracer_genesis.tools.track_builder import plot_track, track_metrics
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 

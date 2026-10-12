@@ -21,7 +21,7 @@ import os
 
 import optuna
 
-from deepracer_genesis.experiment import FeatureEnvironment, PPO, VectorPolicy, run
+from deepracer_genesis.experiment import PPO, FeatureEnvironment, VectorPolicy, run
 from deepracer_genesis.randomization.spaces import FloatRange, IntRange
 
 STEPS = int(os.environ.get("HPO_STEPS", 5_000_000))

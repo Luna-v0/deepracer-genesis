@@ -14,7 +14,10 @@ production ``SIGNALS`` registry. These tests pin the two K.2 guarantees:
 import torch
 
 from deepracer_genesis.envs.features import (
-    ClassicFeatures, FEATURE_BLOCKS, PerceptionFeatures, SelectFeatures,
+    FEATURE_BLOCKS,
+    ClassicFeatures,
+    PerceptionFeatures,
+    SelectFeatures,
 )
 from deepracer_genesis.envs.signals import SIGNALS, SignalBus
 

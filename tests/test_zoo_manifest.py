@@ -9,9 +9,14 @@ import textwrap
 
 import pytest
 
-from deepracer_genesis.tools.zoo import (OfficialSample, TrackVariant, Zoo,
-                                         compile_zoo, default_zoo,
-                                         load_manifest)
+from deepracer_genesis.tools.zoo import (
+    OfficialSample,
+    TrackVariant,
+    Zoo,
+    compile_zoo,
+    default_zoo,
+    load_manifest,
+)
 
 
 def _write(tmp_path, body: str):

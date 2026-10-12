@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Optional
 
 from .knobs import EditorKnob
 
@@ -155,10 +154,12 @@ def load_preset(name: str, *, root: str = ".") -> list:
     Raises:
         FileNotFoundError: If no such preset exists.
     """
-    from ...experiment.stages import (DomainRandomizationActions,
-                                      DomainRandomizationCamera,
-                                      DomainRandomizationPhysics,
-                                      DomainRandomizationTrackAppearance)
+    from ...experiment.stages import (
+        DomainRandomizationActions,
+        DomainRandomizationCamera,
+        DomainRandomizationPhysics,
+        DomainRandomizationTrackAppearance,
+    )
 
     path = name if name.endswith(".json") else os.path.join(
         root, PRESET_DIR, f"{name}.json")

@@ -18,10 +18,10 @@ ONCE per run (``base_env._init_buffers``); Nyx env maps baked at
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal, Optional
+from dataclasses import dataclass
+from typing import Literal
 
-from ...randomization.catalog import BY_NAME, CATALOG, Knob
+from ...randomization.catalog import CATALOG, Knob
 from ...randomization.spaces import FloatRange, IntRange, Space
 
 Schedule = Literal["per_step", "per_episode", "per_run", "build"]
@@ -64,11 +64,11 @@ class EditorKnob:
     liveness: Liveness
     kind: Kind
     cfg_path: str
-    space: Optional[Space]
+    space: Space | None
     modalities: frozenset = frozenset({"camera", "feature"})
     renderers: frozenset = _ALL_RENDERERS
     note: str = ""
-    source: Optional[Knob] = None
+    source: Knob | None = None
 
 
 def _wrap(k: Knob) -> EditorKnob:
@@ -117,7 +117,7 @@ def _wrap(k: Knob) -> EditorKnob:
                      f"(layer={k.layer!r})")
 
 
-def _static(name: str, cfg_path: str, space: Optional[Space] = None, *,
+def _static(name: str, cfg_path: str, space: Space | None = None, *,
             renderers: frozenset = _ALL_RENDERERS, note: str = "") -> EditorKnob:
     """Build one static (never-randomized) scene knob entry.
 

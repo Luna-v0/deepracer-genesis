@@ -40,8 +40,8 @@ MODES = {
 
 
 def run_single(n_envs, mode, steps, warmup, repeats):
-    import torch
     import genesis as gs
+    import torch
 
     gs.init(backend=gs.cuda, logging_level="warning", performance_mode=True)
 
@@ -98,7 +98,6 @@ def run_single(n_envs, mode, steps, warmup, repeats):
 
 
 def sweep(args):
-    import torch
 
     configs = []
     feature_envs = [int(x) for x in args.feature_envs.split(",")]
@@ -175,7 +174,7 @@ def write_results(rows):
         "# DeepRacer-Genesis throughput results",
         "",
         f"Hardware: {gpu}, {platform.platform()}",
-        f"Versions: " + ", ".join(f"{k} {v}" for k, v in versions.items()),
+        "Versions: " + ", ".join(f"{k} {v}" for k, v in versions.items()),
         "Method: median of N timed runs after warmup (JIT + first render excluded); "
         "aggregate steps/s = env steps summed across parallel agents per wall-clock second.",
         "",

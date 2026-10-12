@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
-from typing import Optional
 
 import numpy as np
 import torch
@@ -28,7 +27,7 @@ COLUMNS = ("step", "env", "episode", "track", "x", "y", "yaw", "steer",
            "lateral", "half_width", "off_track", "done", "track_len", "dt")
 
 
-def telemetry_env_ids(num_envs: int, k: Optional[int]) -> tuple[int, ...]:
+def telemetry_env_ids(num_envs: int, k: int | None) -> tuple[int, ...]:
     """Evenly spaced env ids to record, so every track block stays sampled.
 
     Args:
@@ -69,7 +68,7 @@ class TelemetryRecorder:
         rows: Number of steps captured so far.
     """
 
-    def __init__(self, env, envs: Optional[Sequence[int]] = None) -> None:
+    def __init__(self, env, envs: Sequence[int] | None = None) -> None:
         """Bind to a live env and cache its per-env static facts.
 
         Args:

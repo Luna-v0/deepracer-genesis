@@ -23,8 +23,13 @@ same population byte for byte, and the compiled names plumb straight into
 training via ``CameraEnvironment(tracks=...)``.
 """
 
-from deepracer_genesis.tools.zoo import (OfficialSample, RandomShapes,
-                                         TrackVariant, Zoo, watch)
+from deepracer_genesis.tools.zoo import (
+    OfficialSample,
+    RandomShapes,
+    TrackVariant,
+    Zoo,
+    watch,
+)
 
 #: the recommended DR population: real circuits, geometrically noised,
 #: visually randomized — plus a few synthetic wildcards

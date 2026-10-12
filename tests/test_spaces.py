@@ -7,7 +7,6 @@ SymRange.suggest raise).
 """
 
 import pytest
-import torch
 
 from deepracer_genesis.randomization.spaces import (
     Choice,

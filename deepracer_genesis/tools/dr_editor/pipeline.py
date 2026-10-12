@@ -13,7 +13,7 @@ order), and the whole image tier runs with no Genesis at all.
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
@@ -29,7 +29,7 @@ STAGES: tuple[str, ...] = ("raw", "world_color", "pixel_noise", "policy_res",
 
 
 def apply_world_color(img: torch.Tensor, strength: float, *,
-                      color: Optional[tuple] = None) -> torch.Tensor:
+                      color: tuple | None = None) -> torch.Tensor:
     """Apply the per-env world-colour remap exactly as the renderer does.
 
     Mirrors ``_CameraRenderer.render``: the GEMM runs channels-last at the
@@ -58,9 +58,9 @@ def apply_world_color(img: torch.Tensor, strength: float, *,
 
 
 def replay_stages(raw: torch.Tensor, dr: dict, *,
-                  policy_res: Optional[tuple] = None, frame_stack: int = 1,
-                  seed: Optional[int] = None,
-                  color: Optional[tuple] = None) -> dict[str, torch.Tensor]:
+                  policy_res: tuple | None = None, frame_stack: int = 1,
+                  seed: int | None = None,
+                  color: tuple | None = None) -> dict[str, torch.Tensor]:
     """Replay every pipeline stage on a raw batch; return all intermediates.
 
     For a single-instant grab the latency stage is an identity by definition
@@ -112,7 +112,7 @@ def replay_stages(raw: torch.Tensor, dr: dict, *,
 
 
 def replay_temporal(frames: Sequence[torch.Tensor], dr: dict, *,
-                    seed: Optional[int] = None) -> list[torch.Tensor]:
+                    seed: int | None = None) -> list[torch.Tensor]:
     """Run the stateful latency/frame-drop stage over a frame sequence.
 
     Args:

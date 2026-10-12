@@ -29,6 +29,13 @@ EXAMPLES = (
 )
 
 __all__ = [
-    "FeatureCpu", "FeatureGpuDr", "CameraCpu", "CameraMadronaDr", "CameraNyx",
-    "WatchLive", "WatchLiveFeature", "WatchLiveCamera", "EXAMPLES",
+    "EXAMPLES",
+    "CameraCpu",
+    "CameraMadronaDr",
+    "CameraNyx",
+    "FeatureCpu",
+    "FeatureGpuDr",
+    "WatchLive",
+    "WatchLiveCamera",
+    "WatchLiveFeature",
 ]

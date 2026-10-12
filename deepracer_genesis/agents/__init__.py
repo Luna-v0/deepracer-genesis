@@ -2,4 +2,4 @@
 
 from .scripted import CenterlineFollower, NoisyExpert, PrivilegedAgent
 
-__all__ = ["PrivilegedAgent", "CenterlineFollower", "NoisyExpert"]
+__all__ = ["CenterlineFollower", "NoisyExpert", "PrivilegedAgent"]
