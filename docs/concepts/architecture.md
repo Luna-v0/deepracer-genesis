@@ -28,14 +28,21 @@ rsl-rl PPO ──▶ DeepRacerEnv (Genesis, N cars in parallel) ─▶ scene.ste
   one car in a ROS process; here N cars are tensors and the ROS control +
   domain logic are reimplemented in torch.
 
-A single control step (`deepracer_env.py:374-431`):
+A single control step (`deepracer_env.py:374-431`), one every `control_dt_s`
+seconds (20 ms by default; `EnvSpec.control_dt_s` sets `decimation =
+control_dt_s / 0.01`, ADR 0005):
 
 1. Map normalized action `[steer, throttle] ∈ [-1,1]` to physical commands.
-2. Push commands to the Genesis DOF controllers.
+   The issued command stays in `env.actions`.
+2. Push commands to the Genesis DOF controllers. With actuation timing DR the
+   command instead joins a per-env queue, and each physics substep drives the
+   car with whatever has landed by then (`env.applied_actions`), so a command
+   acts `ceil(latency / 0.01 s)` substeps after its decision.
 3. Step physics `decimation` times.
 4. `_post_physics` — refresh kinematics + localize on the track, refresh the
-   camera (render → image DR → latency → frame stack), then build the state
-   vector, so camera-reading features see this step's frame.
+   camera (render → image DR → latency → frame stack, every `frame_stride`-th
+   frame), then build the state vector, so camera-reading features see this
+   step's frame.
 5. `_compute_reward` → `_check_termination` → respawn done envs.
 
 ### 1.1 The pre-reset snapshot (`step_info`)
@@ -267,7 +274,7 @@ The default `deepracer` reward (`rewards.py:58-70`) returns:
 | `centered`    | `exp(-(lateral/half_width)²)·dt`        | 0.5 |
 | `heading`     | `-|heading_err|·dt`                     | 0.5 |
 | `steering`    | `-|steer|·dt`                           | 0.3 |
-| `action_rate` | `-Δaction²·dt`                          | 0.05 |
+| `action_rate` | `-Δaction²·dt` (× `(0.02/dt)²` when `control_dt_s` is set) | 0.05 |
 | `off_track`   | `-(wheel off road)·dt`                  | 2.0 |
 
 Every term is a batched `(N,)` tensor summed with its scale

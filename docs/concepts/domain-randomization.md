@@ -32,12 +32,16 @@ Knob("friction", FloatRange(0.6, 1.4), "physics", "rand.friction_range",
 | `geometry` | the rulebook width at reset (`base_env.reset_idx`); feature mode only | per episode | track_width_scale |
 | `visual` | in the renderer (`randomization/visual.py`) | world_color per episode; mount jitter once per run; env_map baked at build | world_color (YIQ remap), camera_pitch_jitter, camera_pos_jitter, pixel_noise, env_map_tint, env_map_multiplier |
 | `actuation` | env-side in the sim step (`base_env._apply_action_dr`) | per step | steer_noise, speed_noise, delay_steps |
+| `actuation` (timing) | a per-env command queue drained inside the substep loop (`randomization/actuation_timing.py`, ADR 0005) | latency_ms per episode; jitter and drops per decision | latency_ms, latency_jitter_ms, decision_drop |
 | `image` | env-side on the camera obs (`vision_env._observe_camera` → `apply_image_aug` in `randomization/image_aug.py`) | per step, per sub-env | brightness, contrast, saturation, hue, blur, cutout, noise, gamma, white_balance, vignette, distortion, crop, shot_noise |
 | `image` (temporal) | env-side, stateful (`FrameLatency` in `randomization/latency.py`) | advanced once per step | latency_steps, frame_drop |
 
 `CATALOG` (`catalog.py:69`) is the full list; `by_layer(layer)` filters it and
 `BY_NAME` indexes it. DR, HPO, and the build-time learnability check all read this
-one table.
+one table. Each knob also carries a thesis `group` —`observation` (what the
+policy sees: visual + image layers), `dynamics` (how the car responds: physics
++ actuation) or `task` (what it is asked to do: geometry) — as data only;
+`by_group("dynamics")` lists the knobs of one ablation.
 
 ## Search-space types (shared with HPO)
 
@@ -75,6 +79,22 @@ declaration *sites* stay separate.
   tint/multiplier (baked at build → per-env-fixed for the run).
 - **Actuation** (`base_env._apply_action_dr`, env-side in the sim step): k-step
   command latency then per-channel Gaussian noise on `[steer, speed]`.
+- **Actuation timing** (ADR 0005; `randomization/actuation_timing.py`): the
+  command the policy issues joins a per-env queue and lands at the physics
+  substep where `max(previous landing, issue + latency)` elapses, so commands
+  never reorder and the latency is exact to the 10 ms physics step.
+  `latency_ms` is a `(lo, hi)` range drawn once per episode (placeholder
+  30–90 ms until the Evo is measured), `latency_jitter_ms` adds a uniform `±`
+  draw per decision, and `decision_drop` drops a decision with probability
+  `p`, so the previous command holds one more period. The env keeps the
+  *issued* command in `env.actions` (the features and the `steering` /
+  `action_rate` penalties read it, as on the car) and the delayed one in
+  `env.applied_actions` (physics and telemetry). The draws come from the
+  env's own generator (`cfg["sim"]["seed"]`, set from `spec.seed`), so turning
+  the knobs on leaves every spawn and image-aug draw unchanged; nothing is
+  drawn while they are off. They cannot be combined with the legacy
+  `delay_steps` (which feeds the features the delayed command) or with a
+  discrete policy — `validate()` refuses both.
 - **Image** (env-side on the camera obs, `vision_env._observe_camera`):
   `apply_image_aug` (`randomization/image_aug.py`) resamples the 13 stateless
   per-frame effects — brightness/contrast/saturation/hue/blur/cutout/noise plus
@@ -96,7 +116,7 @@ enforces the matrix (`_validate_knob_compat`): an activated knob either acts or
 | Knob(s) | Modalities | Renderers |
 |---------|------------|-----------|
 | friction, mass_shift, com_shift, steer_kp_scale, wheel_kv_scale, armature | feature + camera | all |
-| steer_noise, speed_noise, delay_steps | feature + camera | all |
+| steer_noise, speed_noise, delay_steps, latency_ms, latency_jitter_ms, decision_drop | feature + camera | all |
 | track_width_scale | feature only | — (feature envs render nothing) |
 | world_color, pixel_noise, all 15 image knobs | camera only | all |
 | camera_pitch_jitter, camera_pos_jitter | camera only | madrona, rasterizer |
@@ -148,3 +168,17 @@ CameraEnvironment(render="madrona", num_envs=128)
 
 Each stage accepts either a raw range/scalar or a `Space` (a suggested default
 range lives in the catalog).
+
+A car-faithful timing setup (ADR 0005) fixes the decision period and frame
+spacing on the env stage and randomizes the actuator latency around it; the
+PPO horizon is then given in seconds so it does not move with the rate:
+
+```python
+CameraEnvironment(render="madrona", num_envs=128, frame_stack=4,
+                  control_dt_s=0.07,        # the Evo's ~15 fps decision period
+                  frame_interval_s=0.07)    # one stacked frame per decision
+    >> AsymmetricCameraPolicy()
+    >> DomainRandomizationActions(latency_ms=(30, 90), latency_jitter_ms=10,
+                                  decision_drop=0.05)
+    >> PPO(horizon_s=2.0)                   # gamma = exp(-0.07 / 2.0) = 0.9656
+```

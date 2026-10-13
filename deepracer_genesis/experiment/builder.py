@@ -5,9 +5,15 @@ The only layer that imports the heavy sim dependency.
 
 from __future__ import annotations
 
-from ..configs.cfgs import get_env_cfg
+from ..configs.cfgs import DEFAULT_CONTROL_DT_S, get_env_cfg
 from ..envs import DeepRacerEnv
-from .spec import NEUTRAL_PHYSICS, ExperimentSpec
+from .spec import (
+    NEUTRAL_PHYSICS,
+    ExperimentSpec,
+    control_decimation,
+    control_period_s,
+    frame_stride,
+)
 
 
 def _ensure_genesis(backend: str = "gpu"):
@@ -62,6 +68,19 @@ class Builder:
             cfg["sim"]["episode_length_s"] = env.episode_length_s
         if env.max_laps is not None:
             cfg["termination"]["max_laps"] = env.max_laps
+        # Control timing (ADR 0005): the decision period is dt * decimation,
+        # so the spec's period becomes an integer decimation; the frame
+        # interval becomes an integer stride over control steps. Rewards
+        # keyed per second are already dt-scaled; action_rate is not, so the
+        # env rescales it to the 50 Hz reference when a period is set.
+        if env.control_dt_s is not None:
+            cfg["sim"]["decimation"] = control_decimation(env.control_dt_s,
+                                                          cfg["sim"]["dt"])
+            cfg["reward"]["action_rate_dt_ref"] = DEFAULT_CONTROL_DT_S
+        if env.frame_interval_s is not None:
+            cfg["vision"]["frame_stride"] = frame_stride(env.frame_interval_s,
+                                                         control_period_s(env))
+        cfg["sim"]["seed"] = self.spec.seed      # env-owned generators (timing DR)
         # Renderer resolution has ONE source of truth (EnvSpec.effective_renderer;
         # Part M.2 rule folded in: cpu wins over nyx). "madrona" keeps the cfg
         # default vision_renderer='batch'.
@@ -92,10 +111,18 @@ class Builder:
         # path (eval, preview, datasets, plain Builder.sim()).
         extra_dr: dict = {}
         ad = self.spec.action_dr
-        if ad.delay_steps or ad.steer_noise or ad.speed_noise:
+        if ad.delay_steps or ad.steer_noise or ad.speed_noise or ad.timing_active:
             extra_dr["action_dr"] = {"steer_noise": ad.steer_noise,
                                      "speed_noise": ad.speed_noise,
                                      "delay_steps": ad.delay_steps}
+            if ad.timing_active:
+                # the timing keys ride along only when set, so the legacy
+                # action_dr dict (and anything comparing it) is unchanged
+                extra_dr["action_dr"].update({
+                    "latency_ms": (tuple(ad.latency_ms)
+                                   if ad.latency_ms is not None else None),
+                    "latency_jitter_ms": ad.latency_jitter_ms,
+                    "decision_drop": ad.decision_drop})
         if obs_dr.image_aug:
             extra_dr["image_aug"] = dict(obs_dr.image_aug)
         return {**cfg, **extra_dr}

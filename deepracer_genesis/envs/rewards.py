@@ -96,13 +96,20 @@ def deepracer(env: DeepRacerEnv) -> dict[str, torch.Tensor]:
         penalty ``mdp.check_termination`` adds on the default (non-cost) path.
     """
     on_track = env.lateral.abs() < (env.half_width - env.cfg["termination"]["wheel_margin"])
+    action_rate = -((env.actions - env.last_actions) ** 2).sum(dim=1) * env.dt
+    ref_dt = env.cfg.get("reward", {}).get("action_rate_dt_ref")
+    if ref_dt:
+        # Not period-invariant on its own: for a smooth command |Δa|² grows
+        # with the decision period squared, so the per-second penalty is
+        # referenced to the 50 Hz period when control_dt_s is set (ADR 0005).
+        action_rate = action_rate * (ref_dt / env.dt) ** 2
     return {
         "progress": env.d_progress,
         "speed": env.v_forward.clamp(0.0, env.cfg["action"]["max_speed"]) * env.dt,
         "centered": torch.exp(-((env.lateral / env.half_width.clamp(min=0.1)) ** 2)) * env.dt,
         "heading": -env.heading_err.abs() * env.dt,
         "steering": -env.actions[:, 0].abs() * env.dt,
-        "action_rate": -((env.actions - env.last_actions) ** 2).sum(dim=1) * env.dt,
+        "action_rate": action_rate,
         # negative like heading/steering: signs live in the TERM, scales stay
         # positive. (This was +1*dt until 2026-08: a positive scale *rewarded*
         # edge-riding at 4x the centered bonus — pinned by test_rewards.)

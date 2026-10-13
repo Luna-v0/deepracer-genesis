@@ -84,3 +84,31 @@ This matches the training-time action map (see [Rewards & actions](../concepts/r
 the physical bounds come from `physics/limits.py`. The card also records the spec,
 `spec_id`, checkpoint path, opset, SHA256, and whether the graph was verified
 against torch.
+
+## Timing contract in the model card
+
+The camera entry of `observations` states the timing the policy trained at
+(ADR 0005); the car node must reproduce it exactly:
+
+```json
+"FRONT_FACING_CAMERA": {
+  "frame_stack": 4,
+  "stack_order": "oldest_first (newest frame = last 3 channels)",
+  "stack_priming": "repeat_first_frame (never zeros)",
+  "control_dt_s": 0.07,
+  "frame_interval_s": 0.07,
+  "frame_stride": 1,
+  "stack_source": "policy_decisions",
+  "stack_source_note": "the stack holds the frames observed at policy decisions ..."
+}
+```
+
+- `control_dt_s` — seconds between policy decisions in training (the node
+  runs the model once per `control_dt_s`).
+- `frame_interval_s` — seconds between the stacked frames; `frame_stride =
+  frame_interval_s / control_dt_s` decisions apart.
+- `stack_source = "policy_decisions"` — the stack is fed by the frames the
+  policy observed at its decisions (every `frame_stride`-th one), not by
+  every camera frame; a skipped decision leaves a gap, never a duplicate.
+
+The `STATE` entry of a feature policy carries `control_dt_s` too.

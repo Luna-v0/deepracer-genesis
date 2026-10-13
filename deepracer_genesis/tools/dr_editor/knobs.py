@@ -92,7 +92,10 @@ def _wrap(k: Knob) -> EditorKnob:
         return EditorKnob(schedule="per_step", liveness="offline",
                           kind=kind, **common)
     if k.layer == "actuation":
-        return EditorKnob(schedule="per_step", liveness="reroll",
+        # latency_ms is drawn once per episode (ActuationTiming.reset); the
+        # noise, jitter and drop knobs act on every decision
+        schedule = "per_episode" if k.name == "latency_ms" else "per_step"
+        return EditorKnob(schedule=schedule, liveness="reroll",
                           kind="action", **common)
     if k.layer == "physics":
         return EditorKnob(schedule="per_run", liveness="rebuild",

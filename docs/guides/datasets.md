@@ -26,7 +26,10 @@ compress)` (`datasets/rollout.py`):
   `(env, t)`.
 - A `meta.json` records `feature_set`, `state_layout`, `cnn_target_slice` (the
   channels a CNN must predict — see [Feature vectors](../concepts/features.md)),
-  resolution, `control_dt`, and the DR configs used.
+  resolution, `control_dt` (the seconds between rows), `frame_stride` /
+  `frame_interval_s` (the env's own stack spacing while collecting), and the
+  DR configs used. `RolloutDataset(stride=s)` stacks rows `s` control steps
+  apart, so its `frame_interval_s` is `s × control_dt` (ADR 0005).
 
 ```python
 from deepracer_genesis.datasets.rollout import collect_rollout_dataset

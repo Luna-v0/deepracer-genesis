@@ -113,6 +113,38 @@ def _fingerprint(tracks: Sequence[str]) -> list[list]:
                   for t in tracks for f in _parquet_files(t))
 
 
+def _row_interval(tracks: Sequence[str]) -> float | None:
+    """Return the control period the tracks' rows were collected at.
+
+    Args:
+        tracks: Dataset track names.
+
+    Returns:
+        The shared ``meta.json`` ``control_dt``, or None when no meta records
+        one (datasets predating the field).
+
+    Raises:
+        ValueError: If the tracks were collected at different control periods
+            (their stacks would not share one frame interval).
+    """
+    found: dict[str, float] = {}
+    for track in tracks:
+        meta = DATA_ROOT / track / "meta.json"
+        if not meta.exists():
+            continue
+        dt = json.loads(meta.read_text()).get("control_dt")
+        if dt is not None:
+            found[track] = float(dt)
+    if not found:
+        return None
+    periods = sorted(set(found.values()))
+    if len(periods) > 1:
+        raise ValueError(
+            f"tracks were collected at different control periods {periods}; "
+            "a stack cannot carry one frame_interval_s — split the dataset")
+    return periods[0]
+
+
 def _cache_dir(tracks: Sequence[str]) -> Path:
     """One cache directory per track SET, keyed by content.
 
@@ -233,20 +265,26 @@ def build_raw_cache(tracks: Sequence[str], hw: tuple[int, int]) -> Path:
 
 
 class RolloutDataset(Dataset):
-    """Stacks of k consecutive frames from one car, and the target of the last.
+    """Stacks of k frames ``stride`` rows apart from one car, and the last's target.
 
     Camera jitter is off by default so validation reads frames as rendered.
 
     Attributes:
         k: Frames per stack.
+        stride: Rows (control steps) between stacked frames; 1 = consecutive.
         index: Row indices at which a valid stack starts.
         targets: Supervision targets for every cached row.
         resolution: ``(h, w)`` frames are served at, or None for as-collected.
+        row_interval_s: Seconds between rows (the collection ``control_dt``),
+            or None when no track's ``meta.json`` records it.
+        frame_interval_s: Seconds between stacked frames
+            (``stride * row_interval_s``), or None when unknown.
     """
 
     def __init__(self, tracks: Sequence[str] = DATASET_TRACKS, k: int = K,
                  jitter: bool = False, seed: int = 0,
-                 resolution: tuple[int, int] | None = None) -> None:
+                 resolution: tuple[int, int] | None = None,
+                 stride: int = 1) -> None:
         """Build the cache if needed and index every valid stack start.
 
         Args:
@@ -257,11 +295,21 @@ class RolloutDataset(Dataset):
             resolution: ``(h, w)`` to serve frames at, from a raw uint8 cache
                 materialized once (no per-batch PNG decode); None serves the
                 collected frames as-is via PNG decode.
+            stride: Rows between stacked frames, so a stack spans
+                ``(k - 1) * stride`` control steps (ADR 0005: must equal the
+                env's ``frame_interval_s / control_dt_s`` at deployment).
 
         Raises:
-            ValueError: If a requested track is absent from the cache, or
-                ``resolution`` exceeds the collected frame size.
+            ValueError: If a requested track is absent from the cache,
+                ``resolution`` exceeds the collected frame size, ``stride``
+                is < 1, or the tracks were collected at different rates.
         """
+        if int(stride) < 1:
+            raise ValueError(f"stride must be >= 1; got {stride}")
+        self.stride = int(stride)
+        self.row_interval_s = _row_interval(tracks)
+        self.frame_interval_s = (None if self.row_interval_s is None
+                                 else self.stride * self.row_interval_s)
         self.resolution = tuple(resolution) if resolution is not None else None
         if self.resolution is not None:
             self._dir = build_raw_cache(tracks, self.resolution)
@@ -284,12 +332,15 @@ class RolloutDataset(Dataset):
         keep = np.isin(d["track_id"], [all_tracks.index(t) for t in tracks])
         env, ep, tid, step = d["env"], d["episode"], d["track_id"], d["step"]
         curvature = valid_curvatures(self.targets)
-        # a stack is usable only if all k rows come from the same car, episode
-        # and track, are consecutive in time, and end on a believable target
-        i = np.flatnonzero(keep)[: -(k - 1) or None]
-        j = i + k - 1
+        # a stack is usable only if its k rows come from the same car, episode
+        # and track, sit exactly `stride` steps apart, and end on a believable
+        # target (rows are sorted (env, t) and episodes are monotone, so the
+        # end rows agreeing means every row between does too)
+        span = (k - 1) * self.stride
+        i = np.flatnonzero(keep)[: -span or None]
+        j = i + span
         ok = ((env[i] == env[j]) & (ep[i] == ep[j]) & (tid[i] == tid[j])
-              & (step[j] - step[i] == k - 1)
+              & (step[j] - step[i] == span)
               & keep[j] & curvature[j])
         self.index = i[ok]
 
@@ -318,8 +369,9 @@ class RolloutDataset(Dataset):
                 worker = info.id if info is not None else 0
                 self._rng = np.random.default_rng([self.seed, worker])
             camera = camera_jitter.sample_camera(self._rng)   # one state per stack
-        frames = torch.cat([self._frame(i + o, camera) for o in range(self.k)], dim=0)
-        target = torch.from_numpy(self.targets[i + self.k - 1].copy())
+        frames = torch.cat([self._frame(i + o * self.stride, camera)
+                            for o in range(self.k)], dim=0)
+        target = torch.from_numpy(self.targets[i + (self.k - 1) * self.stride].copy())
         return frames, target
 
     def _frame(self, row: int, camera: tuple | None = None) -> torch.Tensor:

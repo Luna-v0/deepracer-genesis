@@ -154,6 +154,8 @@ class FeatureEnvironment(Stage):
             30 s default (long tracks need more to be completable).
         max_laps: Truncate the episode after N completed laps (bootstrapped,
             no penalty), or None for endless episodes.
+        control_dt_s: Policy decision period in seconds (a whole multiple of
+            the 0.01 s physics step), or None for the 0.02 s / 50 Hz default.
         KIND: Stage category tag (environment).
     """
 
@@ -172,6 +174,7 @@ class FeatureEnvironment(Stage):
     max_speed: float | None = None     # action-cap speed in m/s
     episode_length_s: float | None = None   # None -> the 30 s config default
     max_laps: int | None = None        # truncate after N laps (None = endless)
+    control_dt_s: float | None = None  # decision period (None -> 0.02 s)
 
     KIND = "environment"
 
@@ -188,6 +191,7 @@ class FeatureEnvironment(Stage):
             max_speed=self.max_speed,
             episode_length_s=self.episode_length_s,
             max_laps=self.max_laps,
+            control_dt_s=self.control_dt_s,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -214,6 +218,10 @@ class CameraEnvironment(Stage):
             30 s default (long tracks need more to be completable).
         max_laps: Truncate the episode after N completed laps (bootstrapped,
             no penalty), or None for endless episodes.
+        control_dt_s: Policy decision period in seconds (a whole multiple of
+            the 0.01 s physics step), or None for the 0.02 s / 50 Hz default.
+        frame_interval_s: Spacing of the stacked frames in seconds (a whole
+            multiple of the control period), or None for one control period.
         KIND: Stage category tag (environment).
     """
 
@@ -235,6 +243,8 @@ class CameraEnvironment(Stage):
     max_speed: float | None = None     # action-cap speed in m/s
     episode_length_s: float | None = None   # None -> the 30 s config default
     max_laps: int | None = None        # truncate after N laps (None = endless)
+    control_dt_s: float | None = None  # decision period (None -> 0.02 s)
+    frame_interval_s: float | None = None   # stack spacing (None -> control period)
 
     KIND = "environment"
 
@@ -252,6 +262,8 @@ class CameraEnvironment(Stage):
             max_speed=self.max_speed,
             episode_length_s=self.episode_length_s,
             max_laps=self.max_laps,
+            control_dt_s=self.control_dt_s,
+            frame_interval_s=self.frame_interval_s,
             backend=self.backend, view=self.view,
             realtime_factor=self.realtime_factor,
         ))
@@ -621,20 +633,35 @@ class DomainRandomizationActions(Stage):
     Attributes:
         steer_noise: Standard deviation of steering noise.
         speed_noise: Standard deviation of speed noise.
-        delay_steps: Number of steps to delay applied actions.
+        delay_steps: Number of steps to delay applied actions (legacy; the
+            features read the delayed command — prefer ``latency_ms``).
+        latency_ms: Per-episode command latency range ``(lo, hi)`` in ms, or
+            None (ADR 0005; catalog placeholder 30–90 until the Evo is
+            measured). Resolved to whole 10 ms physics substeps.
+        latency_jitter_ms: Uniform ``±`` jitter on each decision's latency.
+        decision_drop: Per-decision probability the command is dropped (the
+            previous one holds one more period).
         KIND: Stage category tag (action_dr).
     """
 
     steer_noise: float = 0.0
     speed_noise: float = 0.0
     delay_steps: int = 0
+    latency_ms: tuple[float, float] | None = None
+    latency_jitter_ms: float = 0.0
+    decision_drop: float = 0.0
 
     KIND = "action_dr"
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
+        latency = (tuple(float(v) for v in self.latency_ms)
+                   if self.latency_ms is not None else None)
         return replace(spec, action_dr=ActionDRSpec(
             steer_noise=self.steer_noise, speed_noise=self.speed_noise,
             delay_steps=self.delay_steps,
+            latency_ms=latency,
+            latency_jitter_ms=float(self.latency_jitter_ms),
+            decision_drop=float(self.decision_drop),
         ))
 
 
@@ -656,6 +683,12 @@ class PPO(Stage):
         horizon: Rollout steps per env per iteration.
         schedule: "adaptive" retunes lr from the measured KL, "fixed" keeps it.
         desired_kl: KL target the adaptive schedule steers toward.
+        horizon_s: Discount time horizon in SECONDS, or None to use ``gamma``
+            per step. When set, ``gamma = exp(-control_dt / horizon_s)`` at the
+            env's control period (2.0 s gives 0.99005 at 50 Hz), so HPO can
+            search the horizon independently of the decision rate (ADR 0005).
+        lam_horizon_s: GAE lambda time horizon in seconds, or None to use
+            ``gae_lambda`` per step; same mapping as ``horizon_s``.
         KIND: Stage category tag (algorithm).
     """
 
@@ -670,11 +703,13 @@ class PPO(Stage):
     horizon: int = 24
     schedule: str = "adaptive"
     desired_kl: float = 0.01
+    horizon_s: float | None = None
+    lam_horizon_s: float | None = None
 
     KIND = "algorithm"
 
     def _ppo_dict(self):
-        return {
+        ppo = {
             "clip": self.clip, "epochs": self.epochs,
             "minibatches": self.minibatches, "gamma": self.gamma,
             "gae_lambda": self.gae_lambda, "lr": self.lr,
@@ -682,6 +717,12 @@ class PPO(Stage):
             "max_grad_norm": self.max_grad_norm, "horizon": self.horizon,
             "schedule": self.schedule, "desired_kl": self.desired_kl,
         }
+        # time horizons enter the dict only when set (hash-stable when unset)
+        if self.horizon_s is not None:
+            ppo["horizon_s"] = self.horizon_s
+        if self.lam_horizon_s is not None:
+            ppo["lam_horizon_s"] = self.lam_horizon_s
+        return ppo
 
     def apply(self, spec: ExperimentSpec) -> ExperimentSpec:
         return replace(spec, algorithm=AlgorithmSpec(cls=None, ppo=self._ppo_dict()))

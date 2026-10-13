@@ -80,6 +80,9 @@ def test_schedules_match_verified_application_sites():
             # scale; catalog-layer physics is applied once, before stepping
             expected = ("per_episode" if knob.source.layer == "geometry"
                         else "per_run")
+        elif knob.name == "latency_ms":
+            # the base latency is drawn once per episode (ActuationTiming.reset)
+            expected = "per_episode"
         else:
             expected = EXPECTED_SCHEDULE[knob.kind]
         assert knob.schedule == expected, knob.name

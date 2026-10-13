@@ -33,6 +33,21 @@ def _frame_stack_of(env: DeepRacerEnv) -> int:
     return int(env.cfg["vision"].get("frame_stack", 1) or 1)
 
 
+def _frame_interval_of(env: DeepRacerEnv) -> float | None:
+    """Return the seconds between the env's stacked frames (ADR 0005).
+
+    Args:
+        env: The env being built.
+
+    Returns:
+        ``control_dt * frame_stride``, or None on a bare env without ``dt``.
+    """
+    dt = getattr(env, "dt", None)
+    if dt is None:
+        return None
+    return float(dt) * int(env.cfg["vision"].get("frame_stride", 1) or 1)
+
+
 def _speed_and_yaw_rate(targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Return the speed (m/s) and yaw rate (rad/s) encoded in estimated targets.
 
@@ -65,8 +80,9 @@ class CNNPerceptionFeatures(PerceptionFeatures):
 
         Raises:
             ValueError: If the env has no camera, if ``checkpoint`` is missing,
-                or if the checkpoint's input width does not match
-                ``3 * frame_stack``.
+                if the checkpoint's input width does not match
+                ``3 * frame_stack``, or if it records a frame interval other
+                than the env's ``control_dt * frame_stride``.
         """
         super().__init__(env, params)
         if not getattr(env, "vision", False):
@@ -92,6 +108,20 @@ class CNNPerceptionFeatures(PerceptionFeatures):
                 f"checkpoint {checkpoint} reads {in_channels} channels but this "
                 f"env stacks {_frame_stack_of(env)} frames ({expected} channels). "
                 "Retrain the CNN or set frame_stack to match.")
+        # A checkpoint that recorded its stack spacing must match the env's
+        # (a 3x spacing change is 3x more motion between frames); a checkpoint
+        # without one predates the field and cannot be checked.
+        trained = getattr(net, "frame_interval_s", None)
+        interval = _frame_interval_of(env)
+        if trained is not None and interval is not None \
+                and abs(trained - interval) > 1e-6:
+            raise ValueError(
+                f"checkpoint {checkpoint} was trained on frames {trained:g} s "
+                f"apart but this env stacks frames {interval:g} s apart "
+                f"(control_dt {env.dt:g} s x frame_stride "
+                f"{int(env.cfg['vision'].get('frame_stride', 1) or 1)}). "
+                "Set frame_interval_s to match, or retrain the CNN on a "
+                "RolloutDataset with the matching stride.")
 
         lo, hi = self.cnn_target_slice
         n_targets = net.arch["n_targets"]

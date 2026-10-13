@@ -312,6 +312,12 @@ def _prove_action(session: EditorSession, knob: EditorKnob,
                         "delay ring buffer is sized at env construction — "
                         "build the session with cfg_updates={'action_dr': "
                         "{'delay_steps': k}} to prove it", {})]
+    if knob.name in ("latency_ms", "latency_jitter_ms", "decision_drop"):
+        return [Verdict("skipped", knob.name, False,
+                        "the actuation timing queue is sized and seeded at env "
+                        "construction — build the session with cfg_updates="
+                        "{'action_dr': {'latency_ms': (lo, hi), ...}} and "
+                        "compare env.actions with env.applied_actions", {})]
     hi = knob.space.hi
     session.poke_action_dr(steer_noise=hi if knob.name == "steer_noise" else 0.0,
                            speed_noise=hi if knob.name == "speed_noise" else 0.0)

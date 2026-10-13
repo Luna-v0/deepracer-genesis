@@ -61,6 +61,8 @@ class PerceptionCNN(nn.Module):
         features: The convolution stack.
         head: The dense head mapping to the predicted channels.
         arch: The constructor arguments, for arch-carrying checkpoints.
+        frame_interval_s: Seconds between the stacked frames the net was
+            trained on, or None when the checkpoint did not record it.
     """
 
     def __init__(self, in_channels: int = 12, n_targets: int = 7,
@@ -93,6 +95,7 @@ class PerceptionCNN(nn.Module):
                      "input_hw": tuple(input_hw), "channels": tuple(channels),
                      "kernels": tuple(kernels), "strides": tuple(strides),
                      "head": head}
+        self.frame_interval_s: float | None = None
         layers: list[nn.Module] = []
         c_in = in_channels
         for c, k, s in zip(channels, kernels, strides):
@@ -118,14 +121,22 @@ class PerceptionCNN(nn.Module):
         return self.head(self.features(x))
 
 
-def save_checkpoint(net: PerceptionCNN, path) -> None:
+def save_checkpoint(net: PerceptionCNN, path, *,
+                    frame_interval_s: float | None = None) -> None:
     """Write an arch-carrying checkpoint: the architecture travels with it.
 
     Args:
         net: The network to checkpoint.
         path: Destination file.
+        frame_interval_s: Seconds between the stacked frames it was trained
+            on (``RolloutDataset.frame_interval_s``); recorded so an env with
+            a different stack spacing refuses the checkpoint (ADR 0005).
     """
-    torch.save({"arch": dict(net.arch), "state_dict": net.state_dict()}, path)
+    payload = {"arch": dict(net.arch), "state_dict": net.state_dict()}
+    interval = net.frame_interval_s if frame_interval_s is None else frame_interval_s
+    if interval is not None:
+        payload["frame_interval_s"] = float(interval)
+    torch.save(payload, path)
 
 
 def load_checkpoint(source, map_location="cpu") -> PerceptionCNN:
@@ -149,6 +160,8 @@ def load_checkpoint(source, map_location="cpu") -> PerceptionCNN:
                 for k, v in state["arch"].items()}
         net = PerceptionCNN(**arch)
         net.load_state_dict(state["state_dict"])
+        interval = state.get("frame_interval_s")
+        net.frame_interval_s = None if interval is None else float(interval)
     else:
         # a bare state dict can only be the stock architecture
         net = PerceptionCNN(in_channels=state["features.0.weight"].shape[1],

@@ -18,6 +18,8 @@ class VisionDeepRacerEnv(DeepRacerEnv):
     Attributes:
         image_buf: Full-resolution rendered camera frames for all parallel envs.
         obs_image_buf: Policy-resolution camera frames published as observations.
+        frame_stride: Control steps between stacked frames (1 = consecutive).
+        frame_interval_s: Seconds between stacked frames (``dt * frame_stride``).
     """
 
     def _init_obs_buffers(self, env_cfg: dict) -> None:
@@ -37,11 +39,20 @@ class VisionDeepRacerEnv(DeepRacerEnv):
         # fresh episodes prime by REPEATING the first frame (zeros never occur
         # on a real camera). Order and priming are part of the model card.
         self._frame_stack = int(env_cfg["vision"].get("frame_stack", 1) or 1)
+        self.frame_stride = int(env_cfg["vision"].get("frame_stride", 1) or 1)
+        self.frame_interval_s = self.dt * self.frame_stride
+        self._ring = None
         if self._frame_stack > 1:
             self._stack_buf = torch.zeros(
                 self.num_envs, 3 * self._frame_stack, h, w, device=self.device)
             self._stack_prime = torch.ones(self.num_envs, dtype=torch.bool,
                                            device=self.device)
+            if self.frame_stride > 1:
+                # ADR 0005: the stack holds every stride-th frame, so a ring
+                # of (k-1)*stride+1 frames backs it; stride 1 needs no ring.
+                depth = (self._frame_stack - 1) * self.frame_stride + 1
+                self._ring = torch.zeros(self.num_envs, depth, 3, h, w,
+                                         device=self.device)
         else:
             self._stack_buf = None
         # stateful temporal DR (camera latency / frame drop); None when disabled
@@ -85,7 +96,7 @@ class VisionDeepRacerEnv(DeepRacerEnv):
             if self._frame_latency is not None:
                 frame = self._frame_latency.advance(frame)
             if self._stack_buf is not None:
-                self._stack_buf = torch.cat([self._stack_buf[:, 3:], frame], dim=1)
+                self._push_stack(frame)
             self.obs_image_buf = frame
         else:
             # Re-render after a respawn: every other env already advanced
@@ -99,12 +110,25 @@ class VisionDeepRacerEnv(DeepRacerEnv):
                 self._stack_prime[env_ids] = True
         self._prime_stack()
 
+    def _push_stack(self, frame: torch.Tensor) -> None:
+        """Advance the stack by one control step with the observed ``frame``."""
+        if self._ring is None:
+            self._stack_buf = torch.cat([self._stack_buf[:, 3:], frame], dim=1)
+            return
+        self._ring = torch.cat([self._ring[:, 1:], frame.unsqueeze(1)], dim=1)
+        # every stride-th ring slot, oldest first: slot 0 is (k-1)*stride
+        # steps old, the last slot is this step's frame
+        self._stack_buf = self._ring[:, ::self.frame_stride].flatten(1, 2)
+
     def _prime_stack(self) -> None:
         """Fill respawned envs' stacks with their current frame, repeated."""
         if self._stack_buf is not None and self._stack_prime.any():
             idx = self._stack_prime
             self._stack_buf[idx] = self.obs_image_buf[idx].repeat(
                 1, self._frame_stack, 1, 1)
+            if self._ring is not None:
+                self._ring[idx] = self.obs_image_buf[idx].unsqueeze(1).expand(
+                    -1, self._ring.shape[1], -1, -1, -1)
             self._stack_prime[idx] = False
 
     def _reset_obs_dr(self, env_ids: torch.Tensor) -> None:

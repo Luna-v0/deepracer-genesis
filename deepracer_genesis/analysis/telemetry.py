@@ -58,9 +58,9 @@ def _np(t: torch.Tensor) -> np.ndarray:
 class TelemetryRecorder:
     """Capture per-step car telemetry from a live env during a rollout.
 
-    Reads only tensors the env already computes each step (pose, post-DR
-    actions, track-frame quantities, the ``v_forward`` signal) — one small
-    GPU→CPU copy per step, no extra physics or render work.
+    Reads only tensors the env already computes each step (pose, the applied
+    post-DR command, track-frame quantities, the ``v_forward`` signal) — one
+    small GPU→CPU copy per step, no extra physics or render work.
 
     Attributes:
         env: The live ``DeepRacerEnv`` being recorded.
@@ -107,14 +107,17 @@ class TelemetryRecorder:
         env, i = self.env, self._idx
         pos = _np(env.base_pos[i, :2] - self._offset)
         done_np = _np(done[i]).astype(bool)
+        # the command the physics follows (= the issued one unless actuation
+        # timing DR delays it, ADR 0005); a bare env double carries only `actions`
+        applied = getattr(env, "applied_actions", env.actions)
         self._frames.append({
             "env": self.env_ids,
             "episode": self._episode.copy(),
             "x": pos[:, 0],
             "y": pos[:, 1],
             "yaw": _np(env.yaw[i]),
-            "steer": _np(env.actions[i, 0]),
-            "throttle": _np(env.actions[i, 1]),
+            "steer": _np(applied[i, 0]),
+            "throttle": _np(applied[i, 1]),
             "speed": _np(env.signals["v_forward"][i]),
             "reward": _np(reward[i]),
             "progress_delta": _np(progress_delta[i]),

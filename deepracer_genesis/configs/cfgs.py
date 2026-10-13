@@ -5,15 +5,26 @@ from dataclasses import asdict, dataclass, field
 from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
 from .schema import EnvConfig
 
+#: physics step (s) — the resolution of every timing knob (latency lands on a
+#: substep boundary, so 10 ms)
+SIM_DT = 0.01
+#: physics substeps per policy decision at the default 50 Hz control rate
+DEFAULT_DECIMATION = 2
+#: the default policy decision period (s); ``EnvSpec.control_dt_s`` overrides it
+DEFAULT_CONTROL_DT_S = SIM_DT * DEFAULT_DECIMATION
+
 
 def get_env_cfg(vision=False, track="reinvent_base", randomize=False,
                 topdown=False, backend="gpu", view="none") -> EnvConfig:
     """Build the default nested env config, one typed section per subsystem."""
     return {
         "sim": {
-            "dt": 0.01,
-            "decimation": 2,          # control at 50 Hz
+            "dt": SIM_DT,
+            "decimation": DEFAULT_DECIMATION,   # control at 50 Hz
             "episode_length_s": 30.0,
+            # seed of the env's OWN generators (actuation timing DR); the
+            # builder sets it from spec.seed. Global RNG streams are untouched.
+            "seed": 0,
             "track": track,
             "backend": backend,       # "gpu" | "cpu" (Part M)
             "view": view,             # "none" | "gui" | "spectator" | "topdown"
@@ -75,6 +86,10 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False,
             "frame_stack": 4,           # frames stacked along channels (1 = single frame);
                                         # 4 is the contract default: ego-velocity is
                                         # unobservable from one frame (AWS/dr-gym precedent)
+            # control steps between stacked frames (1 = consecutive decisions);
+            # EnvSpec.frame_interval_s derives it. The stack spans
+            # (frame_stack - 1) * frame_stride * control_dt seconds.
+            "frame_stride": 1,
             "topdown_camera": topdown,  # per-env batch camera (validation checks)
             "spectator": False,         # high-res rasterizer cam, all cars in one view
             "spectator_res": (1280, 960),
@@ -103,6 +118,11 @@ def get_env_cfg(vision=False, track="reinvent_base", randomize=False,
             },
             "reward_scale_overrides": {},
             "reward_params": {},        # constants exposed as env.reward_params
+            # reference control period (s) the action_rate penalty is scaled
+            # to: the term is multiplied by (ref / control_dt)^2 so a smooth
+            # command costs the same per second at any decision rate. None
+            # keeps the per-step penalty (the pre-control_dt_s behaviour).
+            "action_rate_dt_ref": None,
             "emit_cost": False,
             "cost_fn": None,
         },

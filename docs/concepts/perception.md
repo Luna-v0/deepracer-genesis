@@ -135,10 +135,27 @@ privileged values — a perception run that was quietly a perfect-perception run
 It now raises `ValueError` at construction, as does a camera-less env.
 
 The checkpoint is also checked against the env before the first step: its input
-width must be `3 * frame_stack`, and it must predict exactly as many channels as
-the feature set's `cnn_target_slice` spans. A stale checkpoint fails at build
-time instead of skewing a measurement. `feature_params["cnn_device"]` overrides
-where the CNN runs; by default it follows the env's device.
+width must be `3 * frame_stack`, it must predict exactly as many channels as
+the feature set's `cnn_target_slice` spans, and — when it records one — its
+`frame_interval_s` must equal the env's `control_dt × frame_stride` (ADR 0005).
+A stale checkpoint fails at build time instead of skewing a measurement.
+`feature_params["cnn_device"]` overrides where the CNN runs; by default it
+follows the env's device.
+
+### The frame interval travels with the data
+
+The spacing of the stacked frames is a contract shared by every link
+(ADR 0005). Collection writes one row per control step and records
+`control_dt`, `frame_stride` and `frame_interval_s` in `meta.json`;
+`RolloutDataset(stride=s)` stacks rows `s` steps apart and exposes
+`frame_interval_s = s × control_dt` (tracks collected at different periods are
+refused in one dataset); `train_cnn.py` saves the checkpoint with
+`save_checkpoint(net, path, frame_interval_s=train_ds.frame_interval_s)`, which
+`load_checkpoint` restores as `net.frame_interval_s`; the env stacks at
+`CameraEnvironment(frame_interval_s=...)`, and `CNNPerceptionFeatures` refuses
+a mismatch. A checkpoint without the field (one saved before it existed) loads
+with `frame_interval_s=None` and is not checked. Set `STRIDE` in
+`train_cnn.py` to the deployment stride (`frame_interval_s / control_dt_s`).
 
 `NoisyPerceptionFeatures` is the same swap without a renderer: it perturbs the
 same slice with Gaussian noise scaled to the CNN's measured per-channel error
@@ -160,9 +177,11 @@ feature vector. So `CNNPerceptionFeatures` reads the stack ending at the same
 step as everything else in the vector, the reward and the termination, which is
 how the CNN was trained (`datasets/rollout.py` records frame and state of one
 step together). `DomainRandomizationCamera(latency_steps=k)` is the only camera
-delay: features lag the render by exactly `k` steps. A respawned car's stack
-holds its first frame repeated, so its first state uses no frame from the
-previous episode.
+delay: features lag the render by exactly `k` steps. With
+`frame_interval_s` set, the stack keeps every `frame_stride`-th observed
+frame (a ring of `(frame_stack − 1) · stride + 1` frames backs it), still
+oldest first. A respawned car's stack holds its first frame repeated, so its
+first state uses no frame from the previous episode.
 
 ## Evaluation
 

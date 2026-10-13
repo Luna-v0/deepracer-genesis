@@ -37,7 +37,15 @@ planned extension — see the signal bus, `REFACTOR_PLAN.md` Part K.)
 
 On a camera env the frame is rendered, delayed by `latency_steps` and pushed
 onto the frame stack *before* this call, so a feature set that reads
-`env.camera_stack` sees this step's frames, like every other channel.
+`env.camera_stack` sees this step's frames, like every other channel. The
+stack holds every `frame_stride`-th observed frame (`frame_interval_s /
+control_dt_s`, ADR 0005), oldest first, so with `frame_interval_s=0.06` at the
+20 ms period slot `i` of a 3-frame stack is the frame `(2 − i) · 3` steps old.
+
+The `last_action` channel (and the `actions` / `action_rate` signals) is the
+command the policy **issued** this step — `env.actions`. When actuation timing
+DR delays the command, the physics follows `env.applied_actions` instead; the
+features never read it, because the car cannot know when its servo acted.
 
 Right after, optional Gaussian sensor noise is added to the actor's copy
 (`base_env.py:361-362`); this is the *weakest* form of actor/critic asymmetry —
@@ -63,8 +71,9 @@ The crucial fact: **`get_vel()`/`get_ang()` are NOT finite-differenced from
 positions.** Genesis is a full rigid-body integrator — linear and angular
 velocity are primary state variables the solver carries (it integrates velocity
 from forces, then position from velocity). You *read* velocity; you don't
-reconstruct it. Reading gives the instantaneous world-frame state at 50 Hz
-(`dt=0.01` × `decimation=2`).
+reconstruct it. Reading gives the instantaneous world-frame state once per
+decision — 50 Hz by default (`dt=0.01` × `decimation=2`), or every
+`control_dt_s` seconds when the env stage sets it (ADR 0005).
 
 ### 2.2 Three tiers of derivation
 

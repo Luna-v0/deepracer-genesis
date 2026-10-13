@@ -10,6 +10,8 @@ import torch
 
 from deepracer_genesis.envs import mdp
 from deepracer_genesis.experiment.spec import (
+    HASH_EXEMPT_ACTION_DR_WHEN_UNSET,
+    HASH_EXEMPT_ENV_WHEN_NONE,
     AlgorithmSpec,
     EnvSpec,
     ExperimentSpec,
@@ -150,11 +152,14 @@ def test_empty_reward_params_keep_pre_p12_content_hashes():
     # and the exemption is only for the UNSET defaults, not a hash exclusion
     payload = {k: v for k, v in _spec(reward_params={"t": 1}).to_dict().items()
                if k not in ("group", "variant")}
-    # mirror id()'s prune list
-    for late, unset in (("crash_penalty", None), ("episode_length_s", None),
-                        ("max_laps", None)):
-        if payload["env"].get(late) is unset:
+    # mirror id()'s prune list (the late env fields and the ADR 0005 action
+    # timing fields are absent while unset, so older hashes stay valid)
+    for late in HASH_EXEMPT_ENV_WHEN_NONE:
+        if payload["env"].get(late) is None:
             payload["env"].pop(late, None)
+    for late in HASH_EXEMPT_ACTION_DR_WHEN_UNSET:
+        if not payload["action_dr"].get(late):
+            payload["action_dr"].pop(late, None)
     for key in ("telemetry_envs", "keep_checkpoints", "best_metric"):
         payload["eval"].pop(key)                     # ADR 0004: output-only
     manual = hashlib.sha1(

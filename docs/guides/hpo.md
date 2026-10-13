@@ -84,6 +84,40 @@ The SQLite storage makes the study resumable and inspectable with Optuna's
 dashboard. `notebooks/hpo_cnn.ipynb` shows the same pattern searching CNN
 architecture for a camera policy.
 
+## Searching the time horizon in seconds
+
+`PPO.gamma` is a per-step discount, so its horizon `T / (1 − γ)` changes with
+the decision period: 0.99 is 2 s at 50 Hz but 7 s at 70 ms. `PPO.horizon_s`
+(and `lam_horizon_s` for GAE) give the horizon in seconds instead; the backend
+sets `gamma = exp(−control_dt / horizon_s)` at the env's `control_dt_s`
+(ADR 0005). A study then searches the horizon once and keeps it meaningful
+across decision rates:
+
+```python
+SEARCH_SPACE = {
+    "lr":         FloatRange(1e-4, 1e-2, log=True),
+    "horizon_s":  FloatRange(0.5, 8.0, log=True),     # seconds, not steps
+    "lam_horizon_s": FloatRange(0.2, 2.0, log=True),
+}
+
+
+def objective(trial):
+    p = {name: space.suggest(trial, name) for name, space in SEARCH_SPACE.items()}
+    spec = (
+        FeatureEnvironment(num_envs=1024, control_dt_s=0.07)   # the car's period
+        >> VectorPolicy()
+        >> DomainRandomizationActions(latency_ms=(30, 90), latency_jitter_ms=10,
+                                      decision_drop=0.05)
+        >> PPO(lr=p["lr"], horizon_s=p["horizon_s"],
+               lam_horizon_s=p["lam_horizon_s"])
+    ).build(seed=0, total_env_steps=STEPS, eval_every_steps=EVAL_EVERY,
+            group="hpo_horizon")
+    return run(spec, on_eval=report).metrics[METRIC]
+```
+
+Both fields enter the spec's content hash only when set, so studies that
+never touch them keep their run ids.
+
 ## Searching architectures and topologies
 
 Network shape is spec data, so it goes into a study like any hyperparameter.

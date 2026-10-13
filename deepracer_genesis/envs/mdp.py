@@ -33,9 +33,22 @@ def map_action(env: DeepRacerEnv) -> tuple[torch.Tensor, torch.Tensor]:
         ``(steer, speed)``, each ``(N, 1)``: the commanded center steering angle
         in radians (positive = left) and the forward speed in m/s.
     """
+    return map_command(env, env.actions)
+
+
+def map_command(env: DeepRacerEnv, command: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Map one normalized ``(N, 2)`` command to physical steering and speed.
+
+    Args:
+        env: The live env; reads the action caps from ``env.cfg["action"]``.
+        command: ``(N, 2)`` ``[steer, throttle]`` in ``[-1, 1]``.
+
+    Returns:
+        ``(steer, speed)``, each ``(N, 1)``, as :func:`map_action`.
+    """
     act = env.cfg["action"]
-    steer = env.actions[:, 0:1] * math.radians(act["max_steering_deg"])
-    speed = act["min_speed"] + (env.actions[:, 1:2] + 1) * 0.5 * (
+    steer = command[:, 0:1] * math.radians(act["max_steering_deg"])
+    speed = act["min_speed"] + (command[:, 1:2] + 1) * 0.5 * (
         act["max_speed"] - act["min_speed"])
     return steer, speed
 

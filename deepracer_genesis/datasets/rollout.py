@@ -163,9 +163,14 @@ def collect_rollout_dataset(
 
     pool.shutdown()
     fs = sim.feature_set
+    # rows are one control step apart, so RolloutDataset(stride=s) stacks
+    # frames s * control_dt seconds apart; frame_interval_s / frame_stride
+    # record the spacing the env's OWN stack used while collecting (ADR 0005)
     meta = {"num_envs": n, "steps": steps, "shard_steps": shard_steps,
             "frames": frames_out,
             "resolution": list(spec.env.resolution), "control_dt": sim.dt,
+            "frame_stride": int(getattr(sim, "frame_stride", 1)),
+            "frame_interval_s": float(getattr(sim, "frame_interval_s", sim.dt)),
             "agent": type(agent).__name__, "seed": seed,
             "feature_set": type(fs).__name__,
             "state_layout": type(fs).layout_for(lookahead_k=spec.env.lookahead_k,

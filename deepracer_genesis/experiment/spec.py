@@ -9,6 +9,8 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from ..configs.cfgs import DEFAULT_CONTROL_DT_S, SIM_DT
+
 if TYPE_CHECKING:
     from ..envs.features import FeatureSet
     from ..envs.rewards import RewardFn
@@ -102,15 +104,100 @@ def _active_knobs(spec: ExperimentSpec) -> list[tuple]:
              "multiplier": BY_NAME["env_map_multiplier"]}, "obs_dr.env_map")
     if spec.obs_dr.pixel_noise:
         active.append((BY_NAME["pixel_noise"], spec.obs_dr.pixel_noise))
-    for leaf in ("steer_noise", "speed_noise", "delay_steps"):
+    for leaf, knob in action.items():
         value = getattr(spec.action_dr, leaf)
         if value:
-            active.append((action[leaf], value))
+            active.append((knob, value))
     return active
 
 
 class SpecError(ValueError):
     """A structurally or semantically invalid experiment declaration."""
+
+
+def _steps_of(period_s: float, base_s: float, what: str, unit: str) -> int:
+    """Return ``period_s / base_s`` as a whole number of ``unit``.
+
+    Args:
+        period_s: The period being resolved, in seconds.
+        base_s: The base period it must be a multiple of, in seconds.
+        what: Spec field name for the error message.
+        unit: Name of the base unit for the error message.
+
+    Raises:
+        SpecError: If ``period_s`` is not a positive whole multiple of ``base_s``.
+    """
+    if not isinstance(period_s, (int, float)) or isinstance(period_s, bool) \
+            or period_s <= 0:
+        raise SpecError(f"{what} must be a positive number of seconds; "
+                        f"got {period_s!r}")
+    ratio = period_s / base_s
+    steps = round(ratio)
+    if steps < 1 or abs(ratio - steps) > 1e-6:
+        raise SpecError(
+            f"{what}={period_s} s is not a whole number of {unit} "
+            f"({base_s} s): {ratio:.4f}; pick a multiple of {base_s} s")
+    return steps
+
+
+def control_decimation(control_dt_s: float, sim_dt: float = SIM_DT) -> int:
+    """Return the physics substeps per decision for a control period.
+
+    Args:
+        control_dt_s: The policy decision period in seconds.
+        sim_dt: The physics step in seconds.
+
+    Returns:
+        ``control_dt_s / sim_dt`` as an integer.
+
+    Raises:
+        SpecError: If the period is not a positive whole multiple of ``sim_dt``.
+    """
+    return _steps_of(control_dt_s, sim_dt, "control_dt_s", "physics steps")
+
+
+def frame_stride(frame_interval_s: float, control_dt_s: float) -> int:
+    """Return the control steps between stacked frames for a frame interval.
+
+    Args:
+        frame_interval_s: Spacing of stacked camera frames in seconds.
+        control_dt_s: The policy decision period in seconds.
+
+    Returns:
+        ``frame_interval_s / control_dt_s`` as an integer.
+
+    Raises:
+        SpecError: If the interval is not a positive whole multiple of the
+            control period.
+    """
+    return _steps_of(frame_interval_s, control_dt_s, "frame_interval_s",
+                     "control periods")
+
+
+def control_period_s(env: EnvSpec) -> float:
+    """Return the decision period an env spec trains at, in seconds.
+
+    Args:
+        env: The env spec (``control_dt_s`` None means the 50 Hz default).
+
+    Returns:
+        ``env.control_dt_s`` or the config default.
+    """
+    return (DEFAULT_CONTROL_DT_S if env.control_dt_s is None
+            else float(env.control_dt_s))
+
+
+def frame_interval_s_of(env: EnvSpec) -> float:
+    """Return the stacked-frame spacing an env spec trains at, in seconds.
+
+    Args:
+        env: The env spec (``frame_interval_s`` None means one control period).
+
+    Returns:
+        ``env.frame_interval_s`` or the control period.
+    """
+    return (control_period_s(env) if env.frame_interval_s is None
+            else float(env.frame_interval_s))
 
 
 VALID_COST_FNS = ("offtrack", "offtrack_or_overspeed", "crash")
@@ -124,6 +211,14 @@ BEST_METRICS = ("mean_progress_m", "mean_return", "completion_rate",
 
 #: ``EvalConfig`` fields that shape run OUTPUT, never training — hash-exempt
 _OUTPUT_ONLY_EVAL = ("telemetry_envs", "keep_checkpoints", "best_metric")
+
+#: ``EnvSpec`` fields added after launch: absent from ``id()`` while None, so
+#: pre-existing hashes and run dirs stay valid (absent == the old default)
+HASH_EXEMPT_ENV_WHEN_NONE = ("crash_penalty", "episode_length_s", "max_laps",
+                             "control_dt_s", "frame_interval_s")
+#: ``ActionDRSpec`` timing fields: absent from ``id()`` while unset (falsy)
+HASH_EXEMPT_ACTION_DR_WHEN_UNSET = ("latency_ms", "latency_jitter_ms",
+                                    "decision_drop")
 
 
 @dataclass(frozen=True)
@@ -149,6 +244,10 @@ class EnvSpec:
         crash_penalty: terminal off-track/flip penalty override (None = -10.0).
         episode_length_s: episode time limit override in seconds (None = 30.0).
         max_laps: truncate the episode after N completed laps (None = endless).
+        control_dt_s: policy decision period in seconds, a whole multiple of
+            the 0.01 s physics step (None = the 0.02 s / 50 Hz default).
+        frame_interval_s: spacing of the stacked camera frames in seconds, a
+            whole multiple of the control period (None = one control period).
         emits_cost: whether the env produces a cost signal for SafeRL.
         cost_fn: which cost function to emit.
         cost_budget: per-episode cost budget.
@@ -216,6 +315,14 @@ class EnvSpec:
     # bootstrapped truncation like the time cap — no penalty), None keeps the
     # endless default. Excluded from id() when None (hash-stable).
     max_laps: int | None = None
+    # control timing (ADR 0005): the decision period the policy acts at, and
+    # the spacing of the frames it sees stacked. Both are whole multiples of
+    # their base (physics step / control period) and both are excluded from
+    # id() when None, so pre-existing content hashes are stable. The frame
+    # interval is a deployment contract: dataset, CNN checkpoint, env stack
+    # and model card all carry the same value.
+    control_dt_s: float | None = None
+    frame_interval_s: float | None = None
     emits_cost: bool = False
     cost_fn: str | None = None
     cost_budget: float | None = None
@@ -320,12 +427,31 @@ class ActionDRSpec:
     Attributes:
         steer_noise: magnitude of noise added to the steering action.
         speed_noise: magnitude of noise added to the speed action.
-        delay_steps: number of steps to delay applied actions.
+        delay_steps: number of steps to delay applied actions (legacy: the
+            features read the delayed command; prefer ``latency_ms``).
+        latency_ms: per-episode command latency range ``(lo, hi)`` in ms, or
+            None; resolved to whole 10 ms physics substeps.
+        latency_jitter_ms: uniform ``±`` jitter on each decision's latency.
+        decision_drop: per-decision probability the command is dropped and
+            the previous one holds one more period.
     """
 
     steer_noise: float = 0.0
     speed_noise: float = 0.0
     delay_steps: int = 0
+    # Timing knobs (ADR 0005). Unset (None / 0.0) keeps them out of id(), so
+    # pre-existing hashes are stable. Their draws come from the env's own
+    # generator (cfg["sim"]["seed"]); the issued action stays what the
+    # features and penalties see, the delayed command drives the physics.
+    latency_ms: tuple[float, float] | None = None
+    latency_jitter_ms: float = 0.0
+    decision_drop: float = 0.0
+
+    @property
+    def timing_active(self) -> bool:
+        """Whether any ms-latency / jitter / drop knob is set."""
+        return (self.latency_ms is not None or bool(self.latency_jitter_ms)
+                or bool(self.decision_drop))
 
 
 @dataclass(frozen=True)
@@ -460,9 +586,14 @@ class ExperimentSpec:
             # (absent == default), keeping pre-existing hashes/run dirs valid
             if not env_p.get("reward_params"):
                 env_p.pop("reward_params", None)
-            for late in ("crash_penalty", "episode_length_s", "max_laps"):
+            for late in HASH_EXEMPT_ENV_WHEN_NONE:
                 if env_p.get(late) is None:
                     env_p.pop(late, None)
+        action_p = payload.get("action_dr")
+        if action_p:
+            for late in HASH_EXEMPT_ACTION_DR_WHEN_UNSET:
+                if not action_p.get(late):
+                    action_p.pop(late, None)
         for key in _OUTPUT_ONLY_EVAL:        # retention knobs: never identity
             payload.get("eval", {}).pop(key, None)
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
@@ -547,6 +678,18 @@ class ExperimentSpec:
             raise SpecError(
                 "max_laps must be an int >= 1 (or None for endless episodes); "
                 "got %r" % (env.max_laps,))
+        if env.control_dt_s is not None:
+            control_decimation(env.control_dt_s)
+        if env.frame_interval_s is not None:
+            # a knob either acts or refuses to build: the interval only shapes
+            # a camera stack of >= 2 frames
+            if env.modality != "camera":
+                raise SpecError("frame_interval_s spaces the stacked camera "
+                                "frames; it needs a camera env")
+            if env.frame_stack < 2:
+                raise SpecError("frame_interval_s needs frame_stack >= 2 "
+                                "(a single frame has no spacing)")
+            frame_stride(env.frame_interval_s, control_period_s(env))
         if env.modality == "camera" and env.backend == "cpu":
             warnings.warn(
                 "camera obs on backend='cpu' uses the RasterizerObsRenderer: one "
@@ -666,9 +809,11 @@ class ExperimentSpec:
                     raise SpecError(
                         f"discrete actions are (steer, speed) pairs in [-1, 1]; got {a}")
             if (self.action_dr.steer_noise or self.action_dr.speed_noise
-                    or self.action_dr.delay_steps):
-                raise SpecError("action DR (noise/delay) operates on continuous "
-                                "actions; not compatible with a discrete policy")
+                    or self.action_dr.delay_steps
+                    or self.action_dr.timing_active):
+                raise SpecError("action DR (noise/delay/timing) operates on "
+                                "continuous actions; not compatible with a "
+                                "discrete policy")
         if policy.cnn is None and "camera" in (a_keys | c_keys):
             raise SpecError("a vector policy cannot consume the raw 'camera' key; "
                             "add an encoder stage or use a camera policy")
@@ -722,15 +867,39 @@ class ExperimentSpec:
             raise SpecError("DomainRandomizationCamera requires a camera env")
 
     def _validate_action_dr(self) -> None:
-        """Check action-DR magnitudes are non-negative.
+        """Check action-DR magnitudes, the timing ranges, and their exclusions.
 
         Raises:
-            SpecError: If delay_steps or a noise magnitude is negative.
+            SpecError: If delay_steps or a noise magnitude is negative, a
+                timing knob is out of range, or the ms-timing knobs are
+                combined with the legacy ``delay_steps``.
         """
-        if self.action_dr.delay_steps < 0:
+        ad = self.action_dr
+        if ad.delay_steps < 0:
             raise SpecError("delay_steps must be >= 0")
-        if self.action_dr.steer_noise < 0 or self.action_dr.speed_noise < 0:
+        if ad.steer_noise < 0 or ad.speed_noise < 0:
             raise SpecError("action noise magnitudes must be >= 0")
+        if not ad.timing_active:
+            return
+        if ad.delay_steps:
+            raise SpecError(
+                "latency_ms / latency_jitter_ms / decision_drop replace the "
+                "legacy delay_steps (which feeds the features the delayed "
+                "command); set one or the other, not both")
+        if ad.latency_ms is not None:
+            try:
+                lo, hi = (float(ad.latency_ms[0]), float(ad.latency_ms[1]))
+            except (TypeError, IndexError, ValueError):
+                raise SpecError("latency_ms must be a (lo, hi) range in ms; "
+                                f"got {ad.latency_ms!r}") from None
+            if lo < 0 or hi < lo:
+                raise SpecError("latency_ms must satisfy 0 <= lo <= hi; "
+                                f"got {ad.latency_ms!r}")
+        if ad.latency_jitter_ms < 0:
+            raise SpecError("latency_jitter_ms must be >= 0")
+        if not 0.0 <= ad.decision_drop < 1.0:
+            raise SpecError("decision_drop is a probability in [0, 1); "
+                            f"got {ad.decision_drop!r}")
 
     def _validate_knob_compat(self) -> None:
         """Check every activated DR knob acts under this modality/renderer.
@@ -771,6 +940,13 @@ class ExperimentSpec:
         env, algo = self.env, self.algorithm
         if algo is None:
             raise SpecError("algorithm missing: build() must run _infer_algorithm")
+        for key in ("horizon_s", "lam_horizon_s"):
+            value = algo.ppo.get(key)
+            if value is not None and (isinstance(value, bool)
+                                      or not isinstance(value, (int, float))
+                                      or value <= 0):
+                raise SpecError(f"{key} is a time horizon in seconds (> 0); "
+                                f"got {value!r}")
         if algo.cls is not None:
             # a custom Algo(cls=...) must speak the rsl-rl runner interface, or it
             # would fail cryptically deep inside OnPolicyRunner — check up front.

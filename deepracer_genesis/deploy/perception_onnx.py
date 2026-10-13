@@ -129,7 +129,10 @@ def export_perception_cnn(checkpoint: str, out_dir: str, *,
             "layout": f"NCHW; {in_channels // 3} stacked RGB frames, OLDEST "
                       "FIRST (newest = last 3 channels)",
             "priming": "a fresh episode repeats the first frame; zeros never "
-                       "occur on a real camera"}},
+                       "occur on a real camera",
+            # seconds between stacked frames at training (ADR 0005); None
+            # for checkpoints that predate the field
+            "frame_interval_s": getattr(net, "frame_interval_s", None)}},
         "outputs": {PERCEPTION_OUTPUT: {
             "shape": [1, n_targets], "dtype": "float32",
             "channels": list(CHANNEL_NAMES[:n_targets]),

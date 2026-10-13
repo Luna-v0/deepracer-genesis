@@ -30,9 +30,13 @@ from rsl_rl.models import CNNModel
 
 out = sys.argv[1]
 frame_stack = int(sys.argv[2])
+timing = {}
+if len(sys.argv) > 3:                       # control_dt_s,frame_interval_s
+    dt_s, interval_s = (float(v) for v in sys.argv[3].split(","))
+    timing = {"control_dt_s": dt_s, "frame_interval_s": interval_s}
 
 pipe = (CameraEnvironment(render="madrona", resolution=(160, 120),
-                          frame_stack=frame_stack)
+                          frame_stack=frame_stack, **timing)
         >> AsymmetricCameraPolicy(actor_keys=("camera",),
                                   critic_keys=("camera", "state")))
 spec = build(pipe)
@@ -157,11 +161,13 @@ print("REPORT:" + json.dumps({
 """
 
 
-def _run_driver(tmp_path_factory, frame_stack):
+def _run_driver(tmp_path_factory, frame_stack, timing=None):
     out = tmp_path_factory.mktemp(f"export_k{frame_stack}")
+    argv = [sys.executable, "-c", _DRIVER, str(out), str(frame_stack)]
+    if timing:
+        argv.append(",".join(str(v) for v in timing))
     proc = subprocess.run(
-        [sys.executable, "-c", _DRIVER, str(out), str(frame_stack)],
-        capture_output=True, text=True,
+        argv, capture_output=True, text=True, check=False,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
     assert proc.returncode == 0, f"export driver failed:\n{proc.stdout}\n{proc.stderr}"
@@ -199,6 +205,26 @@ def test_stacked_model_io_and_card(report_stacked):
     assert cam["frame_stack"] == 4
     assert cam["stack_order"].startswith("oldest_first")
     assert cam["stack_priming"].startswith("repeat_first")
+    # timing contract (ADR 0005) at the 50 Hz default: one decision per frame
+    assert cam["control_dt_s"] == 0.02
+    assert cam["frame_interval_s"] == 0.02
+    assert cam["frame_stride"] == 1
+    assert cam["stack_source"] == "policy_decisions"
+
+
+@pytest.fixture(scope="module")
+def report_timed(tmp_path_factory):
+    return _run_driver(tmp_path_factory, frame_stack=4, timing=(0.07, 0.14))
+
+
+def test_model_card_states_the_trained_control_period_and_frame_interval(report_timed):
+    cam = report_timed["card_camera"]
+    assert report_timed["input_shape"] == [1, 12, 120, 160]
+    assert cam["control_dt_s"] == 0.07
+    assert cam["frame_interval_s"] == 0.14
+    assert cam["frame_stride"] == 2
+    assert cam["stack_source"] == "policy_decisions"
+    assert "frame_stride-th" in cam["stack_source_note"]
 
 
 def test_opset_is_car_compatible(report):
@@ -237,6 +263,7 @@ def test_feature_export_bakes_the_normalization(feature_report):
     card = feature_report["card_state"]
     assert "BAKED" in card["range"]
     assert card["layout"].startswith("v_forward")
+    assert card["control_dt_s"] == 0.02           # ADR 0005: the trained period
 
 
 def test_export_guards_name_the_unsupported_actor_shapes():

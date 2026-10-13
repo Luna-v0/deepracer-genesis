@@ -20,7 +20,12 @@ import json
 import os
 import tarfile
 
-from ..experiment.spec import ExperimentSpec
+from ..experiment.spec import (
+    ExperimentSpec,
+    control_period_s,
+    frame_interval_s_of,
+    frame_stride,
+)
 from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
 
 
@@ -336,6 +341,7 @@ def export_policy(target, *, root: str = "runs", ckpt: str | None = None,
                 "layout": _state_layout_for_card(spec, dim),
                 "note": "stock AWS nodes feed camera models only; the state "
                         "vector must be assembled onboard (perception pipeline)",
+                "control_dt_s": control_period_s(spec.env),
             },
         }
     else:
@@ -343,6 +349,8 @@ def export_policy(target, *, root: str = "runs", ckpt: str | None = None,
         frame_stack = getattr(spec.env, "frame_stack", 1)
         dummy = torch.zeros(1, 3 * frame_stack, h, w)
         input_name = CAMERA_INPUT
+        period = control_period_s(spec.env)
+        interval = frame_interval_s_of(spec.env)
         obs_card = {
             CAMERA_INPUT: {
                 "shape": [1, 3 * frame_stack, h, w],
@@ -353,6 +361,18 @@ def export_policy(target, *, root: str = "runs", ckpt: str | None = None,
                 "frame_stack": frame_stack,
                 "stack_order": "oldest_first (newest frame = last 3 channels)",
                 "stack_priming": "repeat_first_frame (never zeros)",
+                # Timing contract (ADR 0005): the policy decided every
+                # control_dt_s seconds in training and saw frames
+                # frame_interval_s apart; the node must stack at that spacing.
+                "control_dt_s": period,
+                "frame_interval_s": interval,
+                "frame_stride": frame_stride(interval, period),
+                "stack_source": "policy_decisions",
+                "stack_source_note": (
+                    "the stack holds the frames observed at policy decisions "
+                    "(one per control_dt_s), keeping every frame_stride-th one; "
+                    "it is NOT fed by every camera frame, and a skipped "
+                    "decision leaves a gap rather than a duplicate"),
                 "fov_deg": spec.env.fov,
                 "camera": "front RGB, native 160x120 in sim (no train-time resize)",
             },

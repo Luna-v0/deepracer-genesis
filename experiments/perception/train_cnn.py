@@ -18,7 +18,7 @@ from deepracer_genesis.perception.dataset import (
     TRAINING_TRACKS,
     RolloutDataset,
 )
-from deepracer_genesis.perception.model import PerceptionCNN
+from deepracer_genesis.perception.model import PerceptionCNN, save_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,9 @@ EPOCHS = 8
 BATCH = 64
 LR = 1e-4
 SEED = 0
+# rows between stacked frames (ADR 0005): the deployed env's
+# frame_interval_s / control_dt_s; 1 = consecutive 50 Hz decisions
+STRIDE = 1
 VAL_MAX = 60_000    # validation sample: past this we are measuring noise
 # jitter costs ~3x per stack, so the loaders bound the run rather than the GPU
 TRAIN_WORKERS = 14
@@ -70,8 +73,9 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
-    train_ds = RolloutDataset(tracks=TRAINING_TRACKS, jitter=JITTER, seed=SEED)
-    val_ds = RolloutDataset(tracks=HOLDOUT_TRACKS)
+    train_ds = RolloutDataset(tracks=TRAINING_TRACKS, jitter=JITTER, seed=SEED,
+                              stride=STRIDE)
+    val_ds = RolloutDataset(tracks=HOLDOUT_TRACKS, stride=STRIDE)
     if len(val_ds) > VAL_MAX:      # fixed draw, so runs stay comparable
         g = torch.Generator().manual_seed(SEED)
         val_ds = Subset(val_ds,
@@ -87,8 +91,9 @@ def main() -> None:
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
     loss_fn = nn.MSELoss()
 
-    logger.info("train %d | val %d | %s | jitter %s",
-                len(train_ds), len(val_ds), device, JITTER)
+    logger.info("train %d | val %d | %s | jitter %s | frame interval %s s",
+                len(train_ds), len(val_ds), device, JITTER,
+                train_ds.frame_interval_s)
     logger.info("writing to %s", CHECKPOINT)
     best = float("inf")
     for epoch in range(EPOCHS):
@@ -109,7 +114,10 @@ def main() -> None:
 
         if val_loss < best:
             best = val_loss
-            torch.save(net.state_dict(), CHECKPOINT)
+            # arch-carrying, with the stack spacing the net was trained on so
+            # an env stacking at another interval refuses it
+            save_checkpoint(net, CHECKPOINT,
+                            frame_interval_s=train_ds.frame_interval_s)
             logger.info("  -> saved")
 
     logger.info("best val: %.5f", best)

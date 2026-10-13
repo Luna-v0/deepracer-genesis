@@ -17,6 +17,7 @@ import torch
 
 from ..seeding import seed_everything
 from .evaluator import EvalRecord, evaluate_policy
+from .spec import control_period_s
 
 if TYPE_CHECKING:
     from .spec import ExperimentSpec
@@ -36,6 +37,22 @@ _PPO_KEY_MAP = {
     "schedule": "schedule",
     "desired_kl": "desired_kl",
 }
+
+
+def discount_for_horizon(horizon_s: float, control_dt_s: float) -> float:
+    """Return the per-decision discount for a time horizon in seconds.
+
+    ``gamma = exp(-control_dt_s / horizon_s)``: the ``T / (1 - gamma)`` horizon
+    then stays ``horizon_s`` at any decision rate (2.0 s at 50 Hz is 0.99005).
+
+    Args:
+        horizon_s: Discount (or GAE lambda) time horizon in seconds.
+        control_dt_s: The decision period in seconds.
+
+    Returns:
+        The per-step discount in ``(0, 1)``.
+    """
+    return math.exp(-control_dt_s / horizon_s)
 
 
 def rsl_supported(spec: ExperimentSpec) -> bool:
@@ -131,6 +148,14 @@ def spec_to_train_cfg(spec: ExperimentSpec) -> dict:
             cfg["algorithm"][theirs] = ppo[ours]
     if "horizon" in ppo:
         cfg["num_steps_per_env"] = ppo["horizon"]
+    # ADR 0005: time horizons in seconds override the per-step gamma / lam at
+    # the env's control period, so HPO can search them independently of the
+    # decision rate (and a per-rollout period only has to recompute these).
+    period = control_period_s(spec.env)
+    if ppo.get("horizon_s") is not None:
+        cfg["algorithm"]["gamma"] = discount_for_horizon(ppo["horizon_s"], period)
+    if ppo.get("lam_horizon_s") is not None:
+        cfg["algorithm"]["lam"] = discount_for_horizon(ppo["lam_horizon_s"], period)
     # Custom algorithm (Algo(cls=...)): rsl-rl's OnPolicyRunner resolves
     # cfg["algorithm"]["class_name"] via resolve_callable, which accepts a class
     # OBJECT directly — so the custom class plugs into the SAME runner PPO uses

@@ -43,8 +43,11 @@ class DeepRacerEnv:
         reset_buf: Per-env done flags for the current step.
         rew_buf: Per-env reward for the current step.
         time_out_buf: Per-env truncation flags.
-        actions: Current control actions applied this step.
-        last_actions: Actions applied on the previous step.
+        actions: The command issued this step (what the features and the
+            reward penalties read).
+        applied_actions: The command the physics currently follows; equals
+            ``actions`` unless actuation timing DR delays it (ADR 0005).
+        last_actions: Actions issued on the previous step.
         progress_m: Per-env arc-length progress along the track.
         laps: Per-env completed-lap count.
         dir_sign: Per-env driving direction (+1 forward, -1 reversed).
@@ -257,6 +260,12 @@ class DeepRacerEnv:
         self.last_actions = torch.zeros(N, 2, device=self.device)
         if self._act_delay > 0:      # ring buffer of the last k commands (action DR)
             self._act_buf = torch.zeros(N, self._act_delay, 2, device=self.device)
+        # actuation timing DR (ADR 0005): a per-env pending-command queue the
+        # substep loop drains; None while every timing knob is unset, so the
+        # legacy path stays bit-identical. Its draws come from its own
+        # generator, so turning it on leaves spawn and image-aug streams alone.
+        self._timing = self._build_timing(env_cfg)
+        self.applied_actions = self.actions
         self.progress_m = torch.zeros(N, device=self.device)
         self.laps = torch.zeros(N, device=self.device)
         # per-env driving direction: +1 follows waypoint order (counter-
@@ -343,6 +352,36 @@ class DeepRacerEnv:
         self._post_physics()
 
     # ------------------------------------------------------------------- step
+    def _build_timing(self, env_cfg: dict):
+        """Build the actuation-timing queue, or None when its knobs are unset.
+
+        Args:
+            env_cfg: Environment config; reads ``action_dr.latency_ms`` /
+                ``latency_jitter_ms`` / ``decision_drop`` and ``sim.seed``.
+
+        Returns:
+            An ``ActuationTiming`` instance, or ``None``.
+
+        Raises:
+            ValueError: If the timing knobs are combined with ``delay_steps``.
+        """
+        dr = self.action_dr
+        latency = dr.get("latency_ms")
+        jitter = float(dr.get("latency_jitter_ms") or 0.0)
+        drop = float(dr.get("decision_drop") or 0.0)
+        if latency is None and not jitter and not drop:
+            return None
+        if self._act_delay > 0:
+            raise ValueError("actuation timing (latency_ms / latency_jitter_ms / "
+                             "decision_drop) cannot be combined with delay_steps")
+        from ..randomization.actuation_timing import ActuationTiming
+        sim = env_cfg["sim"]
+        return ActuationTiming(
+            self.num_envs, latency_ms=0.0 if latency is None else latency,
+            jitter_ms=jitter, drop=drop, sim_dt=sim["dt"],
+            decimation=sim["decimation"], device=self.device,
+            seed=int(sim.get("seed", 0)))
+
     def _apply_action_dr(self, a: torch.Tensor) -> torch.Tensor:
         """Env-side action DR: k-step latency then per-channel gaussian noise.
 
@@ -386,10 +425,23 @@ class DeepRacerEnv:
         self.actions = torch.clip(actions, -1.0, 1.0)
         if self.action_dr:
             self.actions = self._apply_action_dr(self.actions)
-        steer, speed = mdp.map_action(self)
-        self.car.drive(steer, speed)
-        for _ in range(self.cfg["sim"]["decimation"]):
-            self.scene.step()
+        decimation = self.cfg["sim"]["decimation"]
+        if self._timing is None:
+            self.applied_actions = self.actions
+            steer, speed = mdp.map_action(self)
+            self.car.drive(steer, speed)
+            for _ in range(decimation):
+                self.scene.step()
+        else:
+            # ADR 0005: the issued command joins the queue now; every substep
+            # lands what is due and drives the car with it, so a command takes
+            # effect ceil(latency / sim dt) substeps after its decision while
+            # `actions` (features, penalties) stays the issued one.
+            self._timing.issue(self.actions)
+            for _ in range(decimation):
+                self.applied_actions = self._timing.advance()
+                self.car.drive(*mdp.map_command(self, self.applied_actions))
+                self.scene.step()
         if self._step_sync:
             torch.cuda.synchronize()   # coarse fence (see __init__); opt-in
 
@@ -557,6 +609,9 @@ class DeepRacerEnv:
         self.last_actions[env_ids] = 0.0
         if self._act_delay > 0:              # clear delayed commands on reset
             self._act_buf[env_ids] = 0.0
+        if self._timing is not None:         # drop queued commands, redraw latency
+            self._timing.reset(env_ids)
+            self.applied_actions = self._timing.applied
         self.feature_set.reset(env_ids)   # clear any per-env feature history
         self._reset_obs_dr(env_ids)       # clear stateful obs DR (camera latency)
         self.progress_m[env_ids] = self.track.localize(pos_xy, envs_idx=env_ids)["progress_m"]

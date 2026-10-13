@@ -16,6 +16,7 @@ class SimConfig(TypedDict):
     dt: float
     decimation: int
     episode_length_s: float
+    seed: int       # seeds the env-owned generators (actuation timing DR)
     track: object   # str name, or list/tuple of names for multi-track
     backend: Literal["gpu", "cpu"]   # Genesis compute backend (Part M)
     view: Literal["none", "gui", "spectator", "topdown"]   # ViewRenderer (Part M)
@@ -81,6 +82,7 @@ class VisionConfig(TypedDict):
     camera_pitch_deg: float
     policy_res: tuple | None
     frame_stack: int
+    frame_stride: int      # control steps between stacked frames (1 = consecutive)
     topdown_camera: bool
     spectator: bool
     spectator_res: tuple
@@ -104,6 +106,7 @@ class RewardConfig(TypedDict):
     reward_scales: dict
     reward_scale_overrides: dict
     reward_params: dict            # constants exposed as env.reward_params
+    action_rate_dt_ref: float | None   # scale action_rate by (ref/control_dt)^2
     emit_cost: bool
     cost_fn: str | None
 
