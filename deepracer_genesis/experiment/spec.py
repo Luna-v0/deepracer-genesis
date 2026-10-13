@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from ..configs.cfgs import DEFAULT_CONTROL_DT_S, SIM_DT
+from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
 
 if TYPE_CHECKING:
     from ..envs.features import FeatureSet
@@ -198,6 +199,27 @@ def frame_interval_s_of(env: EnvSpec) -> float:
     """
     return (control_period_s(env) if env.frame_interval_s is None
             else float(env.frame_interval_s))
+
+
+def action_caps(env: EnvSpec) -> dict[str, float]:
+    """Return the physical action caps an env spec trains with.
+
+    The one source for both the sim config and the exported model card/metadata.
+
+    Args:
+        env: The env spec (``max_speed`` None means the physics default).
+
+    Returns:
+        ``max_steering_deg``, ``min_speed`` and ``max_speed``, keyed as in the
+        sim config's ``action`` section.
+    """
+    # Only max_speed has a spec knob; the floor and the steering cap are the
+    # physics defaults for every run (a min_speed knob would land here).
+    return {
+        "max_steering_deg": MAX_STEERING_DEG,
+        "min_speed": MIN_SPEED,
+        "max_speed": MAX_SPEED if env.max_speed is None else env.max_speed,
+    }
 
 
 VALID_COST_FNS = ("offtrack", "offtrack_or_overspeed", "crash")

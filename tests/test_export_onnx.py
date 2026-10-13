@@ -30,13 +30,10 @@ from rsl_rl.models import CNNModel
 
 out = sys.argv[1]
 frame_stack = int(sys.argv[2])
-timing = {}
-if len(sys.argv) > 3:                       # control_dt_s,frame_interval_s
-    dt_s, interval_s = (float(v) for v in sys.argv[3].split(","))
-    timing = {"control_dt_s": dt_s, "frame_interval_s": interval_s}
+env_kwargs = json.loads(sys.argv[3])        # extra CameraEnvironment kwargs
 
 pipe = (CameraEnvironment(render="madrona", resolution=(160, 120),
-                          frame_stack=frame_stack, **timing)
+                          frame_stack=frame_stack, **env_kwargs)
         >> AsymmetricCameraPolicy(actor_keys=("camera",),
                                   critic_keys=("camera", "state")))
 spec = build(pipe)
@@ -89,6 +86,7 @@ print("REPORT:" + json.dumps({
     "max_diff": max_diff,
     "metadata": meta,
     "card_camera": card["observations"]["FRONT_FACING_CAMERA"],
+    "card_action": card["action_space"]["normalized_to_physical"],
     "bundle_exists": os.path.exists(os.path.join(export_dir, "testbundle.tar.gz")),
 }))
 """
@@ -161,11 +159,10 @@ print("REPORT:" + json.dumps({
 """
 
 
-def _run_driver(tmp_path_factory, frame_stack, timing=None):
+def _run_driver(tmp_path_factory, frame_stack, env_kwargs=None):
     out = tmp_path_factory.mktemp(f"export_k{frame_stack}")
-    argv = [sys.executable, "-c", _DRIVER, str(out), str(frame_stack)]
-    if timing:
-        argv.append(",".join(str(v) for v in timing))
+    argv = [sys.executable, "-c", _DRIVER, str(out), str(frame_stack),
+            json.dumps(env_kwargs or {})]
     proc = subprocess.run(
         argv, capture_output=True, text=True, check=False,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -214,7 +211,8 @@ def test_stacked_model_io_and_card(report_stacked):
 
 @pytest.fixture(scope="module")
 def report_timed(tmp_path_factory):
-    return _run_driver(tmp_path_factory, frame_stack=4, timing=(0.07, 0.14))
+    return _run_driver(tmp_path_factory, frame_stack=4,
+                       env_kwargs={"control_dt_s": 0.07, "frame_interval_s": 0.14})
 
 
 def test_model_card_states_the_trained_control_period_and_frame_interval(report_timed):
@@ -309,12 +307,12 @@ def test_bundle_written(report):
 # so a policy trained at max_speed=2.0 exported metadata claiming 4.0 and the
 # stock navigation node would rescale [-1, 1] into twice the trained top speed.
 
-def _spec_with_max_speed(max_speed):
-    """Build a minimal camera spec with the given action cap."""
+def _camera_spec(**env_kwargs):
+    """Build the driver's camera spec (frame stack aside) with extra env kwargs."""
     from deepracer_genesis.experiment import AsymmetricCameraPolicy, CameraEnvironment
 
     return (CameraEnvironment(render="madrona", resolution=(160, 120),
-                              max_speed=max_speed)
+                              **env_kwargs)
             >> AsymmetricCameraPolicy(actor_keys=("camera",),
                                       critic_keys=("camera", "state"))).build()
 
@@ -322,7 +320,7 @@ def _spec_with_max_speed(max_speed):
 def test_metadata_speed_ceiling_follows_the_env_action_cap():
     from deepracer_genesis.deploy.onnx import model_metadata
 
-    meta = model_metadata(_spec_with_max_speed(2.0))
+    meta = model_metadata(_camera_spec(max_speed=2.0))
     assert meta["action_space"]["speed"] == {"high": 2.0, "low": 0.1}
 
 
@@ -330,7 +328,7 @@ def test_metadata_speed_ceiling_defaults_to_the_physics_limit():
     from deepracer_genesis.deploy.onnx import model_metadata
     from deepracer_genesis.physics.limits import MAX_SPEED
 
-    meta = model_metadata(_spec_with_max_speed(None))
+    meta = model_metadata(_camera_spec())
     assert meta["action_space"]["speed"]["high"] == MAX_SPEED
 
 
@@ -338,6 +336,40 @@ def test_action_physical_tracks_the_same_cap():
     """The model card's normalized->physical table must not disagree with it."""
     from deepracer_genesis.deploy.onnx import action_physical, model_metadata
 
-    spec = _spec_with_max_speed(1.5)
+    spec = _camera_spec(max_speed=1.5)
     assert (action_physical(spec)["speed"]["high"]
             == model_metadata(spec)["action_space"]["speed"]["high"] == 1.5)
+
+
+# --- the written caps must be the caps the training sim was built with ------
+# The exporter once hard-coded MIN_SPEED/MAX_STEERING_DEG while Builder set the
+# sim's caps on its own, so a knob threaded into one side only (PR #5's
+# max_speed) shipped wrong units. Both now read spec.action_caps; this compares
+# the WRITTEN files against Builder.sim_cfg, so a future min_speed knob is
+# covered by adding a case with it in env_kwargs.
+
+_CAPPED = {"max_speed": 2.0}
+
+
+@pytest.fixture(scope="module")
+def report_capped(tmp_path_factory):
+    return _run_driver(tmp_path_factory, frame_stack=1, env_kwargs=_CAPPED)
+
+
+@pytest.mark.parametrize(("fixture", "env_kwargs", "top_speed"),
+                         [("report", {}, 4.0), ("report_capped", _CAPPED, 2.0)],
+                         ids=["default", "max_speed"])
+def test_exported_card_and_metadata_carry_the_training_sim_caps(
+        request, fixture, env_kwargs, top_speed):
+    from deepracer_genesis.experiment.builder import Builder
+
+    rep = request.getfixturevalue(fixture)
+    act = Builder(_camera_spec(**env_kwargs)).sim_cfg()["action"]
+    steer = {"low": -act["max_steering_deg"], "high": act["max_steering_deg"]}
+    speed = {"low": act["min_speed"], "high": act["max_speed"]}
+    card = {ch: {"low": rng["low"], "high": rng["high"]}
+            for ch, rng in rep["card_action"].items()}
+    meta = rep["metadata"]["action_space"]
+    assert card["steering"] == meta["steering_angle"] == steer
+    assert card["speed"] == meta["speed"] == speed
+    assert speed["high"] == top_speed    # the capped case is not vacuous

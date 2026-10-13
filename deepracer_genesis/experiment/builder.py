@@ -10,6 +10,7 @@ from ..envs import DeepRacerEnv
 from .spec import (
     NEUTRAL_PHYSICS,
     ExperimentSpec,
+    action_caps,
     control_decimation,
     control_period_s,
     frame_stride,
@@ -49,8 +50,8 @@ class Builder:
         cfg["vision"]["camera_res"] = tuple(env.resolution)
         cfg["vision"]["camera_fov"] = env.fov
         cfg["vision"]["frame_stack"] = env.frame_stack
-        if env.max_speed is not None:
-            cfg["action"]["max_speed"] = env.max_speed
+        # the exporter writes these same caps into model_card/model_metadata
+        cfg["action"].update(action_caps(env))
         cfg["obs"]["lookahead_k"] = env.lookahead_k
         cfg["obs"]["feature_set"] = env.feature_set
         cfg["obs"]["feature_params"] = dict(env.feature_params)

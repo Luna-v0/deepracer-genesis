@@ -80,10 +80,16 @@ denormalize:
 }
 ```
 
-This matches the training-time action map (see [Rewards & actions](../concepts/rewards-actions.md));
-the physical bounds come from `physics/limits.py`. The card also records the spec,
-`spec_id`, checkpoint path, opset, SHA256, and whether the graph was verified
-against torch.
+This matches the training-time action map (see [Rewards & actions](../concepts/rewards-actions.md)).
+The bounds are the run's own action caps from `action_caps(spec.env)`
+(`experiment/spec.py`), the same function the training sim's config is built
+from: `speed.high` follows `EnvSpec.max_speed` (2.0 for a `max_speed=2.0` run),
+while `speed.low` and the steering cap are the `physics/limits.py` defaults
+because no spec knob sets them. `model_metadata.json` carries the same ranges,
+which is what the stock navigation node rescales `[-1, 1]` into.
+
+The card also records the spec, `spec_id`, checkpoint path, opset, SHA256, and
+whether the graph was verified against torch.
 
 ## Timing contract in the model card
 

@@ -22,18 +22,17 @@ import tarfile
 
 from ..experiment.spec import (
     ExperimentSpec,
+    action_caps,
     control_period_s,
     frame_interval_s_of,
     frame_stride,
 )
-from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
 
 
 def action_physical(spec: ExperimentSpec) -> dict:
     """Physical meaning of the normalized action channels for one spec.
 
-    The speed ceiling follows the env's action cap when set, not the physics
-    constant, so the car rescales into the range the policy actually trained on.
+    Read from ``action_caps``, the same caps the training sim is built with.
 
     Args:
         spec: The experiment the exported model was trained from.
@@ -41,11 +40,11 @@ def action_physical(spec: ExperimentSpec) -> dict:
     Returns:
         Per-channel ``low``/``high``/``unit`` ranges.
     """
-    high = MAX_SPEED if spec.env.max_speed is None else spec.env.max_speed
+    caps = action_caps(spec.env)
+    steer = caps["max_steering_deg"]
     return {
-        "steering": {"low": -MAX_STEERING_DEG, "high": MAX_STEERING_DEG,
-                     "unit": "deg"},
-        "speed": {"low": MIN_SPEED, "high": high, "unit": "m/s"},
+        "steering": {"low": -steer, "high": steer, "unit": "deg"},
+        "speed": {"low": caps["min_speed"], "high": caps["max_speed"], "unit": "m/s"},
     }
 
 #: ONNX input/output names. The camera input is named after the sensor (not
@@ -94,10 +93,11 @@ def model_metadata(spec: ExperimentSpec) -> dict:
             "discrete action-space metadata not implemented: the rsl-rl "
             "backend cannot train discrete policies (rsl_supported), so an "
             "exported discrete model cannot exist yet")
-    speed = action_physical(spec)["speed"]
+    phys = action_physical(spec)
+    steer, speed = phys["steering"], phys["speed"]
     return {
         "action_space": {
-            "steering_angle": {"high": MAX_STEERING_DEG, "low": -MAX_STEERING_DEG},
+            "steering_angle": {"high": steer["high"], "low": steer["low"]},
             "speed": {"high": speed["high"], "low": speed["low"]},
         },
         "action_space_type": "continuous",
