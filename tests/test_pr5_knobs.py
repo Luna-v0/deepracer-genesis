@@ -17,6 +17,7 @@ from deepracer_genesis.experiment import (
 )
 from deepracer_genesis.experiment.builder import Builder
 from deepracer_genesis.experiment.rsl_backend import _PPO_KEY_MAP, spec_to_train_cfg
+from deepracer_genesis.experiment.spec import SpecError
 from deepracer_genesis.physics.limits import MAX_SPEED, MIN_SPEED
 
 
@@ -61,6 +62,15 @@ def test_max_speed_leaves_min_speed_at_the_physics_default(make_spec):
 
 def test_max_speed_survives_the_spec_round_trip():
     assert _feature_spec(max_speed=2.25).to_dict()["env"]["max_speed"] == 2.25
+
+
+@ENV_STAGES
+@pytest.mark.parametrize("bad", [MIN_SPEED, 0.05, 0.0, -1.0])
+def test_max_speed_at_or_below_the_physics_floor_is_rejected(make_spec, bad):
+    """An inverted or empty action range: validate() must reject it (stage
+    build() calls validate(), so construction itself raises)."""
+    with pytest.raises(SpecError, match="max_speed"):
+        make_spec(max_speed=bad)
 
 
 # ---------------------------------------------------------- PPO schedule knobs

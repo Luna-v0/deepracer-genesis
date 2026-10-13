@@ -29,6 +29,15 @@ class EvalRecord:
         metrics: Final scalar evaluation metrics.
         train: Training-side stats (steps_per_s, wall_clock_s, ...).
         eval_history: Periodic evals as [{frames, **metrics}] entries.
+        onboard_feature_caps: The caps envs/features.py's PerceptionFeatures
+            used to build the 22 on-board features this run trained with
+            (empty for records written before this field existed — the
+            train-time code version is still recoverable from "max_speed"'s
+            PRESENCE in ``spec["env"]``: absent means pre-373b5de, a key
+            predating any resolved-cap plumbing). Mirrors deploy/
+            perception_onnx.py's own ``onboard_feature_caps`` block, so a
+            feature-actor export can read this run's own record instead of
+            inferring the run's code version from git history.
         created_at: Timestamp string set when the record is saved.
     """
 
@@ -41,6 +50,7 @@ class EvalRecord:
     train: dict = field(default_factory=dict)   # steps_per_s, wall_clock_s, ...
     eval_history: list = field(default_factory=list)  # periodic evals: [{frames, **metrics}]
     holdout: dict = field(default_factory=dict)  # out-of-loop per-track eval: {track: {metrics}}
+    onboard_feature_caps: dict = field(default_factory=dict)  # see docstring
     created_at: str = ""
 
     def save(self, run_dir: str) -> str:

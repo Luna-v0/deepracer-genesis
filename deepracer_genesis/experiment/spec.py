@@ -700,6 +700,14 @@ class ExperimentSpec:
             raise SpecError(
                 "max_laps must be an int >= 1 (or None for endless episodes); "
                 "got %r" % (env.max_laps,))
+        # an inverted or empty action range: the stock navigation node rejects
+        # the exported metadata at load ("Incorrect action space values") and
+        # training would see a degenerate (reversed/zero-width) speed command.
+        if env.max_speed is not None and env.max_speed <= MIN_SPEED:
+            raise SpecError(
+                "max_speed must exceed the physics floor MIN_SPEED=%r m/s "
+                "(else the action range is inverted or empty); got %r"
+                % (MIN_SPEED, env.max_speed))
         if env.control_dt_s is not None:
             control_decimation(env.control_dt_s)
         if env.frame_interval_s is not None:

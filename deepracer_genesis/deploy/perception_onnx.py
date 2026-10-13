@@ -12,6 +12,8 @@ import os
 import sys
 from collections.abc import Sequence
 
+from ..physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
+
 logger = logging.getLogger(__name__)
 
 #: Named after the sensor so a name-substring dispatch (as the AWS inference
@@ -37,6 +39,62 @@ def _require_genesis_free() -> None:
             "run the export in a process that has NOT imported genesis: "
             "genesis and onnxruntime bundle clashing LLVM symbols and crash "
             "together. Run the export as its own step/script.")
+
+
+def speed_cmd_max_speed_from_eval_record(eval_record: dict) -> float:
+    """Derive the checkpoint's true speed_cmd cap from its own eval_record.json.
+
+    Review finding 1 (2026-10-13-review-speed-caps.md): commit 373b5de is
+    *simultaneously* the commit that made ``envs/features.py``'s
+    ``speed_cmd`` follow the run's resolved ``max_speed`` AND the commit that
+    added the ``max_speed`` field to ``EnvSpec`` at all — before it, the field
+    could not exist in a dumped spec, so its mere PRESENCE in
+    ``eval_record["spec"]["env"]`` is already a 100%-reliable pre/post-373b5de
+    signal, with no git history to consult:
+
+    * Key absent -> the run predates 373b5de -> speed_cmd always used the
+      global physics constant -> return it.
+    * Key present (including an explicit ``null``) -> the run is at or after
+      373b5de -> speed_cmd followed the resolved cap, which itself defaults
+      to the physics constant when the spec value is ``None`` -> return
+      ``env["max_speed"] or MAX_SPEED``.
+
+    A record written by a run that *also* carries the newer, explicit
+    ``onboard_feature_caps`` block (added in the same change as this
+    function) is read from there instead — direct, no inference needed.
+
+    Args:
+        eval_record: A loaded ``eval_record.json`` dict (``EvalRecord.save``'s
+            payload shape).
+
+    Returns:
+        The max_speed ``speed_cmd`` was actually computed with for this run.
+    """
+    record = eval_record or {}
+    caps = record.get("onboard_feature_caps") or {}
+    stamped = caps.get("speed_cmd_max_speed_mps")
+    if stamped is not None:
+        return stamped
+    env = record.get("spec", {}).get("env") or {}
+    return env.get("max_speed") or MAX_SPEED
+
+
+def speed_cmd_max_speed_from_run_dir(run_dir: str) -> float | None:
+    """`speed_cmd_max_speed_from_eval_record`, loading `<run_dir>/eval_record.json`.
+
+    Args:
+        run_dir: A run directory (typically the checkpoint's own parent dir).
+
+    Returns:
+        The derived value, or None if `run_dir` has no `eval_record.json`
+        (e.g. a checkpoint saved outside the run-dir convention) — callers
+        should treat None the same as "no record available".
+    """
+    path = os.path.join(run_dir, "eval_record.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path) as f:
+        return speed_cmd_max_speed_from_eval_record(json.load(f))
 
 
 def _verify(onnx_path: str, sample, reference, name: str, tol: float = 1e-4) -> float:
@@ -155,6 +213,8 @@ def export_feature_actor(checkpoint: str, out_dir: str, *,
                          activation: str = "elu",
                          num_actions: int = NUM_ACTIONS,
                          max_speed: float | None = None,
+                         speed_cmd_max_speed: float | None = None,
+                         run_dir: str | None = None,
                          opset: int = DEFAULT_OPSET) -> str:
     """Export an MLP actor over the feature vector, normalizer folded in.
 
@@ -168,7 +228,33 @@ def export_feature_actor(checkpoint: str, out_dir: str, *,
         hidden_dims: Actor hidden layer widths.
         activation: Actor activation name.
         num_actions: Action dimension.
-        max_speed: The env's action cap in m/s, recorded in the card.
+        max_speed: The env's action cap in m/s, recorded in the card as
+            ``action_mapping.max_speed_mps`` (the actor's own declared action
+            range; unchanged, pre-existing field).
+        speed_cmd_max_speed: The max_speed ``envs/features.py``'s
+            ``PerceptionFeatures`` actually used to compute ``speed_cmd`` for
+            the 22 on-board features THIS checkpoint was trained with.
+            **This is not always the same as `max_speed` above.** Before
+            commit 373b5de (2026-08-30), ``speed_cmd`` always used the global
+            physics constant (4.0) no matter what any spec said; from that
+            commit on, it follows the run's resolved ``max_speed``. Takes
+            priority over `run_dir` below when both are given. Pass this
+            explicitly only when you have independently confirmed the value
+            (e.g. by hand, from the run's git history) — `run_dir` is the
+            preferred, automatic source.
+        run_dir: The checkpoint's run directory, if it has one (typically its
+            parent dir). When `speed_cmd_max_speed` is not given, this
+            function reads `<run_dir>/eval_record.json` (review finding 1,
+            `speed_cmd_max_speed_from_run_dir`) and uses ITS answer — reliable
+            because 373b5de is simultaneously the commit that made
+            `speed_cmd` follow the resolved cap and the commit that added the
+            `max_speed` field to `EnvSpec` at all, so the field's mere
+            presence already tells the two code-version cases apart with no
+            git history to consult, and a record written by this same change
+            carries the answer directly in its own `onboard_feature_caps`
+            block. If `run_dir` has no `eval_record.json` (or is None), the
+            physics constant (today's exact default) is recorded, matching
+            dr-onnx's current behavior exactly.
         opset: ONNX opset to emit.
 
     Returns:
@@ -179,6 +265,8 @@ def export_feature_actor(checkpoint: str, out_dir: str, *,
         RuntimeError: If genesis is loaded, or the graph diverges from torch.
     """
     _require_genesis_free()
+    if speed_cmd_max_speed is None and run_dir is not None:
+        speed_cmd_max_speed = speed_cmd_max_speed_from_run_dir(run_dir)
     import copy
 
     import torch
@@ -257,6 +345,22 @@ def export_feature_actor(checkpoint: str, out_dir: str, *,
             "speed": "speed_mps = min_speed + (a[1] + 1) * 0.5 * "
                      "(max_speed - min_speed)",
             "max_speed_mps": max_speed},
+        # caps the 22 on-board features (dr_onnx/policy_features.py) were
+        # computed with — separate from action_mapping above because they can
+        # genuinely diverge from it (see export_feature_actor's docstring on
+        # speed_cmd_max_speed). max_steering_deg, speed_cmd_min_speed and
+        # speed_err_norm are provenance-independent (no spec knob has ever
+        # changed them, pre- or post-373b5de) so they are always the physics
+        # constants; speed_cmd_max_speed is the one caller-supplied,
+        # provenance-dependent value, defaulting to the same physics constant
+        # so an un-updated/naive export never claims a non-default cap.
+        "onboard_feature_caps": {
+            "max_steering_deg": MAX_STEERING_DEG,
+            "speed_cmd_min_speed_mps": MIN_SPEED,
+            "speed_cmd_max_speed_mps": (
+                MAX_SPEED if speed_cmd_max_speed is None else speed_cmd_max_speed),
+            "speed_err_norm_mps": MAX_SPEED,
+        },
         "onnx_vs_torch_max_abs_diff": diff,
         "notes": "Only 7 of the input channels come from the camera (via "
                  "perception.onnx); the other 22 are computed onboard from the "

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from ..physics.limits import MAX_SPEED
 from ..seeding import seed_everything
 from .evaluator import EvalRecord, evaluate_policy
 from .spec import control_period_s
@@ -402,6 +403,38 @@ def _holdout_eval(spec: ExperimentSpec, policy, runner, run_dir: str,
         return {}
 
 
+def _onboard_feature_caps(sim) -> dict:
+    """The caps envs/features.py's PerceptionFeatures used to build the 22
+    on-board features THIS run trained with — stamped into eval_record.json
+    so a later feature-actor export can read a run's own record instead of
+    inferring its code version from git history (review finding 1,
+    2026-10-13-review-speed-caps.md). Mirrors deploy/perception_onnx.py's own
+    ``onboard_feature_caps`` card block field-for-field.
+
+    Args:
+        sim: The built env; ``sim.cfg["action"]`` is this run's resolved
+            action caps (``experiment.spec.action_caps``'s output, the same
+            dict ``envs/features.py``'s ``speed_cmd`` reads at every step
+            since commit 373b5de).
+
+    Returns:
+        ``max_steering_deg``, ``speed_cmd_min_speed_mps`` and
+        ``speed_cmd_max_speed_mps`` (all three straight from ``sim.cfg``,
+        hence always correct for the code that produced THIS run, by
+        construction) plus ``speed_err_norm_mps`` — the one field that is
+        NOT read from ``sim.cfg``, because ``features.py``'s speed_err
+        normalizer never follows the run cap; it is always the global
+        physics constant.
+    """
+    action = sim.cfg["action"]
+    return {
+        "max_steering_deg": action["max_steering_deg"],
+        "speed_cmd_min_speed_mps": action["min_speed"],
+        "speed_cmd_max_speed_mps": action["max_speed"],
+        "speed_err_norm_mps": MAX_SPEED,
+    }
+
+
 def run_rsl(spec: ExperimentSpec, root: str = "runs", on_eval=None) -> EvalRecord:
     """Train spec via OnPolicyRunner, returning an EvalRecord.
 
@@ -494,6 +527,7 @@ def run_rsl(spec: ExperimentSpec, root: str = "runs", on_eval=None) -> EvalRecor
         spec_id=spec.id(), spec=spec.to_dict(), seed=spec.seed,
         group=spec.group, variant=spec.variant,
         metrics=metrics, eval_history=eval_history, holdout=holdout,
+        onboard_feature_caps=_onboard_feature_caps(sim),
         train={"wall_clock_s": round(wall, 1),
                "total_env_steps": done_iters * per_iter,
                "steps_per_s": round(done_iters * per_iter / max(wall, 1e-9), 1),

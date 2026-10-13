@@ -3,6 +3,7 @@
 The unit slice is pure; the ``smoke`` slice trains tiny real CPU runs (~20 s).
 """
 
+import json
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +21,12 @@ from deepracer_genesis.experiment import (
     VectorPolicy,
     run,
 )
-from deepracer_genesis.experiment.rsl_backend import _improves, _sweep_iter_checkpoints
+from deepracer_genesis.experiment.rsl_backend import (
+    _improves,
+    _onboard_feature_caps,
+    _sweep_iter_checkpoints,
+)
+from deepracer_genesis.physics.limits import MAX_SPEED, MAX_STEERING_DEG, MIN_SPEED
 
 # ---------------------------------------------------------------------------
 # pure helpers
@@ -36,6 +42,32 @@ from deepracer_genesis.experiment.rsl_backend import _improves, _sweep_iter_chec
 ])
 def test_improves(value, best, expected):
     assert _improves(value, best) is expected
+
+
+def test_onboard_feature_caps_reads_the_runs_resolved_action_cfg():
+    """speed_cmd_max_speed_mps comes straight from sim.cfg["action"]["max_speed"]
+    (the same dict envs/features.py's speed_cmd reads since 373b5de), not the
+    global constant — review finding 1's forward-looking fix."""
+    sim = SimpleNamespace(cfg={"action": {
+        "max_steering_deg": MAX_STEERING_DEG, "min_speed": MIN_SPEED,
+        "max_speed": 2.0}})
+    assert _onboard_feature_caps(sim) == {
+        "max_steering_deg": MAX_STEERING_DEG,
+        "speed_cmd_min_speed_mps": MIN_SPEED,
+        "speed_cmd_max_speed_mps": 2.0,
+        "speed_err_norm_mps": MAX_SPEED,
+    }
+
+
+def test_onboard_feature_caps_speed_err_norm_never_follows_the_run_cap():
+    """features.py:294 always divides speed_err by the global constant, even
+    when speed_cmd follows a capped run — the two must not be conflated."""
+    sim = SimpleNamespace(cfg={"action": {
+        "max_steering_deg": MAX_STEERING_DEG, "min_speed": MIN_SPEED,
+        "max_speed": 2.0}})
+    caps = _onboard_feature_caps(sim)
+    assert caps["speed_cmd_max_speed_mps"] == 2.0
+    assert caps["speed_err_norm_mps"] == MAX_SPEED != 2.0
 
 
 def test_sweep_removes_only_iteration_checkpoints(tmp_path):
@@ -157,6 +189,23 @@ def test_best_last_keeps_final_and_best_only(tmp_path):
         assert set(pq.read_table(p, columns=["env"]).column("env").to_pylist()) == {0, 3}
     final = pq.read_table(run_dir / "telemetry" / "final.parquet", columns=["env"])
     assert set(final.column("env").to_pylist()) == {0, 1, 2, 3}
+
+
+@pytest.mark.smoke
+def test_onboard_feature_caps_are_stamped_at_train_time(tmp_path):
+    """The real end-to-end stamp (review finding 1): EvalRecord AND the
+    on-disk eval_record.json both carry onboard_feature_caps, straight from
+    this run's own sim.cfg — no git-history inference needed for any run
+    trained with this code."""
+    rec, run_dir = _train(tmp_path, "caps")
+    assert rec.onboard_feature_caps == {
+        "max_steering_deg": MAX_STEERING_DEG,
+        "speed_cmd_min_speed_mps": MIN_SPEED,
+        "speed_cmd_max_speed_mps": MAX_SPEED,   # _train()'s env never caps max_speed
+        "speed_err_norm_mps": MAX_SPEED,
+    }
+    on_disk = json.loads((run_dir / "eval_record.json").read_text())
+    assert on_disk["onboard_feature_caps"] == rec.onboard_feature_caps
 
 
 @pytest.mark.smoke
